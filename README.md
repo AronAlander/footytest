@@ -30,10 +30,12 @@ endpoint (no signup): per-match team xG/xGA/xPts/PPDA and per-player xG/xA for
 the Serie A analytics layer — Allsvenskan has no free xG source.
 
 `build_report.py` turns the database into a self-contained `report.html` — open it in
-any browser. It shows standings (with a W/D/L form column), recent results, and
-upcoming fixtures per league, plus Serie A analytics: an xG table (points vs expected
-points), clinical/wasteful finisher boards (goals vs xG), and top creators (assists
-vs xA). Adapts to light/dark mode.
+any browser. It shows a full standings table computed from the stored results (with
+rank-trend arrows and a W/D/L form column), a home/away split table, recent results,
+and upcoming fixtures, plus Serie A analytics: an xG table (points vs expected
+points), a pressing-vs-territory scatter (PPDA against deep completions), rolling
+xG-difference form curves for every team, clinical/wasteful finisher boards (goals
+vs xG), and top creators (assists vs xA). Adapts to light/dark mode.
 
 ## Data source
 
@@ -54,8 +56,8 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
 - [x] HTML report for viewing the data
 - [ ] Swap in full-data APIs (football-data.org + API-Football)
 - [x] xG analytics for Serie A via Understat (xG table, finishing boards, creators)
-- [ ] Compute standings trends, form tables, home/away splits
-- [ ] Team style profiles (PPDA pressing intensity vs deep completions)
-- [ ] Rolling xG-difference form curves
+- [x] Compute standings trends, form tables, home/away splits
+- [x] Team style profiles (PPDA pressing intensity vs deep completions)
+- [x] Rolling xG-difference form curves
 - [ ] xG for Allsvenskan via FotMob (unofficial API, fragile)
 - [ ] Web dashboard for visualizations
