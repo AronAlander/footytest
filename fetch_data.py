@@ -1,9 +1,10 @@
 """Fetch Allsvenskan and Serie A data from TheSportsDB (free test key, no signup)
 and store it in a local SQLite database.
 
-Uses only the Python standard library. Each run upserts matches and appends a
-dated standings snapshot, so history accumulates over time. Raw API responses
-are also kept in data/ for debugging.
+Uses only the Python standard library. Matches are fetched round by round
+(the test key truncates season/recent-results endpoints, but serves complete
+rounds), so the whole current season lands in the database. Each run upserts
+matches and appends a dated standings snapshot, so history accumulates.
 
 Usage:
     python fetch_data.py
@@ -11,31 +12,29 @@ Usage:
 
 import json
 import sqlite3
+import time
 import urllib.request
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 API_KEY = "123"  # TheSportsDB public test key, fine for development
 BASE_URL = f"https://www.thesportsdb.com/api/v1/json/{API_KEY}"
+REQUEST_PAUSE = 2.1  # test key allows ~30 requests/minute
+RETRY_WAIT = 35      # seconds to back off after HTTP 429
 
 LEAGUES = {
     "Allsvenskan": {
         "id": "4347",
         # Allsvenskan runs over a calendar year
         "season": str(date.today().year),
+        "rounds": 30,
     },
     "Serie A": {
         "id": "4332",
-        # Serie A runs autumn-spring
+        # Serie A runs autumn-spring; bump when the new season starts in August
         "season": "2025-2026",
+        "rounds": 38,
     },
-}
-
-ENDPOINTS = {
-    "table": "lookuptable.php?l={id}&s={season}",
-    "past_events": "eventspastleague.php?id={id}",
-    "next_events": "eventsnextleague.php?id={id}",
-    "season_events": "eventsseason.php?id={id}&s={season}",
 }
 
 PROJECT_DIR = Path(__file__).parent
@@ -76,10 +75,18 @@ CREATE TABLE IF NOT EXISTS standings (
 """
 
 
-def fetch_json(url: str) -> dict:
-    request = urllib.request.Request(url, headers={"User-Agent": "football-analytics/0.2"})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.load(response)
+def fetch_json(url: str, retries: int = 3) -> dict:
+    request = urllib.request.Request(url, headers={"User-Agent": "football-analytics/0.3"})
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as error:
+            if error.code == 429 and attempt < retries - 1:
+                print(f"    rate limited, waiting {RETRY_WAIT}s...")
+                time.sleep(RETRY_WAIT)
+            else:
+                raise
 
 
 def to_int(value):
@@ -135,6 +142,39 @@ def save_standings(db: sqlite3.Connection, league: str, season: str, rows: list)
     return count
 
 
+def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched_at: str) -> None:
+    print(f"\n=== {league_name} (season {league['season']}) ===")
+    slug = league_name.lower().replace(" ", "_")
+
+    table_url = f"{BASE_URL}/lookuptable.php?l={league['id']}&s={league['season']}"
+    try:
+        payload = fetch_json(table_url)
+        (DATA_DIR / f"{slug}_table.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        count = save_standings(db, league_name, league["season"], payload.get("table"))
+        print(f"  standings: {count} teams (test key truncates the table)")
+    except Exception as error:
+        print(f"  standings: FAILED ({error})")
+
+    all_events = []
+    total = with_result = 0
+    for round_number in range(1, league["rounds"] + 1):
+        time.sleep(REQUEST_PAUSE)
+        url = f"{BASE_URL}/eventsround.php?id={league['id']}&r={round_number}&s={league['season']}"
+        try:
+            events = fetch_json(url).get("events") or []
+        except Exception as error:
+            print(f"  round {round_number}: FAILED ({error})")
+            continue
+        all_events.extend(events)
+        total += upsert_matches(db, league_name, events, fetched_at)
+        with_result += sum(1 for e in events if e.get("intHomeScore") is not None)
+
+    (DATA_DIR / f"{slug}_rounds.json").write_text(
+        json.dumps({"events": all_events}, indent=2), encoding="utf-8"
+    )
+    print(f"  rounds 1-{league['rounds']}: {total} matches upserted ({with_result} with results)")
+
+
 def main() -> None:
     DATA_DIR.mkdir(exist_ok=True)
     db = sqlite3.connect(DB_PATH)
@@ -142,29 +182,9 @@ def main() -> None:
     fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     for league_name, league in LEAGUES.items():
-        print(f"\n=== {league_name} (season {league['season']}) ===")
-        for endpoint_name, endpoint_template in ENDPOINTS.items():
-            url = f"{BASE_URL}/{endpoint_template.format(**league)}"
-            try:
-                payload = fetch_json(url)
-            except Exception as error:
-                print(f"  {endpoint_name}: FAILED ({error})")
-                continue
+        fetch_league(db, league_name, league, fetched_at)
+        db.commit()
 
-            slug = league_name.lower().replace(" ", "_")
-            (DATA_DIR / f"{slug}_{endpoint_name}.json").write_text(
-                json.dumps(payload, indent=2), encoding="utf-8"
-            )
-
-            if endpoint_name == "table":
-                count = save_standings(db, league_name, league["season"], payload.get("table"))
-                print(f"  {endpoint_name}: {count} teams -> standings snapshot")
-            else:
-                events = next((v for v in payload.values() if isinstance(v, list)), None)
-                count = upsert_matches(db, league_name, events, fetched_at)
-                print(f"  {endpoint_name}: {count} matches upserted")
-
-    db.commit()
     totals = db.execute(
         "SELECT league, COUNT(*), SUM(home_score IS NOT NULL) FROM matches GROUP BY league"
     ).fetchall()
