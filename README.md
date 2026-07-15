@@ -8,6 +8,7 @@ Requires Python 3.10+ (standard library only, no dependencies):
 
 ```
 python fetch_data.py
+python fetch_understat.py
 python build_report.py
 ```
 
@@ -19,9 +20,16 @@ serves complete rounds — so the whole season lands in the database. The run ta
 a few minutes because the test key allows only ~30 requests/minute. Raw API
 responses are also kept in `data/` for debugging.
 
+`fetch_understat.py` pulls Serie A advanced stats from Understat's public JSON
+endpoint (no signup): per-match team xG/xGA/xPts/PPDA and per-player xG/xA for
+~590 players. Understat only covers the big five leagues plus Russia, so this is
+the Serie A analytics layer — Allsvenskan has no free xG source.
+
 `build_report.py` turns the database into a self-contained `report.html` — open it in
 any browser. It shows standings (with a W/D/L form column), recent results, and
-upcoming fixtures per league, and adapts to light/dark mode.
+upcoming fixtures per league, plus Serie A analytics: an xG table (points vs expected
+points), clinical/wasteful finisher boards (goals vs xG), and top creators (assists
+vs xA). Adapts to light/dark mode.
 
 ## Data source
 
@@ -41,6 +49,9 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
 - [x] Store fetched data in SQLite
 - [x] HTML report for viewing the data
 - [ ] Swap in full-data APIs (football-data.org + API-Football)
+- [x] xG analytics for Serie A via Understat (xG table, finishing boards, creators)
 - [ ] Compute standings trends, form tables, home/away splits
-- [ ] xG data via Understat (Serie A) / FotMob (Allsvenskan) scraping
+- [ ] Team style profiles (PPDA pressing intensity vs deep completions)
+- [ ] Rolling xG-difference form curves
+- [ ] xG for Allsvenskan via FotMob (unofficial API, fragile)
 - [ ] Web dashboard for visualizations

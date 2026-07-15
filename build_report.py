@@ -146,6 +146,117 @@ def matches_table(db, league, finished, limit=10):
     return f"<div class='card'><table><tbody>{body}</tbody></table></div>"
 
 
+def fmt_delta(value, decimals=1):
+    return f"{value:+.{decimals}f}".replace("-", "−")
+
+
+def xg_table(db):
+    rows = db.execute(
+        """SELECT team, COUNT(*), SUM(pts), SUM(xpts), SUM(scored), SUM(missed),
+                  SUM(xg), SUM(xga), SUM(npxgd)
+           FROM understat_team_matches GROUP BY team ORDER BY SUM(pts) DESC, SUM(xpts) DESC"""
+    ).fetchall()
+    if not rows:
+        return ""
+    body = ""
+    for rank, (team, games, pts, xpts, gf, ga, xg, xga, npxgd) in enumerate(rows, 1):
+        luck = pts - xpts
+        body += (
+            f"<tr><td class='num'>{rank}</td><td>{escape(team)}</td>"
+            f"<td class='num'>{games}</td><td class='num score'>{pts}</td>"
+            f"<td class='num'>{xpts:.1f}</td><td class='num'>{fmt_delta(luck)}</td>"
+            f"<td class='num'>{gf}–{ga}</td><td class='num'>{xg:.1f}</td>"
+            f"<td class='num'>{xga:.1f}</td><td class='num'>{fmt_delta(npxgd)}</td></tr>"
+        )
+    return (
+        "<h3>xG table — results vs expected</h3>"
+        "<div class='card'><table><thead><tr>"
+        "<th class='num'>#</th><th>Team</th><th class='num'>P</th>"
+        "<th class='num'>Pts</th><th class='num'>xPts</th><th class='num'>Pts−xPts</th>"
+        "<th class='num'>Goals</th><th class='num'>xG</th><th class='num'>xGA</th>"
+        "<th class='num'>npxGD</th>"
+        f"</tr></thead><tbody>{body}</tbody></table></div>"
+        "<p class='meta'>Pts−xPts &gt; 0 means the team has taken more points than its "
+        "chances deserved (running hot); npxGD is non-penalty xG difference, the best "
+        "single measure of underlying strength.</p>"
+    )
+
+
+def finishing_rows(db, order, limit=8, min_minutes=900):
+    return db.execute(
+        f"""SELECT player_name, team, minutes, shots, goals, xg, goals - xg AS diff
+            FROM understat_players WHERE minutes >= ?
+            ORDER BY diff {order} LIMIT ?""",
+        (min_minutes, limit),
+    ).fetchall()
+
+
+def player_table(rows, value_header):
+    body = ""
+    for name, team, minutes, shots, goals, xg, diff in rows:
+        body += (
+            f"<tr><td>{escape(name)}</td><td class='dim'>{escape(team)}</td>"
+            f"<td class='num'>{minutes}</td><td class='num'>{shots}</td>"
+            f"<td class='num'>{goals}</td><td class='num'>{xg:.1f}</td>"
+            f"<td class='num score'>{fmt_delta(diff)}</td></tr>"
+        )
+    return (
+        "<div class='card'><table><thead><tr>"
+        "<th>Player</th><th>Team</th><th class='num'>Min</th><th class='num'>Shots</th>"
+        f"<th class='num'>Goals</th><th class='num'>xG</th><th class='num'>{value_header}</th>"
+        f"</tr></thead><tbody>{body}</tbody></table></div>"
+    )
+
+
+def creators_table(db, limit=8, min_minutes=900):
+    rows = db.execute(
+        """SELECT player_name, team, minutes, key_passes, assists, xa, assists - xa
+           FROM understat_players WHERE minutes >= ?
+           ORDER BY xa DESC LIMIT ?""",
+        (min_minutes, limit),
+    ).fetchall()
+    body = ""
+    for name, team, minutes, key_passes, assists, xa, diff in rows:
+        body += (
+            f"<tr><td>{escape(name)}</td><td class='dim'>{escape(team)}</td>"
+            f"<td class='num'>{minutes}</td><td class='num'>{key_passes}</td>"
+            f"<td class='num'>{assists}</td><td class='num'>{xa:.1f}</td>"
+            f"<td class='num score'>{fmt_delta(diff)}</td></tr>"
+        )
+    return (
+        "<div class='card'><table><thead><tr>"
+        "<th>Player</th><th>Team</th><th class='num'>Min</th><th class='num'>Key passes</th>"
+        "<th class='num'>Assists</th><th class='num'>xA</th><th class='num'>A−xA</th>"
+        f"</tr></thead><tbody>{body}</tbody></table></div>"
+    )
+
+
+def understat_section(db):
+    tables = {r[0] for r in db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'understat%'"
+    )}
+    if "understat_team_matches" not in tables:
+        return ""
+    xg = xg_table(db)
+    if not xg:
+        return ""
+    season = db.execute("SELECT MAX(season) FROM understat_players").fetchone()[0]
+    season_label = f"{season}/{int(season) % 100 + 1}" if season else ""
+    return (
+        f"<h2>Serie A — advanced analytics <span class='dim'>({season_label}, Understat)</span></h2>"
+        + xg
+        + "<h3>Clinical finishers — most goals above xG</h3>"
+        + player_table(finishing_rows(db, "DESC"), "G−xG")
+        + "<h3>Wasteful in front of goal — most goals below xG</h3>"
+        + player_table(finishing_rows(db, "ASC"), "G−xG")
+        + "<h3>Top creators by expected assists</h3>"
+        + creators_table(db)
+        + "<p class='meta'>Players with at least 900 minutes. xG = expected goals from "
+        "chance quality; a striker far above xG is finishing exceptionally (or running hot), "
+        "far below is missing good chances. xA is the same idea for passes.</p>"
+    )
+
+
 def league_section(db, league):
     return (
         f"<h2>{escape(league)}</h2>"
@@ -169,6 +280,7 @@ def main() -> None:
         f"<h1>Football report</h1>"
         f"<p class='meta'>Generated {generated} · data from TheSportsDB (test key, truncated coverage)</p>"
         + "".join(league_section(db, league) for league in leagues)
+        + understat_section(db)
         + "<footer>Form column shows the last completed matches known to the local database, "
         "oldest to newest (W = win, D = draw, L = loss). Run <code>python fetch_data.py</code> "
         "regularly to accumulate more history.</footer></div></body></html>"
