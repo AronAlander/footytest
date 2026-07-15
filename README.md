@@ -29,13 +29,20 @@ endpoint (no signup): per-match team xG/xGA/xPts/PPDA and per-player xG/xA for
 ~590 players. Understat only covers the big five leagues plus Russia, so this is
 the Serie A analytics layer — Allsvenskan has no free xG source.
 
-`build_report.py` turns the database into a self-contained `report.html` — open it in
-any browser. It shows a full standings table computed from the stored results (with
-rank-trend arrows and a W/D/L form column), a home/away split table, recent results,
-and upcoming fixtures, plus Serie A analytics: an xG table (points vs expected
-points), a pressing-vs-territory scatter (PPDA against deep completions), rolling
-xG-difference form curves for every team, clinical/wasteful finisher boards (goals
-vs xG), and top creators (assists vs xA). Adapts to light/dark mode.
+`build_report.py` turns the database into a self-contained `report.html` — open it
+in any browser (vanilla JavaScript, works offline from a double-click). It has three
+tabs:
+
+- **League** — full standings computed from stored results (rank-trend arrows,
+  W/D/L form chips), home/away split table, recent results, upcoming fixtures.
+- **Team analytics** — xG table (points vs expected points), pressing-vs-territory
+  scatter (PPDA against deep completions), rolling xG-difference form curves.
+- **Players** — an explorer over every tracked player (~590): search, team /
+  position / minutes filters, a per-90 toggle, and click-to-sort columns for
+  goals, xG, G−xG, assists, xA, shots, key passes and more — plus curated boards
+  for clinical/wasteful finishers and top creators.
+
+Adapts to light/dark mode.
 
 ## Data source
 
