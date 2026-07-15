@@ -1,4 +1,5 @@
 # Football Analytics
+Not serious work, just trying some good'ol vibecoding.
 
 Analytics tool for **Serie A** (with **Allsvenskan** on hold), built on free, no-signup data sources.
 
