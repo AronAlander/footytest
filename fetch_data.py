@@ -23,12 +23,14 @@ REQUEST_PAUSE = 2.1  # test key allows ~30 requests/minute
 RETRY_WAIT = 35      # seconds to back off after HTTP 429
 
 LEAGUES = {
-    "Allsvenskan": {
-        "id": "4347",
-        # Allsvenskan runs over a calendar year
-        "season": str(date.today().year),
-        "rounds": 30,
-    },
+    # Allsvenskan is on hold while the project focuses on Serie A analytics
+    # (no free xG source exists for it) - uncomment to fetch it again:
+    # "Allsvenskan": {
+    #     "id": "4347",
+    #     # Allsvenskan runs over a calendar year
+    #     "season": str(date.today().year),
+    #     "rounds": 30,
+    # },
     "Serie A": {
         "id": "4332",
         # Serie A runs autumn-spring; bump when the new season starts in August

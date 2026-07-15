@@ -1,6 +1,10 @@
 # Football Analytics
 
-Analytics tool for **Allsvenskan** and **Serie A**, starting from free, no-signup data sources.
+Analytics tool for **Serie A** (with **Allsvenskan** on hold), built on free, no-signup data sources.
+
+Allsvenskan support is currently commented out — no free advanced-stats source exists
+for it, so the project focuses on Serie A for now. To bring it back, uncomment its
+entry in `fetch_data.py` and remove it from `HIDDEN_LEAGUES` in `build_report.py`.
 
 ## Quick start
 

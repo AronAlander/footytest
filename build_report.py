@@ -17,6 +17,9 @@ PROJECT_DIR = Path(__file__).parent
 DB_PATH = PROJECT_DIR / "football.sqlite"
 REPORT_PATH = PROJECT_DIR / "report.html"
 
+# Leagues kept in the database but left out of the report for now
+HIDDEN_LEAGUES = {"Allsvenskan"}
+
 CSS = """
 :root {
   --surface: #fcfcfb; --card: #ffffff; --border: #e4e3df;
@@ -270,7 +273,10 @@ def main() -> None:
     if not DB_PATH.exists():
         raise SystemExit("No football.sqlite found - run `python fetch_data.py` first.")
     db = sqlite3.connect(DB_PATH)
-    leagues = [r[0] for r in db.execute("SELECT DISTINCT league FROM matches ORDER BY league")]
+    leagues = [
+        r[0] for r in db.execute("SELECT DISTINCT league FROM matches ORDER BY league")
+        if r[0] not in HIDDEN_LEAGUES
+    ]
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     html = (
