@@ -8,10 +8,17 @@ Requires Python 3.10+ (standard library only, no dependencies):
 
 ```
 python fetch_data.py
+python build_report.py
 ```
 
-This downloads league tables, recent results, upcoming fixtures, and season schedules
-for both leagues into `data/` as raw JSON.
+`fetch_data.py` downloads league tables, results, and fixtures for both leagues and
+stores them in `football.sqlite` (matches are upserted; standings are saved as dated
+snapshots, so history accumulates the more often you run it). Raw API responses are
+also kept in `data/` for debugging.
+
+`build_report.py` turns the database into a self-contained `report.html` — open it in
+any browser. It shows standings (with a W/D/L form column), recent results, and
+upcoming fixtures per league, and adapts to light/dark mode.
 
 ## Data source
 
@@ -27,7 +34,8 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
 
 ## Roadmap ideas
 
-- [ ] Store fetched data in SQLite instead of raw JSON
+- [x] Store fetched data in SQLite
+- [x] HTML report for viewing the data
 - [ ] Swap in full-data APIs (football-data.org + API-Football)
 - [ ] Compute standings trends, form tables, home/away splits
 - [ ] xG data via Understat (Serie A) / FotMob (Allsvenskan) scraping
