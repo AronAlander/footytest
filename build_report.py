@@ -18,6 +18,7 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).parent
 DB_PATH = PROJECT_DIR / "football.sqlite"
 REPORT_PATH = PROJECT_DIR / "report.html"
+DOCS_PATH = PROJECT_DIR / "docs" / "index.html"  # committed copy, served by GitHub Pages
 
 # Leagues kept in the database but left out of the report for now
 HIDDEN_LEAGUES = {"Allsvenskan"}
@@ -90,6 +91,7 @@ svg text.pt-label { fill: var(--text-primary); }
 svg .gridline { stroke: var(--border); stroke-width: 1; }
 svg .zeroline { stroke: var(--text-secondary); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.6; }
 svg .dot { fill: var(--accent); }
+svg text.quad { font-style: italic; opacity: 0.8; }
 svg .curve { stroke: var(--accent); stroke-width: 2; fill: none; }
 .spark-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
               gap: 12px 18px; }
@@ -329,24 +331,27 @@ def nice_ticks(lo, hi, count=5):
     return [round(lo + i * step, 1) for i in range(count)]
 
 
-def style_scatter(db):
-    rows = db.execute(
-        """SELECT team, AVG(ppda), AVG(deep) FROM understat_team_matches
-           WHERE ppda IS NOT NULL GROUP BY team"""
-    ).fetchall()
-    if len(rows) < 2:
-        return ""
+def scatter_svg(points, x_label, y_label, aria, x_dec=1, y_dec=1,
+                zero_x=False, zero_y=False, quadrants=None):
+    """Labelled scatter plot. points = (label, x, y, hover_text).
 
+    zero_x / zero_y draw a dashed reference line at x=0 / y=0 (and extend the
+    range to include it); quadrants = (tl, tr, bl, br) corner annotations.
+    """
     width, height = 860, 460
     ml, mr, mt, mb = 55, 130, 15, 45
     plot_w, plot_h = width - ml - mr, height - mt - mb
 
-    xs = [r[1] for r in rows]
-    ys = [r[2] for r in rows]
+    xs = [p[1] for p in points]
+    ys = [p[2] for p in points]
     xpad = (max(xs) - min(xs)) * 0.08 or 1
     ypad = (max(ys) - min(ys)) * 0.08 or 1
     x0, x1 = min(xs) - xpad, max(xs) + xpad
     y0, y1 = min(ys) - ypad, max(ys) + ypad
+    if zero_x:
+        x0, x1 = min(x0, -xpad), max(x1, xpad)
+    if zero_y:
+        y0, y1 = min(y0, -ypad), max(y1, ypad)
 
     def px(v):
         return ml + (v - x0) / (x1 - x0) * plot_w
@@ -354,41 +359,77 @@ def style_scatter(db):
     def py(v):
         return mt + (1 - (v - y0) / (y1 - y0)) * plot_h
 
+    def fmt_tick(v, dec):
+        return f"{v:.{dec}f}".replace("-", "−")
+
     parts = []
     for tick in nice_ticks(x0, x1):
         x = px(tick)
         parts.append(f"<line class='gridline' x1='{x:.0f}' y1='{mt}' x2='{x:.0f}' y2='{mt + plot_h}'/>")
-        parts.append(f"<text x='{x:.0f}' y='{height - 24}' text-anchor='middle'>{tick}</text>")
+        parts.append(f"<text x='{x:.0f}' y='{height - 24}' text-anchor='middle'>{fmt_tick(tick, x_dec)}</text>")
     for tick in nice_ticks(y0, y1):
         y = py(tick)
         parts.append(f"<line class='gridline' x1='{ml}' y1='{y:.0f}' x2='{ml + plot_w}' y2='{y:.0f}'/>")
-        parts.append(f"<text x='{ml - 8}' y='{y:.0f}' text-anchor='end' dominant-baseline='middle'>{tick:.0f}</text>")
-    parts.append(f"<text x='{ml + plot_w / 2:.0f}' y='{height - 6}' text-anchor='middle'>"
-                 "PPDA — passes allowed per defensive action (left = presses harder)</text>")
+        parts.append(f"<text x='{ml - 8}' y='{y:.0f}' text-anchor='end' dominant-baseline='middle'>{fmt_tick(tick, y_dec)}</text>")
+    if zero_x:
+        x = px(0)
+        parts.append(f"<line class='zeroline' x1='{x:.0f}' y1='{mt}' x2='{x:.0f}' y2='{mt + plot_h}'/>")
+    if zero_y:
+        y = py(0)
+        parts.append(f"<line class='zeroline' x1='{ml}' y1='{y:.0f}' x2='{ml + plot_w}' y2='{y:.0f}'/>")
+    if quadrants:
+        tl, tr, bl, br = quadrants
+        for text, x, y, anchor in (
+            (tl, ml + 8, mt + 16, "start"), (tr, ml + plot_w - 8, mt + 16, "end"),
+            (bl, ml + 8, mt + plot_h - 8, "start"), (br, ml + plot_w - 8, mt + plot_h - 8, "end"),
+        ):
+            if text:
+                parts.append(f"<text class='quad' x='{x}' y='{y}' text-anchor='{anchor}'>{escape(text)}</text>")
+    parts.append(f"<text x='{ml + plot_w / 2:.0f}' y='{height - 6}' text-anchor='middle'>{escape(x_label)}</text>")
     parts.append(f"<text x='14' y='{mt + plot_h / 2:.0f}' text-anchor='middle' "
-                 f"transform='rotate(-90 14 {mt + plot_h / 2:.0f})'>Deep completions per match</text>")
+                 f"transform='rotate(-90 14 {mt + plot_h / 2:.0f})'>{escape(y_label)}</text>")
 
     # naive label collision avoidance: nudge labels that land too close
     placed = []
-    for team, ppda, deep in sorted(rows, key=lambda r: (py(r[2]), px(r[1]))):
-        x, y = px(ppda), py(deep)
+    for label, vx, vy, hover in sorted(points, key=lambda p: (py(p[2]), px(p[1]))):
+        x, y = px(vx), py(vy)
         label_y = y + 4
         while any(abs(label_y - oy) < 13 and abs(x - ox) < 105 for ox, oy in placed):
             label_y += 13
         placed.append((x, label_y))
         parts.append(
             f"<circle class='dot' cx='{x:.0f}' cy='{y:.0f}' r='5'>"
-            f"<title>{escape(team)}: PPDA {ppda:.1f}, deep completions {deep:.1f} per match</title></circle>"
+            f"<title>{escape(hover)}</title></circle>"
         )
-        parts.append(f"<text class='pt-label' x='{x + 9:.0f}' y='{label_y:.0f}'>{escape(team)}</text>")
+        parts.append(f"<text class='pt-label' x='{x + 9:.0f}' y='{label_y:.0f}'>{escape(label)}</text>")
 
     return (
-        "<h3>Team style — pressing vs territory</h3>"
         "<div class='chart-card'>"
         f"<svg viewBox='0 0 {width} {height}' width='100%' role='img' "
-        "aria-label='Scatter plot of pressing intensity against deep completions per team'>"
-        + "".join(parts) + "</svg></div>"
-        "<p class='meta'>Season averages. Left = allows few opposition passes per "
+        f"aria-label='{escape(aria)}'>" + "".join(parts) + "</svg></div>"
+    )
+
+
+def style_scatter(db):
+    rows = db.execute(
+        """SELECT team, AVG(ppda), AVG(deep) FROM understat_team_matches
+           WHERE ppda IS NOT NULL GROUP BY team"""
+    ).fetchall()
+    if len(rows) < 2:
+        return ""
+    points = [
+        (team, ppda, deep, f"{team}: PPDA {ppda:.1f}, deep completions {deep:.1f} per match")
+        for team, ppda, deep in rows
+    ]
+    return (
+        "<h3>Team style — pressing vs territory</h3>"
+        + scatter_svg(
+            points,
+            "PPDA — passes allowed per defensive action (left = presses harder)",
+            "Deep completions per match", y_dec=0,
+            aria="Scatter plot of pressing intensity against deep completions per team",
+        )
+        + "<p class='meta'>Season averages. Left = allows few opposition passes per "
         "defensive action (aggressive press); top = completes many passes near the "
         "opponent box (territorial dominance). Top-left teams press high and pin "
         "opponents back; bottom-right teams sit deep and go direct. Hover a dot for "
@@ -450,6 +491,258 @@ def rolling_sparklines(db):
         f"matches, across the season (teams in final-table order; all curves share the same "
         f"scale, ±{max_abs:.1f}). Above the dashed line = creating more than conceding. The "
         "number is the value at season's end. Hover a curve for its range.</p>"
+    )
+
+
+# ------------------------------------------------------------- insights tab
+
+def justice_table(db):
+    """League table re-ranked by expected points instead of actual points."""
+    rows = db.execute(
+        """SELECT team, SUM(pts), SUM(xpts) FROM understat_team_matches GROUP BY team"""
+    ).fetchall()
+    if not rows:
+        return ""
+    actual_rank = {
+        team: i for i, (team, _, _) in enumerate(sorted(rows, key=lambda r: -r[1]), 1)
+    }
+    body = ""
+    for xrank, (team, pts, xpts) in enumerate(sorted(rows, key=lambda r: -r[2]), 1):
+        moved = xrank - actual_rank[team]  # >0: finished above what chances deserved
+        body += (
+            f"<tr><td class='num'>{xrank}</td><td>{escape(team)}</td>"
+            f"<td class='num score'>{xpts:.1f}</td><td class='num'>{pts}</td>"
+            f"<td class='num'>{actual_rank[team]}</td>"
+            f"<td class='num'>{trend_arrow(moved)}</td></tr>"
+        )
+    return (
+        "<h3>The justice table — where the chances say you belonged</h3>"
+        "<div class='card'><table><thead><tr>"
+        "<th class='num'>xPts rank</th><th>Team</th><th class='num'>xPts</th>"
+        "<th class='num'>Actual pts</th><th class='num'>Actual rank</th>"
+        "<th class='num'>Fortune</th></tr></thead>"
+        f"<tbody>{body}</tbody></table></div>"
+        "<p class='meta'>The league re-ranked by expected points (xPts sums each match's "
+        "win/draw probabilities from its chances). ▲ = finished that many places <em>higher</em> "
+        "than the chances deserved (fortunate season); ▼ = the table undersold them — those "
+        "teams are the usual bounce-back candidates next season.</p>"
+    )
+
+
+def fortune_scatter(db):
+    """Season over/underperformance split into finishing and goalkeeping/defence."""
+    rows = db.execute(
+        """SELECT team, SUM(scored) - SUM(xg), SUM(xga) - SUM(missed)
+           FROM understat_team_matches GROUP BY team"""
+    ).fetchall()
+    if len(rows) < 2:
+        return ""
+    points = [
+        (team, atk, dfn,
+         f"{team}: scored {fmt_delta(atk)} goals vs xG, "
+         f"conceded {fmt_delta(dfn)} fewer than xGA")
+        for team, atk, dfn in rows
+    ]
+    return (
+        "<h3>Where the luck lived — finishing vs goalkeeping</h3>"
+        + scatter_svg(
+            points,
+            "Goals scored minus xG (right = clinical finishing)",
+            "xGA minus goals conceded (up = defence beat the model)",
+            aria="Scatter of attacking and defensive over/underperformance per team",
+            x_dec=0, y_dec=0, zero_x=True, zero_y=True,
+            quadrants=("Wasteful attack, heroic defence", "Hot at both ends",
+                       "Cold at both ends", "Clinical attack, leaky defence"),
+        )
+        + "<p class='meta'>Splits each team's season luck into its two components. "
+        "Right of the dashed line = forwards scored more than their chances were worth; "
+        "above it = keeper and defence conceded less than the chances faced. Both axes tend "
+        "to regress to zero — a team deep in the top-right usually can't repeat it, and a "
+        "bottom-left team is better than its results.</p>"
+    )
+
+
+def chaos_scatter(db):
+    """Underlying quality vs match-to-match volatility."""
+    rows = db.execute(
+        "SELECT team, npxgd FROM understat_team_matches ORDER BY team"
+    ).fetchall()
+    series = {}
+    for team, npxgd in rows:
+        series.setdefault(team, []).append(npxgd)
+    if len(series) < 2:
+        return ""
+    points = []
+    for team, values in series.items():
+        mean = sum(values) / len(values)
+        std = (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5
+        points.append((team, mean, std,
+                       f"{team}: npxGD {fmt_delta(mean, 2)} per match, "
+                       f"volatility (std dev) {std:.2f}"))
+    return (
+        "<h3>The chaos index — quality vs volatility</h3>"
+        + scatter_svg(
+            points,
+            "Average non-penalty xG difference per match (right = stronger)",
+            "Match-to-match volatility (std dev of npxGD)",
+            aria="Scatter of average xG difference against its match-to-match volatility per team",
+            x_dec=1, y_dec=1, zero_x=True,
+            quadrants=("Bad and unpredictable", "Strong but streaky",
+                       "Consistently outplayed", "Strong and steady"),
+        )
+        + "<p class='meta'>How good each team's underlying performance was, against how much "
+        "it swung from match to match. Bottom-right is the champion profile (dominant every "
+        "week); top-right teams mix demolitions with no-shows; top-left is the neutral's "
+        "favourite — total chaos.</p>"
+    )
+
+
+def venue_split_table(db, limit=8):
+    """Teams whose underlying performance changes most between home and away."""
+    rows = db.execute(
+        """SELECT team,
+                  AVG(CASE WHEN home_away = 'h' THEN npxgd END),
+                  AVG(CASE WHEN home_away = 'a' THEN npxgd END)
+           FROM understat_team_matches GROUP BY team"""
+    ).fetchall()
+    if not rows:
+        return ""
+    ranked = sorted(rows, key=lambda r: r[1] - r[2], reverse=True)
+    shown = ranked[:limit // 2] + ranked[-limit // 2:]
+    body = ""
+    for team, home, away in shown:
+        body += (
+            f"<tr><td>{escape(team)}</td><td class='num'>{fmt_delta(home, 2)}</td>"
+            f"<td class='num'>{fmt_delta(away, 2)}</td>"
+            f"<td class='num score'>{fmt_delta(home - away, 2)}</td></tr>"
+        )
+    return (
+        "<h3>Venue dependence — who's a different team on the road</h3>"
+        "<div class='card'><table><thead><tr><th>Team</th>"
+        "<th class='num'>Home npxGD/match</th><th class='num'>Away npxGD/match</th>"
+        "<th class='num'>Home edge</th></tr></thead>"
+        f"<tbody>{body}</tbody></table></div>"
+        f"<p class='meta'>The {limit // 2} most home-dependent teams and the {limit // 2} "
+        "most venue-proof ones, by underlying performance (npxGD) rather than results — so "
+        "this isn't luck, it's how differently they actually play. A big home edge suggests "
+        "a style that needs the crowd or the pitch; a negative one is genuinely rare.</p>"
+    )
+
+
+def shot_diet_scatter(db, top_shooters=30, min_minutes=900):
+    """Shot volume vs average chance quality for the league's main shooters."""
+    rows = db.execute(
+        """SELECT player_name, team, minutes, shots, npg, npxg FROM understat_players
+           WHERE minutes >= ? AND shots > 0 ORDER BY shots DESC LIMIT ?""",
+        (min_minutes, top_shooters),
+    ).fetchall()
+    if len(rows) < 2:
+        return ""
+    points = []
+    for name, team, minutes, shots, npg, npxg in rows:
+        volume = shots * 90 / minutes
+        quality = npxg / shots
+        points.append((name, volume, quality,
+                       f"{name} ({team}): {shots} shots ({volume:.1f} per 90), "
+                       f"{quality:.2f} npxG per shot, {npg} non-penalty goals"))
+    return (
+        "<h3>Shot diet — volume vs chance quality</h3>"
+        + scatter_svg(
+            points,
+            "Shots per 90 minutes",
+            "npxG per shot (up = better chances)",
+            aria="Scatter of shot volume against average chance quality per player",
+            x_dec=1, y_dec=2,
+            quadrants=("Poacher: rare but golden chances", "The complete diet",
+                       "", "Chancer: shoots from anywhere"),
+        )
+        + f"<p class='meta'>The league's {len(points)} highest-volume shooters "
+        f"(≥{min_minutes} minutes), penalties excluded. Up = waits for high-quality looks "
+        "close to goal; right = shoots constantly. Top-right is the elite-striker profile; "
+        "bottom-right players rack up shots that are worth little each — flashy, "
+        "inefficient. Hover a dot for exact numbers.</p>"
+    )
+
+
+def buildup_table(db, limit=12, min_minutes=1800):
+    """Players whose buildup involvement far outstrips their goal/assist credit."""
+    rows = db.execute(
+        """SELECT player_name, team, position, minutes, xg_buildup, xg_chain,
+                  goals + assists
+           FROM understat_players WHERE minutes >= ?
+           ORDER BY xg_buildup * 90.0 / minutes DESC LIMIT ?""",
+        (min_minutes, limit),
+    ).fetchall()
+    if not rows:
+        return ""
+    body = ""
+    for name, team, pos, minutes, buildup, chain, ga in rows:
+        body += (
+            f"<tr><td>{escape(name)}</td><td class='dim'>{escape(team)}</td>"
+            f"<td class='dim'>{escape(pos or '')}</td><td class='num'>{minutes}</td>"
+            f"<td class='num score'>{buildup * 90 / minutes:.2f}</td>"
+            f"<td class='num'>{chain * 90 / minutes:.2f}</td>"
+            f"<td class='num'>{ga}</td></tr>"
+        )
+    return (
+        "<h3>Hidden engines — buildup value without the headlines</h3>"
+        "<div class='card'><table><thead><tr>"
+        "<th>Player</th><th>Team</th><th>Pos</th><th class='num'>Min</th>"
+        "<th class='num'>xGBuildup/90</th><th class='num'>xGChain/90</th>"
+        "<th class='num'>G+A</th></tr></thead>"
+        f"<tbody>{body}</tbody></table></div>"
+        f"<p class='meta'>xGBuildup credits every player involved in a move that ends in a "
+        f"shot, <em>excluding</em> the shooter and the assister — it measures contribution "
+        f"that never shows up in goals or assists. These are the league's biggest "
+        f"under-credited attack-builders (≥{min_minutes} minutes): note how many are "
+        f"defenders and deep midfielders with almost no G+A. xGChain is the same but "
+        f"includes shots and assists.</p>"
+    )
+
+
+def penalty_table(db, limit=8):
+    """Players whose goal tallies lean most on penalties."""
+    rows = db.execute(
+        """SELECT player_name, team, goals, goals - npg, xg - npxg
+           FROM understat_players WHERE goals > npg
+           ORDER BY goals - npg DESC, goals DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    if not rows:
+        return ""
+    body = ""
+    for name, team, goals, pens, pen_xg in rows:
+        share = pens / goals * 100
+        body += (
+            f"<tr><td>{escape(name)}</td><td class='dim'>{escape(team)}</td>"
+            f"<td class='num score'>{pens}</td><td class='num'>{goals}</td>"
+            f"<td class='num'>{share:.0f}%</td><td class='num'>{pen_xg:.1f}</td></tr>"
+        )
+    return (
+        "<h3>Penalty merchants — goal tallies with an asterisk</h3>"
+        "<div class='card'><table><thead><tr>"
+        "<th>Player</th><th>Team</th><th class='num'>Pen goals</th>"
+        "<th class='num'>Total goals</th><th class='num'>Pen share</th>"
+        "<th class='num'>Pen xG</th></tr></thead>"
+        f"<tbody>{body}</tbody></table></div>"
+        "<p class='meta'>Penalties are near-automatic (worth ~0.76 xG each), so a scoring "
+        "record built on them says more about who takes the kicks than who creates goals. "
+        "A high pen share is worth knowing before comparing raw goal tallies — and before "
+        "any fantasy-football auction.</p>"
+    )
+
+
+def insights_panel(db):
+    return (
+        f"<h2>Insights <span class='dim'>({season_label(db)}, Understat)</span></h2>"
+        "<p class='meta'>Second-order reads of the xG data: what the raw tables hide.</p>"
+        + justice_table(db)
+        + fortune_scatter(db)
+        + chaos_scatter(db)
+        + venue_split_table(db)
+        + shot_diet_scatter(db)
+        + buildup_table(db)
+        + penalty_table(db)
     )
 
 
@@ -725,6 +1018,7 @@ def main() -> None:
     if understat_available(db):
         panels.append(("teams", "Team analytics", teams_panel(db)))
         panels.append(("players", "Players", players_panel(db)))
+        panels.append(("insights", "Insights", insights_panel(db)))
 
     tab_bar = ""
     if len(panels) > 1:
@@ -750,8 +1044,11 @@ def main() -> None:
         f"<script>{EXPLORER_JS}</script></body></html>"
     )
     REPORT_PATH.write_text(html, encoding="utf-8")
+    DOCS_PATH.parent.mkdir(exist_ok=True)
+    DOCS_PATH.write_text(html, encoding="utf-8")
     db.close()
     print(f"Report written to {REPORT_PATH}")
+    print(f"Dashboard copy written to {DOCS_PATH} (commit it and it's served by GitHub Pages)")
 
 
 if __name__ == "__main__":

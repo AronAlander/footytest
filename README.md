@@ -31,8 +31,9 @@ endpoint (no signup): per-match team xG/xGA/xPts/PPDA and per-player xG/xA for
 the Serie A analytics layer — Allsvenskan has no free xG source.
 
 `build_report.py` turns the database into a self-contained `report.html` — open it
-in any browser (vanilla JavaScript, works offline from a double-click). It has three
-tabs:
+in any browser (vanilla JavaScript, works offline from a double-click). It also
+writes an identical copy to `docs/index.html`, which is committed so the report can
+be served as a web dashboard (see below). It has four tabs:
 
 - **League** — full standings computed from stored results (rank-trend arrows,
   W/D/L form chips), home/away split table, recent results, upcoming fixtures.
@@ -42,8 +43,22 @@ tabs:
   position / minutes filters, a per-90 toggle, and click-to-sort columns for
   goals, xG, G−xG, assists, xA, shots, key passes and more — plus curated boards
   for clinical/wasteful finishers and top creators.
+- **Insights** — second-order reads of the xG data: the justice table (league
+  re-ranked by expected points), finishing-vs-goalkeeping luck quadrants, a
+  quality-vs-volatility "chaos index", home/away venue dependence by underlying
+  npxGD, shot volume vs chance quality for the top shooters, hidden buildup
+  engines (xGBuildup/90 leaders with barely any goals or assists), and penalty
+  dependence.
 
 Adapts to light/dark mode.
+
+## Web dashboard (GitHub Pages)
+
+`docs/index.html` is a committed copy of the report, so the repo can serve it as a
+live web dashboard. One-time setup on GitHub: **Settings → Pages → Deploy from a
+branch → `master`, folder `/docs` → Save**. The dashboard then lives at
+`https://aronalander.github.io/footytest/` and updates on every push after
+re-running `build_report.py`.
 
 ## Data source
 
@@ -68,4 +83,6 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
 - [x] Team style profiles (PPDA pressing intensity vs deep completions)
 - [x] Rolling xG-difference form curves
 - [ ] xG for Allsvenskan via FotMob (unofficial API, fragile)
-- [ ] Web dashboard for visualizations
+- [x] Web dashboard for visualizations (GitHub Pages from `docs/`)
+- [x] Hidden analytics: justice table, luck quadrants, chaos index, venue
+      dependence, shot diet, hidden buildup engines, penalty dependence
