@@ -23,6 +23,9 @@ DOCS_PATH = PROJECT_DIR / "docs" / "index.html"  # committed copy, served by Git
 # Leagues kept in the database but left out of the report for now
 HIDDEN_LEAGUES = {"Allsvenskan"}
 
+# Preferred order of the league switcher; anything else stored comes after
+LEAGUE_ORDER = ["Serie A", "Premier League", "La Liga", "Bundesliga", "Ligue 1"]
+
 FORM_WINDOW = 5     # matches shown in the form column
 TREND_WINDOW = 5    # rounds used for the rank-trend arrow
 ROLLING_WINDOW = 5  # matches in the rolling xG-difference curves
@@ -91,6 +94,18 @@ nav.tabs button[aria-selected="true"] { color: #fff; background: var(--accent); 
   nav.tabs { background: color-mix(in srgb, var(--card) 78%, transparent); backdrop-filter: blur(10px); }
 }
 .panel[hidden] { display: none; }
+.lgview[hidden] { display: none; }
+nav.lgswitch { display: flex; flex-wrap: wrap; gap: 6px; margin: 20px 0 0; }
+nav.lgswitch button {
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  background: var(--card); border: 1px solid var(--border); border-radius: 999px;
+  padding: 5px 14px; cursor: pointer;
+}
+nav.lgswitch button:hover { color: var(--text-primary); border-color: var(--accent); }
+nav.lgswitch button[aria-selected="true"] {
+  color: #fff; background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  border-color: transparent;
+}
 .tagline { margin: 2px 0 0; color: var(--text-secondary); font-size: 14.5px; }
 .subnav { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 2px; }
 .subnav a {
@@ -325,6 +340,12 @@ def block(title, body, about=None):
     return f"<section class='block'><div class='block-head'>{head}</div>{body}</section>"
 
 
+def lgview(league, content, first):
+    """Per-league wrapper; the league switcher toggles visibility client-side."""
+    hidden = "" if first else " hidden"
+    return f"<div class='lgview' data-lg='{escape(league)}'{hidden}>{content}</div>"
+
+
 # ---------------------------------------------------------------- standings
 
 def completed_matches(db, league):
@@ -512,11 +533,13 @@ def matches_table(db, league, finished, limit=10):
 
 # ------------------------------------------------------- understat sections
 
-def xg_table(db):
+def xg_table(db, league):
     rows = db.execute(
         """SELECT team, COUNT(*), SUM(pts), SUM(xpts), SUM(scored), SUM(missed),
                   SUM(xg), SUM(xga), SUM(npxgd)
-           FROM understat_team_matches GROUP BY team ORDER BY SUM(pts) DESC, SUM(xpts) DESC"""
+           FROM understat_team_matches WHERE league = ?
+           GROUP BY team ORDER BY SUM(pts) DESC, SUM(xpts) DESC""",
+        (league,),
     ).fetchall()
     if not rows:
         return ""
@@ -672,10 +695,11 @@ def scatter_svg(points, x_label, y_label, aria, x_dec=1, y_dec=1,
     )
 
 
-def style_scatter(db):
+def style_scatter(db, league):
     rows = db.execute(
         """SELECT team, AVG(ppda), AVG(deep) FROM understat_team_matches
-           WHERE ppda IS NOT NULL GROUP BY team"""
+           WHERE league = ? AND ppda IS NOT NULL GROUP BY team""",
+        (league,),
     ).fetchall()
     if len(rows) < 2:
         return ""
@@ -705,10 +729,11 @@ def style_scatter(db):
     return block("Team style — pressing vs territory", chart, about)
 
 
-def rolling_sparklines(db):
+def rolling_sparklines(db, league):
     rows = db.execute(
         """SELECT team, npxgd FROM understat_team_matches
-           ORDER BY team, match_date"""
+           WHERE league = ? ORDER BY team, match_date""",
+        (league,),
     ).fetchall()
     if not rows:
         return ""
@@ -728,7 +753,8 @@ def rolling_sparklines(db):
 
     max_abs = max(abs(v) for values in rolling.values() for v in values)
     order = [r[0] for r in db.execute(
-        "SELECT team FROM understat_team_matches GROUP BY team ORDER BY SUM(pts) DESC"
+        "SELECT team FROM understat_team_matches WHERE league = ? "
+        "GROUP BY team ORDER BY SUM(pts) DESC", (league,)
     ) if r[0] in rolling]
 
     n_matches = max(len(v) for v in series.values())
@@ -793,10 +819,12 @@ def rolling_sparklines(db):
 
 # ------------------------------------------------------------- insights tab
 
-def justice_table(db):
+def justice_table(db, league):
     """League table re-ranked by expected points instead of actual points."""
     rows = db.execute(
-        """SELECT team, SUM(pts), SUM(xpts) FROM understat_team_matches GROUP BY team"""
+        """SELECT team, SUM(pts), SUM(xpts) FROM understat_team_matches
+           WHERE league = ? GROUP BY team""",
+        (league,),
     ).fetchall()
     if not rows:
         return ""
@@ -835,11 +863,12 @@ def justice_table(db):
     return block("The justice table — where the chances say you belonged", card, about)
 
 
-def fortune_scatter(db):
+def fortune_scatter(db, league):
     """Season over/underperformance split into finishing and goalkeeping/defence."""
     rows = db.execute(
         """SELECT team, SUM(scored) - SUM(xg), SUM(xga) - SUM(missed)
-           FROM understat_team_matches GROUP BY team"""
+           FROM understat_team_matches WHERE league = ? GROUP BY team""",
+        (league,),
     ).fetchall()
     if len(rows) < 2:
         return ""
@@ -875,10 +904,11 @@ def fortune_scatter(db):
     return block("Where the luck lived — finishing vs goalkeeping", chart, about)
 
 
-def chaos_scatter(db):
+def chaos_scatter(db, league):
     """Underlying quality vs match-to-match volatility."""
     rows = db.execute(
-        "SELECT team, npxgd FROM understat_team_matches ORDER BY team"
+        "SELECT team, npxgd FROM understat_team_matches WHERE league = ? ORDER BY team",
+        (league,),
     ).fetchall()
     series = {}
     for team, npxgd in rows:
@@ -917,13 +947,14 @@ def chaos_scatter(db):
     return block("The chaos index — quality vs volatility", chart, about)
 
 
-def venue_split_table(db, limit=8):
+def venue_split_table(db, league, limit=8):
     """Teams whose underlying performance changes most between home and away."""
     rows = db.execute(
         """SELECT team,
                   AVG(CASE WHEN home_away = 'h' THEN npxgd END),
                   AVG(CASE WHEN home_away = 'a' THEN npxgd END)
-           FROM understat_team_matches GROUP BY team"""
+           FROM understat_team_matches WHERE league = ? GROUP BY team""",
+        (league,),
     ).fetchall()
     if not rows:
         return ""
@@ -958,12 +989,13 @@ def venue_split_table(db, limit=8):
     return block("Venue dependence — who's a different team on the road", card, about)
 
 
-def shot_diet_scatter(db, top_shooters=30, min_minutes=900):
+def shot_diet_scatter(db, league, top_shooters=30, min_minutes=900):
     """Shot volume vs average chance quality for the league's main shooters."""
     rows = db.execute(
         """SELECT player_name, team, minutes, shots, npg, npxg FROM understat_players
-           WHERE minutes >= ? AND shots > 0 ORDER BY shots DESC LIMIT ?""",
-        (min_minutes, top_shooters),
+           WHERE league = ? AND minutes >= ? AND shots > 0
+           ORDER BY shots DESC LIMIT ?""",
+        (league, min_minutes, top_shooters),
     ).fetchall()
     if len(rows) < 2:
         return ""
@@ -999,14 +1031,14 @@ def shot_diet_scatter(db, top_shooters=30, min_minutes=900):
     return block("Shot diet — volume vs chance quality", chart, about)
 
 
-def buildup_table(db, limit=12, min_minutes=1800):
+def buildup_table(db, league, limit=12, min_minutes=1800):
     """Players whose buildup involvement far outstrips their goal/assist credit."""
     rows = db.execute(
         """SELECT player_name, team, position, minutes, xg_buildup, xg_chain,
                   goals + assists
-           FROM understat_players WHERE minutes >= ?
+           FROM understat_players WHERE league = ? AND minutes >= ?
            ORDER BY xg_buildup * 90.0 / minutes DESC LIMIT ?""",
-        (min_minutes, limit),
+        (league, min_minutes, limit),
     ).fetchall()
     if not rows:
         return ""
@@ -1042,13 +1074,13 @@ def buildup_table(db, limit=12, min_minutes=1800):
     return block("Hidden engines — buildup value without the headlines", card, about)
 
 
-def penalty_table(db, limit=8):
+def penalty_table(db, league, limit=8):
     """Players whose goal tallies lean most on penalties."""
     rows = db.execute(
         """SELECT player_name, team, goals, goals - npg, xg - npxg
-           FROM understat_players WHERE goals > npg
+           FROM understat_players WHERE league = ? AND goals > npg
            ORDER BY goals - npg DESC, goals DESC LIMIT ?""",
-        (limit,),
+        (league, limit),
     ).fetchall()
     if not rows:
         return ""
@@ -1081,29 +1113,31 @@ def penalty_table(db, limit=8):
     return block("Penalty merchants — goal tallies with an asterisk", card, about)
 
 
-def insights_panel(db):
+def insights_panel(db, leagues):
+    def content(lg):
+        return (
+            justice_table(db, lg) + fortune_scatter(db, lg) + chaos_scatter(db, lg)
+            + venue_split_table(db, lg) + shot_diet_scatter(db, lg)
+            + buildup_table(db, lg) + penalty_table(db, lg)
+        )
+    views = "".join(
+        lgview(lg, content(lg), i == 0) for i, lg in enumerate(leagues)
+    )
     return (
         f"<h2>Insights <span class='dim'>({season_label(db)}, Understat)</span></h2>"
         "<p class='meta'>Second-order reads of the xG data: what the raw tables hide.</p>"
-        + metric_glossary()
-        + justice_table(db)
-        + fortune_scatter(db)
-        + chaos_scatter(db)
-        + venue_split_table(db)
-        + shot_diet_scatter(db)
-        + buildup_table(db)
-        + penalty_table(db)
+        + metric_glossary() + views
     )
 
 
 # -------------------------------------------------------------- player tab
 
-def finishing_rows(db, order, limit=8, min_minutes=900):
+def finishing_rows(db, league, order, limit=8, min_minutes=900):
     return db.execute(
         f"""SELECT player_name, team, minutes, shots, goals, xg, goals - xg AS diff
-            FROM understat_players WHERE minutes >= ?
+            FROM understat_players WHERE league = ? AND minutes >= ?
             ORDER BY diff {order} LIMIT ?""",
-        (min_minutes, limit),
+        (league, min_minutes, limit),
     ).fetchall()
 
 
@@ -1124,12 +1158,12 @@ def player_table(rows, value_header):
     )
 
 
-def creators_table(db, limit=8, min_minutes=900):
+def creators_table(db, league, limit=8, min_minutes=900):
     rows = db.execute(
         """SELECT player_name, team, minutes, key_passes, assists, xa, assists - xa
-           FROM understat_players WHERE minutes >= ?
+           FROM understat_players WHERE league = ? AND minutes >= ?
            ORDER BY xa DESC LIMIT ?""",
-        (min_minutes, limit),
+        (league, min_minutes, limit),
     ).fetchall()
     body = ""
     for name, team, minutes, key_passes, assists, xa, diff in rows:
@@ -1147,11 +1181,12 @@ def creators_table(db, limit=8, min_minutes=900):
     )
 
 
-def load_players(db):
+def load_players(db, league):
     rows = db.execute(
         """SELECT player_name, team, position, games, minutes, goals, xg,
                   assists, xa, shots, key_passes, npg, npxg, xg_chain, xg_buildup
-           FROM understat_players ORDER BY xg DESC"""
+           FROM understat_players WHERE league = ? ORDER BY xg DESC""",
+        (league,),
     ).fetchall()
     return [
         {
@@ -1167,18 +1202,16 @@ def load_players(db):
     ]
 
 
-def player_explorer(players):
-    if not players:
+def player_explorer(players_by_lg):
+    if not any(players_by_lg.values()):
         return ""
-    # transferred players have comma-joined teams ("Inter,Parma"); offer single clubs
-    teams = sorted({club for p in players for club in p["team"].split(",")})
-    team_options = "".join(f"<option>{escape(t)}</option>" for t in teams)
-    payload = json.dumps(players, ensure_ascii=False).replace("</", "<\\/")
+    # team filter and datalist options are (re)built client-side per league
+    payload = json.dumps(players_by_lg, ensure_ascii=False).replace("</", "<\\/")
 
     body = (
         "<div class='controls'>"
         "<input type='search' id='pe-search' placeholder='Search player or team…'>"
-        f"<select id='pe-team'><option value=''>All teams</option>{team_options}</select>"
+        "<select id='pe-team'><option value=''>All teams</option></select>"
         "<select id='pe-pos'><option value=''>All positions</option>"
         "<option value='G'>Goalkeepers</option><option value='D'>Defenders</option>"
         "<option value='M'>Midfielders</option><option value='F'>Forwards</option></select>"
@@ -1190,11 +1223,13 @@ def player_explorer(players):
         "<tbody></tbody></table></div>"
         "<div class='show-more' id='pe-more'></div>"
         "<div id='pd-overlay' hidden><div id='pd-modal' role='dialog' aria-modal='true'></div></div>"
-        f"<script>const PLAYERS = {payload};</script>"
+        f"<script>const PLAYERS_BY_LG = {payload};</script>"
     )
+    total = sum(len(v) for v in players_by_lg.values())
     about = (
-        f"<p><strong>What it shows.</strong> Every player Understat tracks this season "
-        f"({len(players)}). The table starts with the top 25 by the current sort — use "
+        f"<p><strong>What it shows.</strong> Every player Understat tracks in the "
+        f"selected league this season ({total} across the big five). The table starts "
+        "with the top 25 by the current sort — use "
         "the buttons under it to load more. Search by name or club, filter by position "
         "and minutes, and click any column header to sort (click again to flip direction). "
         "<strong>Click a row</strong> to open that player's profile card, with season "
@@ -1212,15 +1247,9 @@ def player_explorer(players):
     return block("Player explorer", body, about)
 
 
-def player_compare(players):
-    if not players:
-        return ""
-    # both name and team go in the value: Chromium's dropdown displays option
-    # inner text as the primary line, which showed only the team name
-    options = "".join(
-        f"<option value=\"{escape(p['name'])} — {escape(p['team'])}\"></option>"
-        for p in players
-    )
+def player_compare():
+    # datalist options are built client-side per league ("Name — Team" values:
+    # Chromium's dropdown displays option inner text as the primary line)
     inputs = "".join(
         f"<input list='pc-list' id='pc-{i}' placeholder='Player {i}…' autocomplete='off'>"
         for i in (1, 2, 3)
@@ -1228,7 +1257,7 @@ def player_compare(players):
     body = (
         f"<div class='controls'>{inputs}"
         "<button id='pc-clear' type='button'>Clear</button></div>"
-        f"<datalist id='pc-list'>{options}</datalist>"
+        "<datalist id='pc-list'></datalist>"
         "<div class='chart-card' id='pc-empty'><p class='dim' style='margin:4px 2px'>"
         "Pick two or three players above (or use “Add to comparison” on a player card) "
         "to see their profiles side by side.</p></div>"
@@ -1253,12 +1282,13 @@ def player_compare(players):
     return block("Player comparison", body, about)
 
 
-def load_teams(db):
+def load_teams(db, league):
     rows = db.execute(
         """SELECT team, COUNT(*), SUM(pts), SUM(xpts), SUM(npxg), SUM(npxga),
                   AVG(ppda), SUM(deep), SUM(deep_allowed),
                   SUM(scored), SUM(missed), SUM(xg), SUM(xga)
-           FROM understat_team_matches GROUP BY team ORDER BY team"""
+           FROM understat_team_matches WHERE league = ? GROUP BY team ORDER BY team""",
+        (league,),
     ).fetchall()
     return [
         {
@@ -1274,27 +1304,27 @@ def load_teams(db):
     ]
 
 
-def team_compare(teams):
-    if not teams:
+def team_compare(teams_by_lg):
+    if not any(teams_by_lg.values()):
         return ""
-    options = "".join(f"<option>{escape(t['team'])}</option>" for t in teams)
+    # select options are (re)built client-side per league
     selects = "".join(
-        f"<select id='tc-{i}'><option value=''>Team {i}…</option>{options}</select>"
+        f"<select id='tc-{i}'><option value=''>Team {i}…</option></select>"
         for i in (1, 2, 3)
     )
-    payload = json.dumps(teams, ensure_ascii=False).replace("</", "<\\/")
+    payload = json.dumps(teams_by_lg, ensure_ascii=False).replace("</", "<\\/")
     body = (
         f"<div class='controls'>{selects}"
         "<button id='tc-clear' type='button'>Clear</button></div>"
         "<div class='chart-card' id='tc-empty'><p class='dim' style='margin:4px 2px'>"
         "Pick two or three teams above to see their playing styles side by side.</p></div>"
         "<div class='chart-card' id='tc-card' hidden></div>"
-        f"<script>const TEAMS = {payload};</script>"
+        f"<script>const TEAMS_BY_LG = {payload};</script>"
     )
     about = (
         "<p><strong>What it shows.</strong> Up to three teams overlaid on a radar of six "
         "style dimensions, each expressed as the team's <em>percentile</em> among the "
-        f"{len(teams)} sides in the league. <strong>Attack</strong> is non-penalty xG "
+        "sides in that league. <strong>Attack</strong> is non-penalty xG "
         "created per match and <strong>Defence</strong> is non-penalty xG conceded "
         "(flipped, so further out = fewer chances allowed). <strong>Finishing</strong> is "
         "goals minus xG — conversion above or below what the chances deserved. "
@@ -1314,8 +1344,37 @@ def team_compare(teams):
 
 
 EXPLORER_JS = """
+(function () {  // league switcher: sets window.CUR_LG, toggles .lgview blocks
+  const btns = document.querySelectorAll('nav.lgswitch button');
+  if (!btns.length) {
+    const v = document.querySelector('.lgview');
+    window.CUR_LG = v ? v.dataset.lg : null;
+    return;
+  }
+  window.CUR_LG = btns[0].dataset.lg;
+  const m = decodeURIComponent(location.hash.slice(1)).match(/(?:^|&)lg=([^&]+)/);
+  if (m) {
+    const want = m[1].replace(/_/g, ' ');
+    btns.forEach((b) => { if (b.dataset.lg === want) window.CUR_LG = want; });
+  }
+  function apply() {
+    btns.forEach((b) =>
+      b.setAttribute('aria-selected', b.dataset.lg === window.CUR_LG ? 'true' : 'false'));
+    document.querySelectorAll('.lgview').forEach((v) => {
+      v.hidden = v.dataset.lg !== window.CUR_LG;
+    });
+  }
+  btns.forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.lg === window.CUR_LG) return;
+    window.CUR_LG = b.dataset.lg;
+    apply();
+    document.dispatchEvent(new CustomEvent('leaguechange'));
+  }));
+  apply();
+})();
+
 (function () {
-  if (typeof PLAYERS === 'undefined') return;
+  if (typeof PLAYERS_BY_LG === 'undefined') return;
   const COLS = [
     { key: 'name',    label: 'Player' },
     { key: 'team',    label: 'Team' },
@@ -1341,6 +1400,13 @@ EXPLORER_JS = """
   const tbody = document.querySelector('#player-table tbody');
 
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  let PLAYERS = PLAYERS_BY_LG[window.CUR_LG] || [];
+  function rebuildTeams() {
+    const teams = Array.from(new Set(PLAYERS.flatMap((p) => p.team.split(',')))).sort();
+    $('pe-team').innerHTML = "<option value=''>All teams</option>" +
+      teams.map((t) => '<option>' + esc(t) + '</option>').join('');
+  }
 
   function value(p, col) {
     let v = p[col.key];
@@ -1425,6 +1491,14 @@ EXPLORER_JS = """
     state.per90 = $('pe-per90').checked;
     render();
   });
+  document.addEventListener('leaguechange', () => {
+    PLAYERS = PLAYERS_BY_LG[window.CUR_LG] || [];
+    state.limit = PAGE;
+    $('pe-search').value = '';
+    rebuildTeams();
+    render();
+  });
+  rebuildTeams();
   render();
 })();
 
@@ -1439,14 +1513,20 @@ EXPLORER_JS = """
     activate(b.dataset.panel);
     history.replaceState(null, '', '#' + b.dataset.panel);
   }));
-  const initial = location.hash.slice(1);
+  const initial = decodeURIComponent(location.hash.slice(1)).split('&')
+    .filter((s) => s && !s.includes('='))[0] || '';
   activate(document.getElementById('panel-' + initial) ? initial : tabs[0].dataset.panel);
 })();
 
 (function () {  // player profile cards + radar comparison
-  if (typeof PLAYERS === 'undefined') return;
+  if (typeof PLAYERS_BY_LG === 'undefined') return;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let PLAYERS = PLAYERS_BY_LG[window.CUR_LG] || [];
+  function rebuildList() {
+    $('pc-list').innerHTML = PLAYERS.map((p) =>
+      '<option value="' + esc(p.name) + ' \\u2014 ' + esc(p.team) + '"></option>').join('');
+  }
   const per90 = (p, k) => p.min > 0 ? p[k] * 90 / p.min : 0;
   const posOf = (p) => p.pos.includes('GK') ? 'GK' : ((p.pos.match(/[DMF]/) || ['F'])[0]);
   const POS_NAME = { GK: 'goalkeepers', D: 'defenders', M: 'midfielders', F: 'forwards' };
@@ -1601,9 +1681,19 @@ EXPLORER_JS = """
     [1, 2, 3].forEach((i) => { $('pc-' + i).value = ''; });
     renderCompare();
   });
+  document.addEventListener('leaguechange', () => {
+    PLAYERS = PLAYERS_BY_LG[window.CUR_LG] || [];
+    rebuildList();
+    [1, 2, 3].forEach((i) => { $('pc-' + i).value = ''; });
+    renderCompare();
+    closeDetail();
+  });
+  rebuildList();
 
-  /* ---- deep links: #player=Name and #compare=Name,Name[,Name] ---- */
-  const hash = decodeURIComponent(location.hash.slice(1));
+  /* ---- deep links: #player=Name and #compare=Name,Name[,Name],
+         optionally prefixed with lg=League_Name& ---- */
+  const hash = decodeURIComponent(location.hash.slice(1)).split('&')
+    .filter((s) => !s.startsWith('lg=')).join('&');
   const showPlayersTab = () => document.querySelector("nav.tabs button[data-panel='players']").click();
   if (hash.startsWith('player=')) {
     showPlayersTab();
@@ -1617,9 +1707,16 @@ EXPLORER_JS = """
 })();
 
 (function () {  // team comparison radar
-  if (typeof TEAMS === 'undefined') return;
+  if (typeof TEAMS_BY_LG === 'undefined') return;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let TEAMS = TEAMS_BY_LG[window.CUR_LG] || [];
+  function rebuildSelects() {
+    const options = TEAMS.map((t) => '<option>' + esc(t.team) + '</option>').join('');
+    [1, 2, 3].forEach((i) => {
+      $('tc-' + i).innerHTML = "<option value=''>Team " + i + '\\u2026</option>' + options;
+    });
+  }
   const RADAR = [
     { key: 'npxg',         label: 'Attack',      unit: 'npxG / match',         dec: 2 },
     { key: 'npxga',        label: 'Defence',     unit: 'npxGA / match',        dec: 2, invert: true },
@@ -1711,9 +1808,16 @@ EXPLORER_JS = """
     [1, 2, 3].forEach((i) => { $('tc-' + i).value = ''; });
     renderTC();
   });
+  document.addEventListener('leaguechange', () => {
+    TEAMS = TEAMS_BY_LG[window.CUR_LG] || [];
+    rebuildSelects();
+    renderTC();
+  });
+  rebuildSelects();
 
-  /* deep link: #teams=Name,Name[,Name] */
-  const hash = decodeURIComponent(location.hash.slice(1));
+  /* deep link: #teams=Name,Name[,Name], optionally prefixed with lg=League_Name& */
+  const hash = decodeURIComponent(location.hash.slice(1)).split('&')
+    .filter((s) => !s.startsWith('lg=')).join('&');
   if (hash.startsWith('teams=')) {
     document.querySelector("nav.tabs button[data-panel='teams']").click();
     hash.slice(6).split(',').slice(0, 3).forEach((n, i) => { $('tc-' + (i + 1)).value = n.trim(); });
@@ -1721,23 +1825,34 @@ EXPLORER_JS = """
   }
 })();
 
-(function () {  // per-tab section navigation chips
-  document.querySelectorAll('section.panel').forEach((panel) => {
-    const blocks = Array.from(panel.querySelectorAll('section.block'));
-    if (blocks.length < 3) return;
-    const nav = document.createElement('nav');
-    nav.className = 'subnav';
-    blocks.forEach((b) => {
-      const h = b.querySelector('h3');
-      if (!h) return;
-      const a = document.createElement('a');
-      a.textContent = h.textContent.split(' \\u2014 ')[0];
-      a.addEventListener('click', () => b.scrollIntoView({ behavior: 'smooth', block: 'start' }));
-      nav.appendChild(a);
+(function () {  // per-tab section navigation chips (rebuilt on league switch)
+  function build() {
+    document.querySelectorAll('section.panel').forEach((panel) => {
+      let nav = panel.querySelector('nav.subnav');
+      const blocks = Array.from(panel.querySelectorAll('section.block')).filter((b) => {
+        const view = b.closest('.lgview');
+        return !view || !view.hidden;
+      });
+      if (blocks.length < 3) { if (nav) nav.remove(); return; }
+      if (!nav) {
+        nav = document.createElement('nav');
+        nav.className = 'subnav';
+        const h2 = panel.querySelector('h2');
+        if (h2 && !h2.closest('.lgview')) h2.after(nav); else panel.prepend(nav);
+      }
+      nav.innerHTML = '';
+      blocks.forEach((b) => {
+        const h = b.querySelector('h3');
+        if (!h) return;
+        const a = document.createElement('a');
+        a.textContent = h.textContent.split(' \\u2014 ')[0];
+        a.addEventListener('click', () => b.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        nav.appendChild(a);
+      });
     });
-    const h2 = panel.querySelector('h2');
-    if (h2) h2.after(nav); else panel.prepend(nav);
-  });
+  }
+  build();
+  document.addEventListener('leaguechange', build);
 })();
 
 (function () {  // back-to-top button
@@ -1841,16 +1956,23 @@ def metric_glossary():
     )
 
 
-def teams_panel(db):
+def teams_panel(db, leagues):
+    tables = "".join(
+        lgview(lg, xg_table(db, lg), i == 0) for i, lg in enumerate(leagues)
+    )
+    charts = "".join(
+        lgview(lg, style_scatter(db, lg) + rolling_sparklines(db, lg), i == 0)
+        for i, lg in enumerate(leagues)
+    )
     return (
         f"<h2>Team analytics <span class='dim'>({season_label(db)}, Understat)</span></h2>"
-        + metric_glossary()
-        + xg_table(db) + team_compare(load_teams(db))
-        + style_scatter(db) + rolling_sparklines(db)
+        + metric_glossary() + tables
+        + team_compare({lg: load_teams(db, lg) for lg in leagues})
+        + charts
     )
 
 
-def players_panel(db):
+def players_panel(db, leagues):
     finishing_about = (
         "<p><strong>What it shows.</strong> The players (≥900 minutes) whose goal tallies "
         "differ most from the value of their chances. G−xG is goals scored minus expected "
@@ -1877,19 +1999,24 @@ def players_panel(db):
         "the creator was let down by finishing; above zero means teammates converted "
         "generously. xA is the fairer ranking of creativity than raw assists.</p>"
     )
-    players = load_players(db)
+    def boards(lg):
+        return (
+            "<div class='duo'>"
+            + block("Clinical finishers — most goals above xG",
+                    player_table(finishing_rows(db, lg, "DESC"), "G−xG"), finishing_about)
+            + block("Wasteful in front of goal — most goals below xG",
+                    player_table(finishing_rows(db, lg, "ASC"), "G−xG"), wasteful_about)
+            + "</div>"
+            + block("Top creators by expected assists", creators_table(db, lg), creators_about)
+        )
+    players_by_lg = {lg: load_players(db, lg) for lg in leagues}
+    views = "".join(lgview(lg, boards(lg), i == 0) for i, lg in enumerate(leagues))
     return (
         f"<h2>Players <span class='dim'>({season_label(db)}, Understat)</span></h2>"
         + metric_glossary()
-        + player_explorer(players)
-        + player_compare(players)
-        + "<div class='duo'>"
-        + block("Clinical finishers — most goals above xG",
-                player_table(finishing_rows(db, "DESC"), "G−xG"), finishing_about)
-        + block("Wasteful in front of goal — most goals below xG",
-                player_table(finishing_rows(db, "ASC"), "G−xG"), wasteful_about)
-        + "</div>"
-        + block("Top creators by expected assists", creators_table(db), creators_about)
+        + player_explorer(players_by_lg)
+        + player_compare()
+        + views
     )
 
 
@@ -1897,18 +2024,28 @@ def main() -> None:
     if not DB_PATH.exists():
         raise SystemExit("No football.sqlite found - run `python fetch_data.py` first.")
     db = sqlite3.connect(DB_PATH)
-    leagues = [
+    stored = [
         r[0] for r in db.execute("SELECT DISTINCT league FROM matches ORDER BY league")
         if r[0] not in HIDDEN_LEAGUES
     ]
+    leagues = [lg for lg in LEAGUE_ORDER if lg in stored]
+    leagues += [lg for lg in stored if lg not in leagues]
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    panels = [("league", "League", "".join(league_section(db, lg) for lg in leagues))]
+    panels = [("league", "League", "".join(
+        lgview(lg, league_section(db, lg), i == 0) for i, lg in enumerate(leagues)
+    ))]
     if understat_available(db):
-        panels.append(("teams", "Team analytics", teams_panel(db)))
-        panels.append(("players", "Players", players_panel(db)))
-        panels.append(("insights", "Insights", insights_panel(db)))
+        panels.append(("teams", "Team analytics", teams_panel(db, leagues)))
+        panels.append(("players", "Players", players_panel(db, leagues)))
+        panels.append(("insights", "Insights", insights_panel(db, leagues)))
 
+    lg_bar = ""
+    if len(leagues) > 1:
+        lg_bar = "<nav class='lgswitch'>" + "".join(
+            f"<button data-lg='{escape(lg)}' aria-selected='{'true' if i == 0 else 'false'}'>{escape(lg)}</button>"
+            for i, lg in enumerate(leagues)
+        ) + "</nav>"
     tab_bar = ""
     if len(panels) > 1:
         tab_bar = "<nav class='tabs'>" + "".join(
@@ -1922,7 +2059,7 @@ def main() -> None:
 
     badges = "".join(
         f"<span class='badge'>{escape(text)}</span>"
-        for text in ([f"{lg} {season_label(db)}".strip() for lg in leagues]
+        for text in ([f"Big five leagues {season_label(db)}".strip()]
                      + ["TheSportsDB + Understat", f"Generated {generated}"])
     )
     html = (
@@ -1930,10 +2067,10 @@ def main() -> None:
         f"<meta name='viewport' content='width=device-width, initial-scale=1'>"
         f"<title>Football dashboard</title><style>{CSS}</style></head><body><div class='wrap'>"
         f"<header class='hero'><h1>Football dashboard</h1>"
-        f"<p class='tagline'>Serie A under the hood — standings, xG team analytics, "
-        f"player profiles and second-order insights.</p>"
+        f"<p class='tagline'>The big five European leagues under the hood — standings, "
+        f"xG team analytics, player profiles and second-order insights.</p>"
         f"<div class='badges'>{badges}</div></header>"
-        + tab_bar + panel_html
+        + lg_bar + tab_bar + panel_html
         + "<footer>Standings are computed from the stored results. Run "
         "<code>python fetch_data.py</code> and <code>python fetch_understat.py</code> "
         "regularly to keep the database current.</footer></div>"

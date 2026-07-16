@@ -1,4 +1,4 @@
-"""Fetch Allsvenskan and Serie A data from TheSportsDB (free test key, no signup)
+"""Fetch big-five-league data from TheSportsDB (free test key, no signup)
 and store it in a local SQLite database.
 
 Uses only the Python standard library. Matches are fetched round by round
@@ -31,12 +31,13 @@ LEAGUES = {
     #     "season": str(date.today().year),
     #     "rounds": 30,
     # },
-    "Serie A": {
-        "id": "4332",
-        # Serie A runs autumn-spring; bump when the new season starts in August
-        "season": "2025-2026",
-        "rounds": 38,
-    },
+    # The big five European leagues, all autumn-spring; bump the season
+    # strings when the new campaigns start in August
+    "Serie A": {"id": "4332", "season": "2025-2026", "rounds": 38},
+    "Premier League": {"id": "4328", "season": "2025-2026", "rounds": 38},
+    "La Liga": {"id": "4335", "season": "2025-2026", "rounds": 38},
+    "Bundesliga": {"id": "4331", "season": "2025-2026", "rounds": 34},
+    "Ligue 1": {"id": "4334", "season": "2025-2026", "rounds": 34},
 }
 
 PROJECT_DIR = Path(__file__).parent

@@ -1,11 +1,11 @@
-"""Fetch Serie A advanced stats (xG, xA, xPts, PPDA, ...) from Understat.
+"""Fetch big-five-league advanced stats (xG, xA, xPts, PPDA, ...) from Understat.
 
 Understat's league pages load their data from a public JSON endpoint that
-needs no key or signup; this pulls it directly (one request per run) and
+needs no key or signup; this pulls it directly (one request per league) and
 stores it in football.sqlite alongside the basic match data.
 
-Note: Understat covers only the big five leagues plus Russia, so this is
-Serie A only - Allsvenskan has no free xG source.
+Note: Understat covers only the big five leagues plus Russia - Allsvenskan
+has no free xG source.
 
 Usage:
     python fetch_understat.py
@@ -15,18 +15,25 @@ import gzip
 import html
 import json
 import sqlite3
+import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-LEAGUE = "Serie_A"
+# display name (matches fetch_data.py / the report) -> Understat URL slug
+LEAGUES = {
+    "Serie A": "Serie_A",
+    "Premier League": "EPL",
+    "La Liga": "La_liga",
+    "Bundesliga": "Bundesliga",
+    "Ligue 1": "Ligue_1",
+}
 SEASON = "2025"  # Understat labels seasons by starting year: 2025 = 2025/26
+REQUEST_PAUSE = 2.0
 
-URL = f"https://understat.com/getLeagueData/{LEAGUE}/{SEASON}"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     "X-Requested-With": "XMLHttpRequest",
-    "Referer": f"https://understat.com/league/{LEAGUE}/{SEASON}",
 }
 
 PROJECT_DIR = Path(__file__).parent
@@ -36,6 +43,7 @@ DB_PATH = PROJECT_DIR / "football.sqlite"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS understat_players (
     season       TEXT NOT NULL,
+    league       TEXT NOT NULL,
     player_id    TEXT NOT NULL,
     player_name  TEXT,
     team         TEXT,
@@ -53,10 +61,11 @@ CREATE TABLE IF NOT EXISTS understat_players (
     xg_chain     REAL,
     xg_buildup   REAL,
     fetched_at   TEXT,
-    PRIMARY KEY (season, player_id)
+    PRIMARY KEY (season, league, player_id)
 );
 CREATE TABLE IF NOT EXISTS understat_team_matches (
     season        TEXT NOT NULL,
+    league        TEXT NOT NULL,
     team          TEXT NOT NULL,
     match_date    TEXT NOT NULL,
     home_away     TEXT,
@@ -75,9 +84,20 @@ CREATE TABLE IF NOT EXISTS understat_team_matches (
     pts           INTEGER,
     npxgd         REAL,
     fetched_at    TEXT,
-    PRIMARY KEY (season, team, match_date)
+    PRIMARY KEY (season, league, team, match_date)
 );
 """
+
+
+def migrate_if_needed(db):
+    """Older databases lack the league column (they were Serie A only).
+    The data is fully refetchable, so just rebuild those tables."""
+    for table in ("understat_players", "understat_team_matches"):
+        cols = [r[1] for r in db.execute(f"PRAGMA table_info({table})")]
+        if cols and "league" not in cols:
+            print(f"Migrating {table}: no league column, dropping for refetch.")
+            db.execute(f"DROP TABLE {table}")
+    db.executescript(SCHEMA)
 
 
 def ppda_ratio(value):
@@ -87,31 +107,28 @@ def ppda_ratio(value):
     return None
 
 
-def main() -> None:
-    print(f"Fetching {URL} ...")
-    request = urllib.request.Request(URL, headers=HEADERS)
+def fetch_league(db, league, slug, fetched_at):
+    url = f"https://understat.com/getLeagueData/{slug}/{SEASON}"
+    print(f"Fetching {url} ...")
+    headers = dict(HEADERS, Referer=f"https://understat.com/league/{slug}/{SEASON}")
+    request = urllib.request.Request(url, headers=headers)
     raw = urllib.request.urlopen(request, timeout=60).read()
     if raw[:2] == b"\x1f\x8b":
         raw = gzip.decompress(raw)
     data = json.loads(raw)
 
-    DATA_DIR.mkdir(exist_ok=True)
-    (DATA_DIR / f"understat_{LEAGUE.lower()}_{SEASON}.json").write_text(
+    (DATA_DIR / f"understat_{slug.lower()}_{SEASON}.json").write_text(
         json.dumps(data, indent=2), encoding="utf-8"
     )
-
-    db = sqlite3.connect(DB_PATH)
-    db.executescript(SCHEMA)
-    fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     players = data.get("players") or []
     for p in players:
         db.execute(
             "INSERT OR REPLACE INTO understat_players VALUES "
-            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 # some names arrive entity-encoded ("M&#039;Bala Nzola")
-                SEASON, p["id"], html.unescape(p.get("player_name") or ""),
+                SEASON, league, p["id"], html.unescape(p.get("player_name") or ""),
                 html.unescape(p.get("team_title") or ""),
                 p.get("position"), int(p.get("games") or 0), int(p.get("time") or 0),
                 int(p.get("goals") or 0), float(p.get("xG") or 0),
@@ -124,14 +141,13 @@ def main() -> None:
         )
 
     match_count = 0
-    teams = data.get("teams") or {}
-    for team in teams.values():
+    for team in (data.get("teams") or {}).values():
         for match in team.get("history") or []:
             db.execute(
                 "INSERT OR REPLACE INTO understat_team_matches VALUES "
-                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    SEASON, team["title"], match.get("date"), match.get("h_a"),
+                    SEASON, league, team["title"], match.get("date"), match.get("h_a"),
                     float(match.get("xG") or 0), float(match.get("xGA") or 0),
                     float(match.get("npxG") or 0), float(match.get("npxGA") or 0),
                     ppda_ratio(match.get("ppda")), ppda_ratio(match.get("ppda_allowed")),
@@ -143,10 +159,26 @@ def main() -> None:
                 ),
             )
             match_count += 1
+    print(f"  {league}: {len(players)} players, {match_count} team-match rows")
 
-    db.commit()
-    print(f"Stored {len(players)} players and {match_count} team-match rows "
-          f"for {LEAGUE} {SEASON} in {DB_PATH.name}")
+
+def main() -> None:
+    DATA_DIR.mkdir(exist_ok=True)
+    db = sqlite3.connect(DB_PATH)
+    migrate_if_needed(db)
+    fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    for league, slug in LEAGUES.items():
+        fetch_league(db, league, slug, fetched_at)
+        db.commit()
+        time.sleep(REQUEST_PAUSE)
+
+    totals = db.execute(
+        "SELECT league, COUNT(*) FROM understat_players GROUP BY league"
+    ).fetchall()
+    print(f"\nDatabase: {DB_PATH.name}")
+    for league, count in totals:
+        print(f"  {league}: {count} players")
     db.close()
 
 

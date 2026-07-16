@@ -1,11 +1,14 @@
 # Football Analytics
 Not serious work, just trying some good'ol vibecoding.
 
-Analytics tool for **Serie A** (with **Allsvenskan** on hold), built on free, no-signup data sources.
+Analytics tool for the **big five European leagues** — Serie A, Premier League,
+La Liga, Bundesliga and Ligue 1 — built on free, no-signup data sources. The
+dashboard has a league switcher; every tab (standings, team analytics, players,
+insights) works for all five leagues.
 
-Allsvenskan support is currently commented out — no free advanced-stats source exists
-for it, so the project focuses on Serie A for now. To bring it back, uncomment its
-entry in `fetch_data.py` and remove it from `HIDDEN_LEAGUES` in `build_report.py`.
+Allsvenskan support is on hold — no free advanced-stats source exists for it. To
+bring back its basic data, uncomment its entry in `fetch_data.py` and remove it
+from `HIDDEN_LEAGUES` in `build_report.py`.
 
 ## Quick start
 
@@ -17,23 +20,26 @@ python fetch_understat.py
 python build_report.py
 ```
 
-`fetch_data.py` downloads league tables, results, and fixtures for both leagues and
-stores them in `football.sqlite` (matches are upserted; standings are saved as dated
+`fetch_data.py` downloads league tables, results, and fixtures for all five leagues
+and stores them in `football.sqlite` (matches are upserted; standings are saved as dated
 snapshots, so history accumulates the more often you run it). Matches are fetched
 round by round — the test key truncates the season/recent-results endpoints but
 serves complete rounds — so the whole season lands in the database. The run takes
 a few minutes because the test key allows only ~30 requests/minute. Raw API
 responses are also kept in `data/` for debugging.
 
-`fetch_understat.py` pulls Serie A advanced stats from Understat's public JSON
-endpoint (no signup): per-match team xG/xGA/xPts/PPDA and per-player xG/xA for
-~590 players. Understat only covers the big five leagues plus Russia, so this is
-the Serie A analytics layer — Allsvenskan has no free xG source.
+`fetch_understat.py` pulls advanced stats for all five leagues from Understat's
+public JSON endpoint (no signup, one request per league): per-match team
+xG/xGA/xPts/PPDA and per-player xG/xA for ~2,800 players. Understat only covers
+the big five leagues plus Russia — which is why Allsvenskan (no free xG source)
+stays on hold.
 
 `build_report.py` turns the database into a self-contained `report.html` — open it
 in any browser (vanilla JavaScript, works offline from a double-click). It also
 writes an identical copy to `docs/index.html`, which is committed so the report can
-be served as a web dashboard (see below). It has four tabs:
+be served as a web dashboard (see below). A league switcher at the top flips the
+whole dashboard between the five leagues (deep-linkable by prefixing any link with
+`#lg=Premier_League&…`); below it are four tabs:
 
 - **League** — full standings computed from stored results (rank-trend arrows,
   W/D/L form chips), home/away split table, recent results, upcoming fixtures.
@@ -97,6 +103,8 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
 
 - [x] Store fetched data in SQLite
 - [x] HTML report for viewing the data
+- [x] All five big European leagues with a league switcher (Understat covers
+      them all; TheSportsDB provides results for any league by ID)
 - [ ] Swap in a full-data API for standings (football-data.org — API-Football's
       free plan is stuck on 2022–2024 seasons, see above)
 - [x] xG analytics for Serie A via Understat (xG table, finishing boards, creators)
