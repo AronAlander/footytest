@@ -50,7 +50,8 @@ be served as a web dashboard (see below). It has four tabs:
   engines (xGBuildup/90 leaders with barely any goals or assists), and penalty
   dependence.
 
-Adapts to light/dark mode.
+Every chart and table has a collapsible **"How to read this"** explainer (what the
+metric is, how it's computed, how to interpret it). Adapts to light/dark mode.
 
 ## Web dashboard (GitHub Pages)
 

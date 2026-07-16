@@ -29,46 +29,96 @@ ROLLING_WINDOW = 5  # matches in the rolling xG-difference curves
 
 CSS = """
 :root {
-  --surface: #fcfcfb; --card: #ffffff; --border: #e4e3df;
-  --text-primary: #0b0b0b; --text-secondary: #52514e;
-  --accent: #2a78d6; --win: #0ca30c; --loss: #d03b3b; --draw: #8a8983;
+  --surface: #f7f7f4; --card: #ffffff; --border: #e4e3df;
+  --text-primary: #101010; --text-secondary: #52514e;
+  --accent: #2a78d6; --accent-2: #7c5cff;
+  --win: #0ca30c; --loss: #d03b3b; --draw: #8a8983;
+  --row-hover: #f0f4fa;
+  --shadow: 0 1px 2px rgba(20,20,20,.05), 0 4px 16px rgba(20,20,20,.05);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --surface: #1a1a19; --card: #232322; --border: #3a3936;
+    --surface: #161615; --card: #212120; --border: #3a3936;
     --text-primary: #ffffff; --text-secondary: #c3c2b7;
-    --accent: #3987e5; --draw: #75746e;
+    --accent: #3987e5; --accent-2: #9d86ff; --draw: #75746e;
+    --row-hover: #2a2b2e;
+    --shadow: 0 1px 2px rgba(0,0,0,.5), 0 4px 16px rgba(0,0,0,.35);
   }
 }
 * { box-sizing: border-box; }
 body {
-  margin: 0; padding: 24px; background: var(--surface); color: var(--text-primary);
+  margin: 0; padding: 28px 24px 44px; background: var(--surface); color: var(--text-primary);
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
-.wrap { max-width: 960px; margin: 0 auto; }
-h1 { font-size: 24px; margin: 0 0 4px; }
-h2 { font-size: 19px; margin: 28px 0 12px; }
-h3 { font-size: 14px; margin: 20px 0 8px; color: var(--text-secondary);
-     text-transform: uppercase; letter-spacing: 0.05em; }
+.wrap { max-width: 1000px; margin: 0 auto; }
+h1 {
+  font-size: 30px; letter-spacing: -0.02em; margin: 0 0 4px; width: fit-content;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+}
+.badges { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 0; }
+.badge {
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  border: 1px solid var(--border); background: var(--card);
+  padding: 3px 11px; border-radius: 999px;
+}
+h2 { font-size: 20px; letter-spacing: -0.01em; margin: 26px 0 4px; }
+h3 { font-size: 13px; margin: 0; color: var(--text-primary);
+     text-transform: uppercase; letter-spacing: 0.06em; }
 .meta { color: var(--text-secondary); font-size: 13px; margin: 6px 0 8px; }
 nav.tabs {
-  display: flex; gap: 4px; margin: 18px 0 4px; border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; background: var(--surface); z-index: 5; padding-top: 6px;
+  display: inline-flex; gap: 2px; margin: 20px 0 4px; padding: 4px;
+  position: sticky; top: 10px; z-index: 5;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow);
 }
 nav.tabs button {
-  appearance: none; background: none; border: none; border-bottom: 2px solid transparent;
+  appearance: none; background: none; border: none; border-radius: 8px;
   color: var(--text-secondary); font: inherit; font-size: 14px; font-weight: 600;
-  padding: 8px 14px; cursor: pointer;
+  padding: 8px 16px; cursor: pointer;
 }
-nav.tabs button:hover { color: var(--text-primary); }
-nav.tabs button[aria-selected="true"] {
-  color: var(--text-primary); border-bottom-color: var(--accent);
-}
+nav.tabs button:hover { color: var(--text-primary); background: var(--row-hover); }
+nav.tabs button[aria-selected="true"] { color: #fff; background: var(--accent); }
 .panel[hidden] { display: none; }
+.block { margin: 26px 0 30px; }
+.block-head {
+  display: flex; gap: 8px 14px; align-items: baseline; flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.block-head h3 { flex: 1 1 auto; }
+details.about { font-size: 13px; }
+details.about[open] { flex-basis: 100%; }
+details.about summary {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  list-style: none; user-select: none;
+  font-size: 12px; font-weight: 600; color: var(--accent);
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 12px;
+}
+details.about summary::-webkit-details-marker { display: none; }
+details.about summary::before { content: "ⓘ"; font-size: 13px; }
+details.about summary:hover { border-color: var(--accent); }
+.about-body {
+  margin-top: 10px; padding: 12px 16px; font-size: 13.5px;
+  color: var(--text-secondary); background: var(--card);
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 8px;
+}
+.about-body p { margin: 6px 0; }
+.about-body strong { color: var(--text-primary); }
 .card { background: var(--card); border: 1px solid var(--border);
-        border-radius: 8px; overflow-x: auto; }
+        border-radius: 10px; overflow-x: auto; box-shadow: var(--shadow); }
 .chart-card { background: var(--card); border: 1px solid var(--border);
-              border-radius: 8px; padding: 14px; overflow-x: auto; }
+              border-radius: 10px; padding: 14px; overflow-x: auto;
+              box-shadow: var(--shadow); }
+tbody tr:hover td { background: var(--row-hover); }
+tr.zone-cl td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+tr.zone-rel td:first-child { box-shadow: inset 3px 0 0 var(--loss); }
+.pos { color: var(--win); }
+.neg { color: var(--loss); }
+span.up { color: var(--win); }
+span.down { color: var(--loss); }
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 th, td { padding: 7px 12px; text-align: left; white-space: nowrap; }
 th { font-size: 12px; color: var(--text-secondary); text-transform: uppercase;
@@ -90,7 +140,7 @@ svg text { fill: var(--text-secondary); font: 11px system-ui, sans-serif; }
 svg text.pt-label { fill: var(--text-primary); }
 svg .gridline { stroke: var(--border); stroke-width: 1; }
 svg .zeroline { stroke: var(--text-secondary); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.6; }
-svg .dot { fill: var(--accent); }
+svg .dot { fill: var(--accent); stroke: var(--card); stroke-width: 1.5; }
 svg text.quad { font-style: italic; opacity: 0.8; }
 svg .leader { stroke: var(--text-secondary); stroke-width: 1; opacity: 0.45; }
 svg .curve { stroke: var(--accent); stroke-width: 2; fill: none; }
@@ -120,6 +170,23 @@ footer { margin-top: 32px; font-size: 13px; color: var(--text-secondary); }
 
 def fmt_delta(value, decimals=1):
     return f"{value:+.{decimals}f}".replace("-", "−")
+
+
+def fmt_delta_html(value, decimals=1):
+    """Signed value colored green/red; plain-text fmt_delta stays for SVG titles."""
+    cls = "pos" if value > 0 else "neg" if value < 0 else "dim"
+    return f"<span class='{cls}'>{fmt_delta(value, decimals)}</span>"
+
+
+def block(title, body, about=None):
+    """A titled section; `about` (HTML) becomes a collapsible 'How to read this'."""
+    head = f"<h3>{escape(title)}</h3>"
+    if about:
+        head += (
+            "<details class='about'><summary>How to read this</summary>"
+            f"<div class='about-body'>{about}</div></details>"
+        )
+    return f"<section class='block'><div class='block-head'>{head}</div>{body}</section>"
 
 
 # ---------------------------------------------------------------- standings
@@ -190,9 +257,9 @@ def trend_arrow(change):
     if change is None:
         return "<span class='dim'>–</span>"
     if change > 0:
-        return f"▲{change}"
+        return f"<span class='up'>▲{change}</span>"
     if change < 0:
-        return f"▼{-change}"
+        return f"<span class='down'>▼{-change}</span>"
     return "<span class='dim'>=</span>"
 
 
@@ -211,8 +278,9 @@ def standings_table(db, league):
     body = ""
     for rank, (team, t) in enumerate(table, 1):
         change = previous_rank[team] - rank if team in previous_rank else None
+        zone = " class='zone-cl'" if rank <= 4 else " class='zone-rel'" if rank > len(table) - 3 else ""
         body += (
-            f"<tr><td class='num'>{rank}</td><td>{escape(team)}</td>"
+            f"<tr{zone}><td class='num'>{rank}</td><td>{escape(team)}</td>"
             f"<td class='num'>{t['p']}</td><td class='num'>{t['w']}</td>"
             f"<td class='num'>{t['d']}</td><td class='num'>{t['l']}</td>"
             f"<td class='num'>{t['gf']}–{t['ga']}</td>"
@@ -221,17 +289,25 @@ def standings_table(db, league):
             f"<td class='num'>{trend_arrow(change)}</td>"
             f"<td>{form_chips(team_form(db, league, team))}</td></tr>"
         )
-    return (
+    card = (
         "<div class='card'><table><thead><tr>"
         "<th class='num'>#</th><th>Team</th><th class='num'>P</th>"
         "<th class='num'>W</th><th class='num'>D</th><th class='num'>L</th>"
         "<th class='num'>Goals</th><th class='num'>+/−</th><th class='num'>Pts</th>"
         f"<th class='num'>±{TREND_WINDOW}R</th><th>Form</th>"
         f"</tr></thead><tbody>{body}</tbody></table></div>"
-        f"<p class='meta'>Computed from stored results. ±{TREND_WINDOW}R is the change in "
-        f"league position over the last {TREND_WINDOW} rounds; form shows the last "
-        f"{FORM_WINDOW} matches, oldest to newest.</p>"
     )
+    about = (
+        "<p><strong>What it shows.</strong> The league table, computed from every stored "
+        "result rather than copied from a website — wins are 3 points, draws 1; ties are "
+        "broken by goal difference, then goals scored.</p>"
+        f"<p><strong>The extras.</strong> ±{TREND_WINDOW}R is each team's change in league "
+        f"position over the last {TREND_WINDOW} rounds — a quick read on who is climbing "
+        f"or sliding. The form chips are the last {FORM_WINDOW} results, oldest to newest. "
+        "A blue stripe marks the top four (Champions League places), a red stripe the "
+        "bottom three (relegation).</p>"
+    )
+    return block("Standings", card, about)
 
 
 def home_away_table(db, league):
@@ -249,16 +325,22 @@ def home_away_table(db, league):
             f"<td class='num'>{a['gf']}–{a['ga']}</td><td class='num score'>{a['pts']}</td>"
             f"<td class='num'>{h['pts'] - a['pts']:+d}</td></tr>"
         )
-    return (
-        "<h3>Home / away split</h3>"
+    card = (
         "<div class='card'><table><thead><tr><th>Team</th>"
         "<th class='num'>Home W-D-L</th><th class='num'>Goals</th><th class='num'>Pts</th>"
         "<th class='num'>Away W-D-L</th><th class='num'>Goals</th><th class='num'>Pts</th>"
         "<th class='num'>H−A</th></tr></thead>"
         f"<tbody>{body}</tbody></table></div>"
-        "<p class='meta'>H−A is home points minus away points: high values are "
-        "fortress teams, negative values travel better than they defend home turf.</p>"
     )
+    about = (
+        "<p><strong>What it shows.</strong> Each team's record split by venue, in "
+        "overall-table order. H−A is home points minus away points.</p>"
+        "<p><strong>How to read it.</strong> A big positive H−A is a fortress team that "
+        "leans on its own ground; a value near zero is venue-proof; a negative one — rare — "
+        "actually travels better than it defends home turf. Note each half is only ~19 "
+        "matches, so a swing of a few points can be noise.</p>"
+    )
+    return block("Home / away split", card, about)
 
 
 # ------------------------------------------------------------ matches lists
@@ -308,22 +390,32 @@ def xg_table(db):
         body += (
             f"<tr><td class='num'>{rank}</td><td>{escape(team)}</td>"
             f"<td class='num'>{games}</td><td class='num score'>{pts}</td>"
-            f"<td class='num'>{xpts:.1f}</td><td class='num'>{fmt_delta(luck)}</td>"
+            f"<td class='num'>{xpts:.1f}</td><td class='num'>{fmt_delta_html(luck)}</td>"
             f"<td class='num'>{gf}–{ga}</td><td class='num'>{xg:.1f}</td>"
-            f"<td class='num'>{xga:.1f}</td><td class='num'>{fmt_delta(npxgd)}</td></tr>"
+            f"<td class='num'>{xga:.1f}</td><td class='num'>{fmt_delta_html(npxgd)}</td></tr>"
         )
-    return (
-        "<h3>xG table — results vs expected</h3>"
+    card = (
         "<div class='card'><table><thead><tr>"
         "<th class='num'>#</th><th>Team</th><th class='num'>P</th>"
         "<th class='num'>Pts</th><th class='num'>xPts</th><th class='num'>Pts−xPts</th>"
         "<th class='num'>Goals</th><th class='num'>xG</th><th class='num'>xGA</th>"
         "<th class='num'>npxGD</th>"
         f"</tr></thead><tbody>{body}</tbody></table></div>"
-        "<p class='meta'>Pts−xPts &gt; 0 means the team has taken more points than its "
-        "chances deserved (running hot); npxGD is non-penalty xG difference, the best "
-        "single measure of underlying strength.</p>"
     )
+    about = (
+        "<p><strong>What it shows.</strong> Results next to what the chances say they "
+        "should have been. xG (expected goals) values every shot by how often that kind "
+        "of chance is scored; xPts converts each match's shots into win/draw/loss "
+        "probabilities and sums the expected points.</p>"
+        "<p><strong>How to read it.</strong> Pts−xPts above zero means the team banked "
+        "more points than its chances deserved — running hot on finishing, goalkeeping "
+        "or timing. npxGD is non-penalty xG difference (created minus conceded), widely "
+        "considered the best single number for underlying strength: it predicts future "
+        "results better than points do.</p>"
+        "<p><strong>Caveat.</strong> xG is a model of chance quality, not truth — elite "
+        "finishers beat it consistently, and one season is a small sample.</p>"
+    )
+    return block("xG table — results vs expected", card, about)
 
 
 def nice_ticks(lo, hi, count=5):
@@ -455,20 +547,26 @@ def style_scatter(db):
         (team, ppda, deep, f"{team}: PPDA {ppda:.1f}, deep completions {deep:.1f} per match")
         for team, ppda, deep in rows
     ]
-    return (
-        "<h3>Team style — pressing vs territory</h3>"
-        + scatter_svg(
-            points,
-            "PPDA — passes allowed per defensive action (left = presses harder)",
-            "Deep completions per match", y_dec=0,
-            aria="Scatter plot of pressing intensity against deep completions per team",
-        )
-        + "<p class='meta'>Season averages. Left = allows few opposition passes per "
-        "defensive action (aggressive press); top = completes many passes near the "
-        "opponent box (territorial dominance). Top-left teams press high and pin "
-        "opponents back; bottom-right teams sit deep and go direct. Hover a dot for "
-        "exact values.</p>"
+    chart = scatter_svg(
+        points,
+        "PPDA — passes allowed per defensive action (left = presses harder)",
+        "Deep completions per match", y_dec=0,
+        aria="Scatter plot of pressing intensity against deep completions per team",
     )
+    about = (
+        "<p><strong>What it shows.</strong> Each team's playing identity in two numbers, "
+        "averaged over the season. PPDA (passes per defensive action) counts how many "
+        "passes a team lets the opponent play before making a tackle, interception or "
+        "foul — fewer means a more aggressive press. Deep completions are passes "
+        "completed within roughly 20 metres of the opponent's goal — a proxy for "
+        "sustained territorial dominance.</p>"
+        "<p><strong>How to read it.</strong> Top-left teams press high <em>and</em> pin "
+        "opponents into their own box — the modern dominant style. Bottom-right teams "
+        "sit deep and play direct, ceding the ball and the territory. Neither corner is "
+        "'better' — it's a style map, not a quality ranking. Hover a dot for exact "
+        "values.</p>"
+    )
+    return block("Team style — pressing vs territory", chart, about)
 
 
 def rolling_sparklines(db):
@@ -518,14 +616,19 @@ def rolling_sparklines(db):
             f"<line class='zeroline' x1='0' y1='{h / 2}' x2='{w}' y2='{h / 2}'/>"
             f"<polyline class='curve' points='{points}'/></svg></div>"
         )
-    return (
-        "<h3>Form curves — rolling xG difference</h3>"
-        f"<div class='chart-card'><div class='spark-grid'>{''.join(cells)}</div></div>"
-        f"<p class='meta'>Non-penalty xG difference averaged over the last {ROLLING_WINDOW} "
-        f"matches, across the season (teams in final-table order; all curves share the same "
-        f"scale, ±{max_abs:.1f}). Above the dashed line = creating more than conceding. The "
-        "number is the value at season's end. Hover a curve for its range.</p>"
+    chart = f"<div class='chart-card'><div class='spark-grid'>{''.join(cells)}</div></div>"
+    about = (
+        f"<p><strong>What it shows.</strong> Every team's underlying form across the whole "
+        f"season: non-penalty xG difference averaged over a rolling {ROLLING_WINDOW}-match "
+        f"window. Teams appear in final-table order and all curves share the same scale "
+        f"(±{max_abs:.1f}), so shapes are directly comparable.</p>"
+        "<p><strong>How to read it.</strong> Above the dashed midline = creating more than "
+        "conceding over that stretch. Look for the story in the shape: a title challenge "
+        "that faded, a slow starter that clicked after a coaching change, a relegated team "
+        "that was actually improving. The number after each name is the value in the final "
+        "window; hover a curve for its season range.</p>"
     )
+    return block("Form curves — rolling xG difference", chart, about)
 
 
 # ------------------------------------------------------------- insights tab
@@ -543,24 +646,33 @@ def justice_table(db):
     body = ""
     for xrank, (team, pts, xpts) in enumerate(sorted(rows, key=lambda r: -r[2]), 1):
         moved = xrank - actual_rank[team]  # >0: finished above what chances deserved
+        zone = " class='zone-cl'" if xrank <= 4 else " class='zone-rel'" if xrank > len(rows) - 3 else ""
         body += (
-            f"<tr><td class='num'>{xrank}</td><td>{escape(team)}</td>"
+            f"<tr{zone}><td class='num'>{xrank}</td><td>{escape(team)}</td>"
             f"<td class='num score'>{xpts:.1f}</td><td class='num'>{pts}</td>"
             f"<td class='num'>{actual_rank[team]}</td>"
             f"<td class='num'>{trend_arrow(moved)}</td></tr>"
         )
-    return (
-        "<h3>The justice table — where the chances say you belonged</h3>"
+    card = (
         "<div class='card'><table><thead><tr>"
         "<th class='num'>xPts rank</th><th>Team</th><th class='num'>xPts</th>"
         "<th class='num'>Actual pts</th><th class='num'>Actual rank</th>"
         "<th class='num'>Fortune</th></tr></thead>"
         f"<tbody>{body}</tbody></table></div>"
-        "<p class='meta'>The league re-ranked by expected points (xPts sums each match's "
-        "win/draw probabilities from its chances). ▲ = finished that many places <em>higher</em> "
-        "than the chances deserved (fortunate season); ▼ = the table undersold them — those "
-        "teams are the usual bounce-back candidates next season.</p>"
     )
+    about = (
+        "<p><strong>What it shows.</strong> The league re-ranked by expected points. "
+        "xPts turns each match's chances into win/draw/loss probabilities and sums the "
+        "expected points — so this is the table with finishing luck, deflections and "
+        "goalkeeping heroics stripped out. Stripes mark where the Champions League and "
+        "relegation places <em>would</em> have gone.</p>"
+        "<p><strong>How to read it.</strong> ▲ in the Fortune column means the team "
+        "finished that many places <em>higher</em> in the real table than its chances "
+        "deserved — a fortunate season likely to regress. ▼ means the table undersold "
+        "them; those teams are the classic bounce-back picks for next season, and where "
+        "the value hides in pre-season betting markets and predictions.</p>"
+    )
+    return block("The justice table — where the chances say you belonged", card, about)
 
 
 def fortune_scatter(db):
@@ -577,23 +689,30 @@ def fortune_scatter(db):
          f"conceded {fmt_delta(dfn)} fewer than xGA")
         for team, atk, dfn in rows
     ]
-    return (
-        "<h3>Where the luck lived — finishing vs goalkeeping</h3>"
-        + scatter_svg(
-            points,
-            "Goals scored minus xG (right = clinical finishing)",
-            "xGA minus goals conceded (up = defence beat the model)",
-            aria="Scatter of attacking and defensive over/underperformance per team",
-            x_dec=0, y_dec=0, zero_x=True, zero_y=True,
-            quadrants=("Wasteful attack, heroic defence", "Hot at both ends",
-                       "Cold at both ends", "Clinical attack, leaky defence"),
-        )
-        + "<p class='meta'>Splits each team's season luck into its two components. "
-        "Right of the dashed line = forwards scored more than their chances were worth; "
-        "above it = keeper and defence conceded less than the chances faced. Both axes tend "
-        "to regress to zero — a team deep in the top-right usually can't repeat it, and a "
-        "bottom-left team is better than its results.</p>"
+    chart = scatter_svg(
+        points,
+        "Goals scored minus xG (right = clinical finishing)",
+        "xGA minus goals conceded (up = defence beat the model)",
+        aria="Scatter of attacking and defensive over/underperformance per team",
+        x_dec=0, y_dec=0, zero_x=True, zero_y=True,
+        quadrants=("Wasteful attack, heroic defence", "Hot at both ends",
+                   "Cold at both ends", "Clinical attack, leaky defence"),
     )
+    about = (
+        "<p><strong>What it shows.</strong> Every team's season luck, split into its two "
+        "ingredients. The horizontal axis is finishing: goals scored minus the xG of the "
+        "chances taken. The vertical axis is the defensive mirror: the xG of chances "
+        "faced minus goals actually conceded — beating it means the keeper and defenders "
+        "repelled more than the model expected.</p>"
+        "<p><strong>How to read it.</strong> The dashed lines are 'exactly as expected'. "
+        "A team deep in the top-right corner won its points with hot finishing <em>and</em> "
+        "heroic goalkeeping at once — a combination that history says doesn't repeat. "
+        "A bottom-left team was punished at both ends and is almost certainly better "
+        "than its results. The interesting cases are the off-diagonal ones: a clinical "
+        "attack can mask a genuinely leaky defence in the goal-difference column, and "
+        "this chart un-masks it.</p>"
+    )
+    return block("Where the luck lived — finishing vs goalkeeping", chart, about)
 
 
 def chaos_scatter(db):
@@ -613,22 +732,29 @@ def chaos_scatter(db):
         points.append((team, mean, std,
                        f"{team}: npxGD {fmt_delta(mean, 2)} per match, "
                        f"volatility (std dev) {std:.2f}"))
-    return (
-        "<h3>The chaos index — quality vs volatility</h3>"
-        + scatter_svg(
-            points,
-            "Average non-penalty xG difference per match (right = stronger)",
-            "Match-to-match volatility (std dev of npxGD)",
-            aria="Scatter of average xG difference against its match-to-match volatility per team",
-            x_dec=1, y_dec=1, zero_x=True,
-            quadrants=("Bad and unpredictable", "Strong but streaky",
-                       "Consistently outplayed", "Strong and steady"),
-        )
-        + "<p class='meta'>How good each team's underlying performance was, against how much "
-        "it swung from match to match. Bottom-right is the champion profile (dominant every "
-        "week); top-right teams mix demolitions with no-shows; top-left is the neutral's "
-        "favourite — total chaos.</p>"
+    chart = scatter_svg(
+        points,
+        "Average non-penalty xG difference per match (right = stronger)",
+        "Match-to-match volatility (std dev of npxGD)",
+        aria="Scatter of average xG difference against its match-to-match volatility per team",
+        x_dec=1, y_dec=1, zero_x=True,
+        quadrants=("Bad and unpredictable", "Strong but streaky",
+                   "Consistently outplayed", "Strong and steady"),
     )
+    about = (
+        "<p><strong>What it shows.</strong> Two dimensions of a season that a league "
+        "table can't separate: how good a team's underlying performance was (average "
+        "non-penalty xG difference per match, horizontal) and how wildly it swung from "
+        "week to week (its standard deviation, vertical).</p>"
+        "<p><strong>How to read it.</strong> Bottom-right is the champion profile — "
+        "dominant nearly every week, no drama. Top-right teams mix demolitions with "
+        "inexplicable no-shows; they often underachieve their talent because football "
+        "caps a rout at 3 points. Bottom-left teams are steadily, reliably outplayed. "
+        "Top-left is the neutral's favourite: total chaos, capable of anything on any "
+        "given Sunday. Volatility also hints at squad depth and tactical rigidity — "
+        "thin squads and one-plan teams swing harder.</p>"
+    )
+    return block("The chaos index — quality vs volatility", chart, about)
 
 
 def venue_split_table(db, limit=8):
@@ -646,21 +772,30 @@ def venue_split_table(db, limit=8):
     body = ""
     for team, home, away in shown:
         body += (
-            f"<tr><td>{escape(team)}</td><td class='num'>{fmt_delta(home, 2)}</td>"
-            f"<td class='num'>{fmt_delta(away, 2)}</td>"
-            f"<td class='num score'>{fmt_delta(home - away, 2)}</td></tr>"
+            f"<tr><td>{escape(team)}</td><td class='num'>{fmt_delta_html(home, 2)}</td>"
+            f"<td class='num'>{fmt_delta_html(away, 2)}</td>"
+            f"<td class='num score'>{fmt_delta_html(home - away, 2)}</td></tr>"
         )
-    return (
-        "<h3>Venue dependence — who's a different team on the road</h3>"
+    card = (
         "<div class='card'><table><thead><tr><th>Team</th>"
         "<th class='num'>Home npxGD/match</th><th class='num'>Away npxGD/match</th>"
         "<th class='num'>Home edge</th></tr></thead>"
         f"<tbody>{body}</tbody></table></div>"
-        f"<p class='meta'>The {limit // 2} most home-dependent teams and the {limit // 2} "
-        "most venue-proof ones, by underlying performance (npxGD) rather than results — so "
-        "this isn't luck, it's how differently they actually play. A big home edge suggests "
-        "a style that needs the crowd or the pitch; a negative one is genuinely rare.</p>"
     )
+    about = (
+        f"<p><strong>What it shows.</strong> The {limit // 2} most home-dependent teams "
+        f"and the {limit // 2} most venue-proof ones — measured by underlying performance "
+        "(non-penalty xG difference per match), not results. Results split by venue mix "
+        "in luck; this measures how differently a team actually <em>plays</em> at home "
+        "versus away.</p>"
+        "<p><strong>How to read it.</strong> A big home edge suggests a style that needs "
+        "its own conditions — the crowd's energy for a press, a familiar pitch for a "
+        "passing game — and makes away fixtures against them far more winnable than the "
+        "table implies. A near-zero or negative edge is genuinely rare and marks a "
+        "mentally robust, system-driven side. Useful for match predictions: venue matters "
+        "much more for some teams than others.</p>"
+    )
+    return block("Venue dependence — who's a different team on the road", card, about)
 
 
 def shot_diet_scatter(db, top_shooters=30, min_minutes=900):
@@ -679,23 +814,29 @@ def shot_diet_scatter(db, top_shooters=30, min_minutes=900):
         points.append((name, volume, quality,
                        f"{name} ({team}): {shots} shots ({volume:.1f} per 90), "
                        f"{quality:.2f} npxG per shot, {npg} non-penalty goals"))
-    return (
-        "<h3>Shot diet — volume vs chance quality</h3>"
-        + scatter_svg(
-            points,
-            "Shots per 90 minutes",
-            "npxG per shot (up = better chances)",
-            aria="Scatter of shot volume against average chance quality per player",
-            x_dec=1, y_dec=2,
-            quadrants=("Poacher: rare but golden chances", "The complete diet",
-                       "", "Chancer: shoots from anywhere"),
-        )
-        + f"<p class='meta'>The league's {len(points)} highest-volume shooters "
-        f"(≥{min_minutes} minutes), penalties excluded. Up = waits for high-quality looks "
-        "close to goal; right = shoots constantly. Top-right is the elite-striker profile; "
-        "bottom-right players rack up shots that are worth little each — flashy, "
-        "inefficient. Hover a dot for exact numbers.</p>"
+    chart = scatter_svg(
+        points,
+        "Shots per 90 minutes",
+        "npxG per shot (up = better chances)",
+        aria="Scatter of shot volume against average chance quality per player",
+        x_dec=1, y_dec=2,
+        quadrants=("Poacher: rare but golden chances", "The complete diet",
+                   "", "Chancer: shoots from anywhere"),
     )
+    about = (
+        f"<p><strong>What it shows.</strong> The league's {len(points)} highest-volume "
+        f"shooters (≥{min_minutes} minutes) plotted by how often they shoot (horizontal) "
+        "against the average quality of each attempt (vertical, npxG per shot — "
+        "penalties excluded, since a spot-kick would poison the average).</p>"
+        "<p><strong>How to read it.</strong> A shot worth 0.20 npxG is a one-in-five "
+        "chance, close to goal; a 0.05 shot is a hopeful hit from distance. Top-left "
+        "poachers shoot rarely but only from gold positions. Bottom-right 'chancers' "
+        "rack up flashy shot counts that are worth little each — high highlight-reel "
+        "value, low goal value. Top-right, high volume <em>and</em> high quality, is the "
+        "elite-striker profile and the rarest spot on the chart. Hover a dot for exact "
+        "numbers.</p>"
+    )
+    return block("Shot diet — volume vs chance quality", chart, about)
 
 
 def buildup_table(db, limit=12, min_minutes=1800):
@@ -718,20 +859,27 @@ def buildup_table(db, limit=12, min_minutes=1800):
             f"<td class='num'>{chain * 90 / minutes:.2f}</td>"
             f"<td class='num'>{ga}</td></tr>"
         )
-    return (
-        "<h3>Hidden engines — buildup value without the headlines</h3>"
+    card = (
         "<div class='card'><table><thead><tr>"
         "<th>Player</th><th>Team</th><th>Pos</th><th class='num'>Min</th>"
         "<th class='num'>xGBuildup/90</th><th class='num'>xGChain/90</th>"
         "<th class='num'>G+A</th></tr></thead>"
         f"<tbody>{body}</tbody></table></div>"
-        f"<p class='meta'>xGBuildup credits every player involved in a move that ends in a "
-        f"shot, <em>excluding</em> the shooter and the assister — it measures contribution "
-        f"that never shows up in goals or assists. These are the league's biggest "
-        f"under-credited attack-builders (≥{min_minutes} minutes): note how many are "
-        f"defenders and deep midfielders with almost no G+A. xGChain is the same but "
-        f"includes shots and assists.</p>"
     )
+    about = (
+        "<p><strong>What it shows.</strong> When a move ends in a shot, xGChain credits "
+        "the shot's xG to <em>every</em> player who touched the ball in that possession. "
+        "xGBuildup is the same but excludes the shooter and the assister — leaving only "
+        "the contribution that never appears in any goals or assists column. This table "
+        f"ranks players (≥{min_minutes} minutes) by xGBuildup per 90 minutes.</p>"
+        "<p><strong>How to read it.</strong> These are the league's under-credited "
+        "attack-builders — note how many are defenders and deep midfielders with almost "
+        "no G+A. A player high here is the platform their team's attack stands on; sell "
+        "them and the forwards' numbers mysteriously dry up. This is exactly the kind of "
+        "signal scouting departments pay for, and it's invisible in a normal stats page. "
+        "The G+A column is shown precisely to highlight the gap.</p>"
+    )
+    return block("Hidden engines — buildup value without the headlines", card, about)
 
 
 def penalty_table(db, limit=8):
@@ -752,18 +900,25 @@ def penalty_table(db, limit=8):
             f"<td class='num score'>{pens}</td><td class='num'>{goals}</td>"
             f"<td class='num'>{share:.0f}%</td><td class='num'>{pen_xg:.1f}</td></tr>"
         )
-    return (
-        "<h3>Penalty merchants — goal tallies with an asterisk</h3>"
+    card = (
         "<div class='card'><table><thead><tr>"
         "<th>Player</th><th>Team</th><th class='num'>Pen goals</th>"
         "<th class='num'>Total goals</th><th class='num'>Pen share</th>"
         "<th class='num'>Pen xG</th></tr></thead>"
         f"<tbody>{body}</tbody></table></div>"
-        "<p class='meta'>Penalties are near-automatic (worth ~0.76 xG each), so a scoring "
-        "record built on them says more about who takes the kicks than who creates goals. "
-        "A high pen share is worth knowing before comparing raw goal tallies — and before "
-        "any fantasy-football auction.</p>"
     )
+    about = (
+        "<p><strong>What it shows.</strong> The players whose goal tallies lean most on "
+        "penalties. Pen share is the fraction of their goals scored from the spot; pen xG "
+        "is the expected-goals value of those kicks.</p>"
+        "<p><strong>How to read it.</strong> A penalty is converted about 76% of the time "
+        "regardless of who takes it, so a scoring record built on them says more about "
+        "who <em>holds the ball</em> when the referee points to the spot than about who "
+        "creates goals from open play. Strip the penalties before comparing raw tallies, "
+        "judging a transfer fee, or paying up at a fantasy-football auction — and "
+        "remember penalty duty can vanish overnight with a squad change.</p>"
+    )
+    return block("Penalty merchants — goal tallies with an asterisk", card, about)
 
 
 def insights_panel(db):
@@ -798,7 +953,7 @@ def player_table(rows, value_header):
             f"<tr><td>{escape(name)}</td><td class='dim'>{escape(team)}</td>"
             f"<td class='num'>{minutes}</td><td class='num'>{shots}</td>"
             f"<td class='num'>{goals}</td><td class='num'>{xg:.1f}</td>"
-            f"<td class='num score'>{fmt_delta(diff)}</td></tr>"
+            f"<td class='num score'>{fmt_delta_html(diff)}</td></tr>"
         )
     return (
         "<div class='card'><table><thead><tr>"
@@ -821,7 +976,7 @@ def creators_table(db, limit=8, min_minutes=900):
             f"<tr><td>{escape(name)}</td><td class='dim'>{escape(team)}</td>"
             f"<td class='num'>{minutes}</td><td class='num'>{key_passes}</td>"
             f"<td class='num'>{assists}</td><td class='num'>{xa:.1f}</td>"
-            f"<td class='num score'>{fmt_delta(diff)}</td></tr>"
+            f"<td class='num score'>{fmt_delta_html(diff)}</td></tr>"
         )
     return (
         "<div class='card'><table><thead><tr>"
@@ -854,8 +1009,7 @@ def player_explorer(db):
     team_options = "".join(f"<option>{escape(t)}</option>" for t in teams)
     payload = json.dumps(players, ensure_ascii=False).replace("</", "<\\/")
 
-    return (
-        "<h3>Player explorer</h3>"
+    body = (
         "<div class='controls'>"
         "<input type='search' id='pe-search' placeholder='Search player or team…'>"
         f"<select id='pe-team'><option value=''>All teams</option>{team_options}</select>"
@@ -868,11 +1022,23 @@ def player_explorer(db):
         "</div>"
         "<div class='card'><table id='player-table'><thead><tr></tr></thead>"
         "<tbody></tbody></table></div>"
-        "<p class='meta'>Every player Understat tracks this season. Click a column "
-        "header to sort; “per 90” converts volume stats to per-90-minute rates "
-        "(players under 270 minutes are hidden in that mode to avoid tiny-sample noise).</p>"
         f"<script>const PLAYERS = {payload};</script>"
     )
+    about = (
+        f"<p><strong>What it shows.</strong> Every player Understat tracks this season "
+        f"({len(players)}). Search by name or club, filter by position and minutes, and "
+        "click any column header to sort (click again to flip direction).</p>"
+        "<p><strong>The columns.</strong> xG and xA are expected goals and expected "
+        "assists — the value of the chances a player took or created. G−xG above zero "
+        "means finishing better than the chances deserved; A−xA above zero means "
+        "teammates converted the chances generously. KP is key passes (passes leading "
+        "directly to a shot), npxG strips out penalties.</p>"
+        "<p><strong>Per 90.</strong> The toggle converts volume stats to per-90-minute "
+        "rates, which makes part-time players comparable to ever-presents — players "
+        "under 270 minutes are hidden in that mode to avoid tiny-sample noise. Players "
+        "transferred mid-season show both clubs, comma-separated.</p>"
+    )
+    return block("Player explorer", body, about)
 
 
 EXPLORER_JS = """
@@ -994,10 +1160,10 @@ EXPLORER_JS = """
 def league_section(db, league):
     return (
         f"<h2>{escape(league)}</h2>"
-        "<h3>Standings</h3>" + standings_table(db, league)
+        + standings_table(db, league)
         + home_away_table(db, league)
-        + "<h3>Recent results</h3>" + matches_table(db, league, finished=True)
-        + "<h3>Upcoming fixtures</h3>" + matches_table(db, league, finished=False)
+        + block("Recent results", matches_table(db, league, finished=True))
+        + block("Upcoming fixtures", matches_table(db, league, finished=False))
     )
 
 
@@ -1023,18 +1189,40 @@ def teams_panel(db):
 
 
 def players_panel(db):
+    finishing_about = (
+        "<p><strong>What it shows.</strong> The players (≥900 minutes) whose goal tallies "
+        "differ most from the value of their chances. G−xG is goals scored minus expected "
+        "goals: far above zero means converting chances an average finisher would miss.</p>"
+        "<p><strong>How to read it.</strong> A single hot season can be luck; players who "
+        "beat their xG year after year are genuinely elite finishers. Check the shots "
+        "column too — a big overshoot on few shots is far flukier than the same overshoot "
+        "on a hundred.</p>"
+    )
+    wasteful_about = (
+        "<p><strong>What it shows.</strong> The other end of the list — players "
+        "(≥900 minutes) who scored the fewest goals relative to the chances they had.</p>"
+        "<p><strong>How to read it.</strong> This is not simply a wall of shame: a player "
+        "here with a high xG is still <em>getting into</em> great positions, which is the "
+        "hard part — finishing tends to bounce back. A player with low xG <em>and</em> a "
+        "big negative gap has a real problem.</p>"
+    )
+    creators_about = (
+        "<p><strong>What it shows.</strong> The league's best chance creators "
+        "(≥900 minutes), ranked by expected assists — the probability that the shots "
+        "their passes created would be scored.</p>"
+        "<p><strong>How to read it.</strong> xA measures the quality of the chance "
+        "served, independent of whether the teammate buried it. A−xA below zero means "
+        "the creator was let down by finishing; above zero means teammates converted "
+        "generously. xA is the fairer ranking of creativity than raw assists.</p>"
+    )
     return (
         f"<h2>Players <span class='dim'>({season_label(db)}, Understat)</span></h2>"
         + player_explorer(db)
-        + "<h3>Clinical finishers — most goals above xG</h3>"
-        + player_table(finishing_rows(db, "DESC"), "G−xG")
-        + "<h3>Wasteful in front of goal — most goals below xG</h3>"
-        + player_table(finishing_rows(db, "ASC"), "G−xG")
-        + "<h3>Top creators by expected assists</h3>"
-        + creators_table(db)
-        + "<p class='meta'>Boards show players with at least 900 minutes. xG = expected "
-        "goals from chance quality; a striker far above xG is finishing exceptionally "
-        "(or running hot), far below is missing good chances. xA is the same for passes.</p>"
+        + block("Clinical finishers — most goals above xG",
+                player_table(finishing_rows(db, "DESC"), "G−xG"), finishing_about)
+        + block("Wasteful in front of goal — most goals below xG",
+                player_table(finishing_rows(db, "ASC"), "G−xG"), wasteful_about)
+        + block("Top creators by expected assists", creators_table(db), creators_about)
     )
 
 
@@ -1065,12 +1253,17 @@ def main() -> None:
         for i, (pid, _, content) in enumerate(panels)
     )
 
+    badges = "".join(
+        f"<span class='badge'>{escape(text)}</span>"
+        for text in ([f"{lg} {season_label(db)}".strip() for lg in leagues]
+                     + ["TheSportsDB + Understat", f"Generated {generated}"])
+    )
     html = (
         f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         f"<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        f"<title>Football report</title><style>{CSS}</style></head><body><div class='wrap'>"
-        f"<h1>Football report</h1>"
-        f"<p class='meta'>Generated {generated} · data from TheSportsDB and Understat</p>"
+        f"<title>Football dashboard</title><style>{CSS}</style></head><body><div class='wrap'>"
+        f"<header class='hero'><h1>Football dashboard</h1>"
+        f"<div class='badges'>{badges}</div></header>"
         + tab_bar + panel_html
         + "<footer>Standings are computed from the stored results. Run "
         "<code>python fetch_data.py</code> and <code>python fetch_understat.py</code> "
