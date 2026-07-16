@@ -92,6 +92,7 @@ svg .gridline { stroke: var(--border); stroke-width: 1; }
 svg .zeroline { stroke: var(--text-secondary); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.6; }
 svg .dot { fill: var(--accent); }
 svg text.quad { font-style: italic; opacity: 0.8; }
+svg .leader { stroke: var(--text-secondary); stroke-width: 1; opacity: 0.45; }
 svg .curve { stroke: var(--accent); stroke-width: 2; fill: none; }
 .spark-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
               gap: 12px 18px; }
@@ -389,19 +390,52 @@ def scatter_svg(points, x_label, y_label, aria, x_dec=1, y_dec=1,
     parts.append(f"<text x='14' y='{mt + plot_h / 2:.0f}' text-anchor='middle' "
                  f"transform='rotate(-90 14 {mt + plot_h / 2:.0f})'>{escape(y_label)}</text>")
 
-    # naive label collision avoidance: nudge labels that land too close
-    placed = []
+    # label placement: try right / left / above / below of the dot; if every
+    # spot is taken, slide the label away and tie it to the dot with a leader line
+    def overlaps(a, b):
+        return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
+
+    boxes = [(px(p[1]) - 7, py(p[2]) - 7, px(p[1]) + 7, py(p[2]) + 7) for p in points]
     for label, vx, vy, hover in sorted(points, key=lambda p: (py(p[2]), px(p[1]))):
         x, y = px(vx), py(vy)
-        label_y = y + 4
-        while any(abs(label_y - oy) < 13 and abs(x - ox) < 105 for ox, oy in placed):
-            label_y += 13
-        placed.append((x, label_y))
+        w = 6.2 * len(label)  # rough 11px system-ui width
+        candidates = (
+            ("start", x + 9, y + 4, (x + 8, y - 7, x + 10 + w, y + 6)),
+            ("end", x - 9, y + 4, (x - 10 - w, y - 7, x - 8, y + 6)),
+            ("middle", x, y - 10, (x - w / 2, y - 21, x + w / 2, y - 8)),
+            ("middle", x, y + 17, (x - w / 2, y + 7, x + w / 2, y + 20)),
+        )
+        chosen = None
+        for anchor, tx, ty, box in candidates:
+            if box[0] < 2 or box[2] > width - 2 or box[1] < mt - 2 or box[3] > mt + plot_h + 12:
+                continue
+            if not any(overlaps(box, b) for b in boxes):
+                chosen = (anchor, tx, ty, box, None)
+                break
+        if chosen is None:
+            # slide diagonally away from the dot until a free spot appears
+            fits_right = x + 14 + w <= width - 2
+            dx, anchor = (13, "start") if fits_right else (-13, "end")
+            ty = y + 17
+            while True:
+                tx = x + dx
+                box = (tx - 1, ty - 11, tx + 2 + w, ty + 2) if dx > 0 else (tx - 2 - w, ty - 11, tx + 1, ty + 2)
+                if not any(overlaps(box, b) for b in boxes):
+                    break
+                ty += 13
+            leader = (x, y, x + (11 if dx > 0 else -11), ty - 4)
+            chosen = (anchor, tx, ty, box, leader)
+        anchor, tx, ty, box, leader = chosen
+        boxes.append(box)
+        if leader:
+            parts.append(f"<line class='leader' x1='{leader[0]:.0f}' y1='{leader[1]:.0f}' "
+                         f"x2='{leader[2]:.0f}' y2='{leader[3]:.0f}'/>")
         parts.append(
             f"<circle class='dot' cx='{x:.0f}' cy='{y:.0f}' r='5'>"
             f"<title>{escape(hover)}</title></circle>"
         )
-        parts.append(f"<text class='pt-label' x='{x + 9:.0f}' y='{label_y:.0f}'>{escape(label)}</text>")
+        parts.append(f"<text class='pt-label' x='{tx:.0f}' y='{ty:.0f}' "
+                     f"text-anchor='{anchor}'>{escape(label)}</text>")
 
     return (
         "<div class='chart-card'>"
