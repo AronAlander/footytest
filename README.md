@@ -58,7 +58,10 @@ be served as a web dashboard (see below). It has four tabs:
   dependence.
 
 Every chart and table has a collapsible **"How to read this"** explainer (what the
-metric is, how it's computed, how to interpret it). Adapts to light/dark mode.
+metric is, how it's computed, how to interpret it), and each analytics tab opens
+with a collapsible **metric glossary** defining every abbreviation (xG, npxG,
+xGBuildup, PPDA, deep completions, xPts…) in plain language; abbreviated column
+headers also carry hover tooltips. Adapts to light/dark mode.
 
 ## Web dashboard (GitHub Pages)
 

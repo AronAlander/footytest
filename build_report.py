@@ -50,7 +50,7 @@ body {
   margin: 0; padding: 28px 24px 44px; background: var(--surface); color: var(--text-primary);
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
-.wrap { max-width: 1000px; margin: 0 auto; }
+.wrap { max-width: 1240px; margin: 0 auto; }
 h1 {
   font-size: 30px; letter-spacing: -0.02em; margin: 0 0 4px; width: fit-content;
   background: linear-gradient(90deg, var(--accent), var(--accent-2));
@@ -223,6 +223,29 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 #player-table th.sortable { cursor: pointer; user-select: none; }
 #player-table th.sortable:hover { color: var(--text-primary); }
 #player-table th .arrow { font-size: 10px; }
+#player-table th, #player-table td { padding: 6px 8px; }
+#player-table td { font-size: 13.5px; }
+#player-table th[title] { cursor: help; }
+#player-table th.sortable[title] { cursor: pointer; }
+details.glossary {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--shadow);
+  margin: 14px 0 4px; padding: 0;
+}
+details.glossary summary {
+  cursor: pointer; user-select: none; list-style: none;
+  padding: 10px 16px; font-size: 13px; font-weight: 600; color: var(--accent);
+}
+details.glossary summary::-webkit-details-marker { display: none; }
+details.glossary summary::before { content: "📖 "; }
+details.glossary[open] summary { border-bottom: 1px solid var(--border); }
+.gl-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 10px 28px; margin: 0; padding: 14px 16px 16px;
+}
+.gl-grid > div { font-size: 13px; }
+.gl-grid dt { font-weight: 700; color: var(--text-primary); }
+.gl-grid dd { margin: 1px 0 0; color: var(--text-secondary); }
 footer { margin-top: 32px; font-size: 13px; color: var(--text-secondary); }
 """
 
@@ -984,6 +1007,7 @@ def insights_panel(db):
     return (
         f"<h2>Insights <span class='dim'>({season_label(db)}, Understat)</span></h2>"
         "<p class='meta'>Second-order reads of the xG data: what the raw tables hide.</p>"
+        + metric_glossary()
         + justice_table(db)
         + fortune_scatter(db)
         + chaos_scatter(db)
@@ -1132,9 +1156,12 @@ def player_compare(players):
     )
     about = (
         "<p><strong>What it shows.</strong> Up to three players overlaid on a radar of "
-        "six per-90 attacking dimensions — npxG (shot value), xA (chance creation), "
-        "shots, key passes, xGChain (involvement in scoring moves) and xGBuildup "
-        "(deep-lying contribution). Each axis is the player's <em>percentile</em> among "
+        "six per-90 attacking dimensions — non-penalty expected goals (npxG: the value "
+        "of the shots taken, penalties excluded), expected assists (xA: the value of "
+        "the chances created), shots, key passes (passes leading to a shot), xGChain "
+        "(involvement anywhere in a scoring move) and xGBuildup (build-up play only, "
+        "shots and assists excluded — see the glossary at the top of this tab). "
+        "Each axis is the player's <em>percentile</em> among "
         "players of the same position with 450+ minutes, so a defender isn't drowned by "
         "striker numbers; the table below gives the exact per-90 rates.</p>"
         "<p><strong>How to read it.</strong> The bigger the shape, the more complete the "
@@ -1214,18 +1241,18 @@ EXPLORER_JS = """
     { key: 'team',    label: 'Team' },
     { key: 'pos',     label: 'Pos' },
     { key: 'min',     label: 'Min',   num: true },
-    { key: 'games',   label: 'Apps',  num: true },
+    { key: 'games',   label: 'Apps',  num: true, full: 'Appearances' },
     { key: 'goals',   label: 'Goals', num: true, per90: true },
-    { key: 'xg',      label: 'xG',    num: true, per90: true, dec: 1 },
-    { key: 'gdiff',   label: 'G−xG',  num: true, dec: 1, signed: true },
-    { key: 'assists', label: 'A',     num: true, per90: true },
-    { key: 'xa',      label: 'xA',    num: true, per90: true, dec: 1 },
-    { key: 'adiff',   label: 'A−xA',  num: true, dec: 1, signed: true },
+    { key: 'xg',      label: 'xG',    num: true, per90: true, dec: 1, full: 'Expected goals \\u2014 the quality of the chances taken' },
+    { key: 'gdiff',   label: 'G−xG',  num: true, dec: 1, signed: true, full: 'Goals minus expected goals \\u2014 finishing above (+) or below (\\u2212) the chances' },
+    { key: 'assists', label: 'A',     num: true, per90: true, full: 'Assists' },
+    { key: 'xa',      label: 'xA',    num: true, per90: true, dec: 1, full: 'Expected assists \\u2014 the quality of the chances created for teammates' },
+    { key: 'adiff',   label: 'A−xA',  num: true, dec: 1, signed: true, full: 'Assists minus expected assists \\u2014 teammates finished generously (+) or wastefully (\\u2212)' },
     { key: 'shots',   label: 'Shots', num: true, per90: true },
-    { key: 'kp',      label: 'KP',    num: true, per90: true },
-    { key: 'npxg',    label: 'npxG',  num: true, per90: true, dec: 1 },
-    { key: 'chain',   label: 'xGCh',  num: true, per90: true, dec: 1 },
-    { key: 'buildup', label: 'xGB',   num: true, per90: true, dec: 1 }
+    { key: 'kp',      label: 'KP',    num: true, per90: true, full: 'Key passes \\u2014 passes leading directly to a shot' },
+    { key: 'npxg',    label: 'npxG',  num: true, per90: true, dec: 1, full: 'Non-penalty expected goals \\u2014 xG with penalties stripped out' },
+    { key: 'chain',   label: 'xGCh',  num: true, per90: true, dec: 1, full: 'xGChain \\u2014 xG of every attacking move the player touched' },
+    { key: 'buildup', label: 'xGB',   num: true, per90: true, dec: 1, full: 'xGBuildup \\u2014 xGChain minus shots and assist passes: pure build-up play' }
   ];
   const state = { sortKey: 'xg', sortDir: -1, per90: false };
   const $ = (id) => document.getElementById(id);
@@ -1253,8 +1280,9 @@ EXPLORER_JS = """
   function buildHeader() {
     thead.innerHTML = COLS.map((col) => {
       const arrow = col.key === state.sortKey ? (state.sortDir < 0 ? ' ▾' : ' ▴') : '';
+      const tip = col.full ? " title=\\"" + col.full + "\\"" : '';
       return "<th class='sortable" + (col.num ? " num" : "") + "' data-key='" + col.key +
-             "'>" + col.label + "<span class='arrow'>" + arrow + "</span></th>";
+             "'" + tip + ">" + col.label + "<span class='arrow'>" + arrow + "</span></th>";
     }).join('');
   }
 
@@ -1626,9 +1654,70 @@ def season_label(db):
     return f"{season}/{int(season) % 100 + 1}" if season else ""
 
 
+GLOSSARY = [
+    ("xG — expected goals",
+     "How good a team's or player's chances were. Every shot gets a value between 0 "
+     "and 1: the probability that an average player scores from that spot and "
+     "situation. A tap-in is ~0.9, a hopeful 30-metre hit ~0.02. Add them up and you "
+     "get how many goals the chances “should” have produced."),
+    ("xA — expected assists",
+     "The same idea for passing: the xG of the shot a pass created. A player who "
+     "keeps serving up big chances gets a high xA even if teammates keep missing "
+     "them."),
+    ("npxG / npg — non-penalty xG and goals",
+     "xG and goals with penalties removed. A penalty is worth ~0.76 xG no matter who "
+     "wins it, so stripping them out shows how much a player or team creates from "
+     "open play."),
+    ("G−xG — finishing",
+     "Goals scored minus expected goals. Above zero: converting chances an average "
+     "finisher would miss. Below zero: missing chances that usually go in. Tends to "
+     "swing back toward zero over time."),
+    ("KP — key passes",
+     "Passes that led directly to a shot, whether or not it went in. Raw creativity "
+     "volume, where xA measures the quality of what was created."),
+    ("xGChain (xGCh)",
+     "Credit for being anywhere in a move that ended in a shot: the full xG of the "
+     "chance is credited to every player who touched the ball in the build-up. "
+     "Rewards involvement, not just the final pass or shot."),
+    ("xGBuildup (xGB)",
+     "xGChain minus the shot and the assist pass. What's left is pure build-up play "
+     "— deep-lying passers and defenders who start attacks score high here even "
+     "with zero goals and assists."),
+    ("PPDA — pressing intensity",
+     "Opponent passes allowed per defensive action in their half. Counter-intuitive "
+     "direction: a LOW number means an aggressive press (the opponent barely gets "
+     "10 passes before being tackled), a high number means the team sits back."),
+    ("Deep completions",
+     "Passes received within roughly 20 metres of the opponent's goal (crosses "
+     "excluded). A good measure of sustained territory and box presence."),
+    ("xPts — expected points",
+     "How many points a match “should” have given based on both teams' chances: "
+     "the chance quality is converted into win/draw/loss probabilities and summed "
+     "over the season. A team far above its xPts has been winning tight or lucky "
+     "games."),
+    ("npxGD — underlying dominance",
+     "Non-penalty xG created minus non-penalty xG conceded, per match. The single "
+     "best summary of how well a team actually played, ignoring finishing luck at "
+     "both ends."),
+]
+
+
+def metric_glossary():
+    items = "".join(
+        f"<div><dt>{term}</dt><dd>{definition}</dd></div>"
+        for term, definition in GLOSSARY
+    )
+    return (
+        "<details class='glossary'><summary>Metric glossary — what xG, npxG, "
+        "xGBuildup, PPDA and friends actually mean</summary>"
+        f"<dl class='gl-grid'>{items}</dl></details>"
+    )
+
+
 def teams_panel(db):
     return (
         f"<h2>Team analytics <span class='dim'>({season_label(db)}, Understat)</span></h2>"
+        + metric_glossary()
         + xg_table(db) + team_compare(load_teams(db))
         + style_scatter(db) + rolling_sparklines(db)
     )
@@ -1664,6 +1753,7 @@ def players_panel(db):
     players = load_players(db)
     return (
         f"<h2>Players <span class='dim'>({season_label(db)}, Understat)</span></h2>"
+        + metric_glossary()
         + player_explorer(players)
         + player_compare(players)
         + block("Clinical finishers — most goals above xG",
