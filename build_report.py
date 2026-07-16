@@ -1111,8 +1111,10 @@ def player_explorer(players):
 def player_compare(players):
     if not players:
         return ""
+    # both name and team go in the value: Chromium's dropdown displays option
+    # inner text as the primary line, which showed only the team name
     options = "".join(
-        f"<option value=\"{escape(p['name'])}\">{escape(p['team'])}</option>"
+        f"<option value=\"{escape(p['name'])} — {escape(p['team'])}\"></option>"
         for p in players
     )
     inputs = "".join(
@@ -1300,7 +1302,12 @@ EXPLORER_JS = """
     return n + (s[(v - 20) % 10] || s[v] || s[0]);
   }
   const signed = (v) => (v > 0 ? '+' : '') + v.toFixed(1).replace('-', '\\u2212');
-  const byName = (name) => PLAYERS.find((q) => q.name === name);
+  const byName = (raw) => {
+    const s = String(raw || '').trim();
+    // accept both "Name" and the datalist's "Name — Team" form
+    return PLAYERS.find((q) => q.name === s) ||
+           PLAYERS.find((q) => q.name === s.split(' \\u2014 ')[0].trim());
+  };
 
   /* ---- profile card ---- */
   const overlay = $('pd-overlay');
