@@ -167,12 +167,24 @@ svg .zeroline { stroke: var(--text-secondary); stroke-width: 1; stroke-dasharray
 svg .dot { fill: var(--accent); stroke: var(--card); stroke-width: 1.5; }
 svg text.quad { font-style: italic; opacity: 0.8; }
 svg .leader { stroke: var(--text-secondary); stroke-width: 1; opacity: 0.45; }
-svg .curve { stroke: var(--accent); stroke-width: 2; fill: none; }
-.spark-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
-              gap: 12px 18px; }
-.spark .name { font-size: 12px; margin: 0 0 2px; color: var(--text-primary);
+.spark-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+              gap: 14px 22px; }
+.spark svg { display: block; overflow: visible; }
+.spark .name { font-size: 12.5px; margin: 0 0 3px; color: var(--text-primary);
                white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.spark .val { font-size: 11px; color: var(--text-secondary); margin-left: 4px; }
+.spark .rank { color: var(--text-secondary); font-weight: 600; font-size: 11px; }
+.spark .val { font-size: 11.5px; font-weight: 600; color: var(--text-secondary);
+              margin-left: 5px; font-variant-numeric: tabular-nums; }
+.spark .val.pos { color: var(--win); }
+.spark .val.neg { color: var(--loss); }
+.spark-legend { font-size: 12.5px; color: var(--text-secondary); margin: 0 2px 14px; }
+svg .spark-area.up { fill: var(--win); opacity: .16; }
+svg .spark-area.down { fill: var(--loss); opacity: .16; }
+svg .spark-line { fill: none; stroke-width: 1.8; }
+svg .spark-line.up { stroke: var(--win); }
+svg .spark-line.down { stroke: var(--loss); }
+svg .spark-dot.up { fill: var(--win); }
+svg .spark-dot.down { fill: var(--loss); }
 .controls {
   display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0;
 }
@@ -719,38 +731,62 @@ def rolling_sparklines(db):
         "SELECT team FROM understat_team_matches GROUP BY team ORDER BY SUM(pts) DESC"
     ) if r[0] in rolling]
 
-    w, h = 158, 46
+    n_matches = max(len(v) for v in series.values())
+    w, h = 220, 64
+    mid = h / 2
+    amp = mid - 6
     cells = []
-    for team in order:
+    for idx, team in enumerate(order):
         values = rolling[team]
         step = w / (len(values) - 1)
-        points = " ".join(
-            f"{i * step:.1f},{h / 2 - (v / max_abs) * (h / 2 - 3):.1f}"
-            for i, v in enumerate(values)
-        )
+        pts = [(i * step, mid - (v / max_abs) * amp) for i, v in enumerate(values)]
+        points = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+        area = f"0,{mid:.1f} {points} {w},{mid:.1f}"
         last = values[-1]
+        sign = "up" if last >= 0 else "down"
+        val_cls = "pos" if last > 0 else "neg" if last < 0 else "dim"
         cells.append(
-            f"<div class='spark'><p class='name'>{escape(team)}"
-            f"<span class='val'>{fmt_delta(last, 2)}</span></p>"
+            f"<div class='spark'><p class='name'><span class='rank'>{idx + 1}</span> "
+            f"{escape(team)}<span class='val {val_cls}'>{fmt_delta(last, 2)}</span></p>"
             f"<svg viewBox='0 0 {w} {h}' width='100%' role='img' "
             f"aria-label='{escape(team)} rolling xG difference'>"
             f"<title>{escape(team)}: rolling {ROLLING_WINDOW}-match npxGD, "
             f"season range {fmt_delta(min(values), 2)} to {fmt_delta(max(values), 2)}, "
             f"latest {fmt_delta(last, 2)}</title>"
-            f"<line class='zeroline' x1='0' y1='{h / 2}' x2='{w}' y2='{h / 2}'/>"
-            f"<polyline class='curve' points='{points}'/></svg></div>"
+            f"<defs>"
+            f"<clipPath id='sp{idx}t'><rect x='-4' y='-4' width='{w + 8}' height='{mid + 4}'/></clipPath>"
+            f"<clipPath id='sp{idx}b'><rect x='-4' y='{mid}' width='{w + 8}' height='{mid + 4}'/></clipPath>"
+            f"</defs>"
+            f"<line class='gridline' x1='{w / 2}' y1='2' x2='{w / 2}' y2='{h - 2}'/>"
+            f"<polygon class='spark-area up' points='{area}' clip-path='url(#sp{idx}t)'/>"
+            f"<polygon class='spark-area down' points='{area}' clip-path='url(#sp{idx}b)'/>"
+            f"<line class='zeroline' x1='0' y1='{mid}' x2='{w}' y2='{mid}'/>"
+            f"<polyline class='spark-line up' points='{points}' clip-path='url(#sp{idx}t)'/>"
+            f"<polyline class='spark-line down' points='{points}' clip-path='url(#sp{idx}b)'/>"
+            f"<circle class='spark-dot {sign}' cx='{pts[-1][0]:.1f}' cy='{pts[-1][1]:.1f}' r='3'/>"
+            "</svg></div>"
         )
-    chart = f"<div class='chart-card'><div class='spark-grid'>{''.join(cells)}</div></div>"
+    legend = (
+        f"<p class='spark-legend'>One panel per team, final-table order · each runs "
+        f"matchday {ROLLING_WINDOW} → {n_matches}, the faint vertical line is "
+        f"mid-season · <span class='pos'>green above zero</span> = out-creating "
+        f"opponents, <span class='neg'>red below</span> = out-created · all panels "
+        f"share the same ±{max_abs:.1f} scale · dot and number = latest "
+        f"{ROLLING_WINDOW}-match window</p>"
+    )
+    chart = f"<div class='chart-card'>{legend}<div class='spark-grid'>{''.join(cells)}</div></div>"
     about = (
         f"<p><strong>What it shows.</strong> Every team's underlying form across the whole "
-        f"season: non-penalty xG difference averaged over a rolling {ROLLING_WINDOW}-match "
-        f"window. Teams appear in final-table order and all curves share the same scale "
+        f"season: non-penalty xG difference (chances created minus chances conceded, "
+        f"penalties excluded) averaged over a rolling {ROLLING_WINDOW}-match window. Teams "
+        f"appear in final-table order and all curves share the same scale "
         f"(±{max_abs:.1f}), so shapes are directly comparable.</p>"
-        "<p><strong>How to read it.</strong> Above the dashed midline = creating more than "
-        "conceding over that stretch. Look for the story in the shape: a title challenge "
-        "that faded, a slow starter that clicked after a coaching change, a relegated team "
-        "that was actually improving. The number after each name is the value in the final "
-        "window; hover a curve for its season range.</p>"
+        "<p><strong>How to read it.</strong> Green stretches above the line are periods of "
+        "outplaying opponents; red dips below are periods of being outplayed. Look for the "
+        "story in the shape: a title challenge that faded after mid-season, a slow starter "
+        "that clicked after a coaching change, a relegated team that was actually "
+        "improving. The number after each name is the latest value; hover a curve for its "
+        "season range.</p>"
     )
     return block("Form curves — rolling xG difference", chart, about)
 
