@@ -41,8 +41,11 @@ be served as a web dashboard (see below). It has four tabs:
   scatter (PPDA against deep completions), rolling xG-difference form curves.
 - **Players** — an explorer over every tracked player (~590): search, team /
   position / minutes filters, a per-90 toggle, and click-to-sort columns for
-  goals, xG, G−xG, assists, xA, shots, key passes and more — plus curated boards
-  for clinical/wasteful finishers and top creators.
+  goals, xG, G−xG, assists, xA, shots, key passes, xGChain, xGBuildup and more.
+  Click any row for a profile card with season totals and per-90 percentile bars
+  vs same-position peers; a comparison block overlays up to three players on a
+  percentile radar (deep-linkable via `#player=Name` / `#compare=A,B,C`). Plus
+  curated boards for clinical/wasteful finishers and top creators.
 - **Insights** — second-order reads of the xG data: the justice table (league
   re-ranked by expected points), finishing-vs-goalkeeping luck quadrants, a
   quality-vs-volatility "chaos index", home/away venue dependence by underlying

@@ -12,6 +12,7 @@ Usage:
 """
 
 import gzip
+import html
 import json
 import sqlite3
 import urllib.request
@@ -109,7 +110,9 @@ def main() -> None:
             "INSERT OR REPLACE INTO understat_players VALUES "
             "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                SEASON, p["id"], p.get("player_name"), p.get("team_title"),
+                # some names arrive entity-encoded ("M&#039;Bala Nzola")
+                SEASON, p["id"], html.unescape(p.get("player_name") or ""),
+                html.unescape(p.get("team_title") or ""),
                 p.get("position"), int(p.get("games") or 0), int(p.get("time") or 0),
                 int(p.get("goals") or 0), float(p.get("xG") or 0),
                 int(p.get("assists") or 0), float(p.get("xA") or 0),

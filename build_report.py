@@ -12,7 +12,7 @@ JavaScript for tabs and the player explorer (works offline from file://).
 import json
 import sqlite3
 from datetime import date, datetime
-from html import escape
+from html import escape, unescape
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parent
@@ -159,8 +159,67 @@ svg .curve { stroke: var(--accent); stroke-width: 2; fill: none; }
 }
 .controls input[type="search"] { width: 200px; }
 .controls input[type="number"] { width: 84px; }
+.controls input[list] { width: 180px; }
 .controls label { font-size: 13px; color: var(--text-secondary); }
 .controls .count { margin-left: auto; font-size: 13px; color: var(--text-secondary); }
+.controls button {
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--accent);
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 12px; cursor: pointer;
+}
+.controls button:hover { border-color: var(--accent); }
+#player-table tbody tr { cursor: pointer; }
+#pd-overlay {
+  position: fixed; inset: 0; background: rgba(10,10,10,.55); z-index: 30;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 48px 16px; overflow: auto;
+}
+#pd-overlay[hidden] { display: none; }
+#pd-modal {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: var(--shadow); width: 100%; max-width: 560px; padding: 18px 22px 20px;
+}
+.pd-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.pd-head h4 { margin: 0; font-size: 19px; }
+#pd-close {
+  appearance: none; background: none; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text-secondary); font-size: 14px; padding: 4px 10px; cursor: pointer;
+}
+#pd-close:hover { color: var(--text-primary); border-color: var(--accent); }
+.pd-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+             gap: 8px; margin: 14px 0 6px; }
+.pd-totals > div { background: var(--surface); border: 1px solid var(--border);
+                   border-radius: 8px; padding: 8px 6px; text-align: center; }
+.pd-tv { display: block; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pd-tl { font-size: 10.5px; color: var(--text-secondary); text-transform: uppercase;
+         letter-spacing: 0.04em; }
+.pd-row { display: flex; align-items: center; gap: 10px; margin: 7px 0; }
+.pd-label { flex: 0 0 112px; font-size: 12.5px; color: var(--text-secondary); text-align: right; }
+.pd-track { flex: 1; height: 10px; border-radius: 5px; background: var(--surface);
+            border: 1px solid var(--border); overflow: hidden; }
+.pd-fill { height: 100%; border-radius: 5px; }
+.pd-fill.hi { background: var(--win); }
+.pd-fill.mid { background: var(--accent); }
+.pd-fill.lo { background: var(--loss); }
+.pd-val { flex: 0 0 96px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.pd-val em { color: var(--text-secondary); font-style: normal; font-size: 11px; }
+#pd-compare {
+  margin-top: 14px; font: inherit; font-size: 13px; font-weight: 600; color: var(--accent);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 14px; cursor: pointer;
+}
+#pd-compare:hover { border-color: var(--accent); }
+.pc-legend { display: flex; gap: 20px; flex-wrap: wrap; margin: 4px 2px 6px; font-size: 13.5px; }
+.pc-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+.pc-dot.pc0 { background: var(--accent); }
+.pc-dot.pc1 { background: var(--win); }
+.pc-dot.pc2 { background: var(--accent-2); }
+svg .radar-grid { fill: none; stroke: var(--border); }
+svg .radar-axis { stroke: var(--border); }
+svg .radar-poly { fill-opacity: 0.14; stroke-width: 2; }
+svg .radar-poly.pc0 { stroke: var(--accent); fill: var(--accent); }
+svg .radar-poly.pc1 { stroke: var(--win); fill: var(--win); }
+svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 #player-table th.sortable { cursor: pointer; user-select: none; }
 #player-table th.sortable:hover { color: var(--text-primary); }
 #player-table th .arrow { font-size: 10px; }
@@ -986,24 +1045,29 @@ def creators_table(db, limit=8, min_minutes=900):
     )
 
 
-def player_explorer(db):
+def load_players(db):
     rows = db.execute(
         """SELECT player_name, team, position, games, minutes, goals, xg,
-                  assists, xa, shots, key_passes, npg, npxg
+                  assists, xa, shots, key_passes, npg, npxg, xg_chain, xg_buildup
            FROM understat_players ORDER BY xg DESC"""
     ).fetchall()
-    if not rows:
-        return ""
-    players = [
+    return [
         {
-            "name": r[0], "team": r[1], "pos": r[2] or "", "games": r[3],
+            # Understat stores some names entity-encoded ("M&#039;Bala Nzola")
+            "name": unescape(r[0]), "team": unescape(r[1]), "pos": r[2] or "", "games": r[3],
             "min": r[4], "goals": r[5], "xg": round(r[6], 2),
             "assists": r[7], "xa": round(r[8], 2), "shots": r[9], "kp": r[10],
             "npg": r[11], "npxg": round(r[12], 2),
+            "chain": round(r[13], 2), "buildup": round(r[14], 2),
             "gdiff": round(r[5] - r[6], 2), "adiff": round(r[7] - r[8], 2),
         }
         for r in rows
     ]
+
+
+def player_explorer(players):
+    if not players:
+        return ""
     # transferred players have comma-joined teams ("Inter,Parma"); offer single clubs
     teams = sorted({club for p in players for club in p["team"].split(",")})
     team_options = "".join(f"<option>{escape(t)}</option>" for t in teams)
@@ -1022,12 +1086,15 @@ def player_explorer(db):
         "</div>"
         "<div class='card'><table id='player-table'><thead><tr></tr></thead>"
         "<tbody></tbody></table></div>"
+        "<div id='pd-overlay' hidden><div id='pd-modal' role='dialog' aria-modal='true'></div></div>"
         f"<script>const PLAYERS = {payload};</script>"
     )
     about = (
         f"<p><strong>What it shows.</strong> Every player Understat tracks this season "
         f"({len(players)}). Search by name or club, filter by position and minutes, and "
-        "click any column header to sort (click again to flip direction).</p>"
+        "click any column header to sort (click again to flip direction). "
+        "<strong>Click a row</strong> to open that player's profile card, with season "
+        "totals and percentile bars against players of the same position.</p>"
         "<p><strong>The columns.</strong> xG and xA are expected goals and expected "
         "assists — the value of the chances a player took or created. G−xG above zero "
         "means finishing better than the chances deserved; A−xA above zero means "
@@ -1039,6 +1106,42 @@ def player_explorer(db):
         "transferred mid-season show both clubs, comma-separated.</p>"
     )
     return block("Player explorer", body, about)
+
+
+def player_compare(players):
+    if not players:
+        return ""
+    options = "".join(
+        f"<option value=\"{escape(p['name'])}\">{escape(p['team'])}</option>"
+        for p in players
+    )
+    inputs = "".join(
+        f"<input list='pc-list' id='pc-{i}' placeholder='Player {i}…' autocomplete='off'>"
+        for i in (1, 2, 3)
+    )
+    body = (
+        f"<div class='controls'>{inputs}"
+        "<button id='pc-clear' type='button'>Clear</button></div>"
+        f"<datalist id='pc-list'>{options}</datalist>"
+        "<div class='chart-card' id='pc-empty'><p class='dim' style='margin:4px 2px'>"
+        "Pick two or three players above (or use “Add to comparison” on a player card) "
+        "to see their profiles side by side.</p></div>"
+        "<div class='chart-card' id='pc-card' hidden></div>"
+    )
+    about = (
+        "<p><strong>What it shows.</strong> Up to three players overlaid on a radar of "
+        "six per-90 attacking dimensions — npxG (shot value), xA (chance creation), "
+        "shots, key passes, xGChain (involvement in scoring moves) and xGBuildup "
+        "(deep-lying contribution). Each axis is the player's <em>percentile</em> among "
+        "players of the same position with 450+ minutes, so a defender isn't drowned by "
+        "striker numbers; the table below gives the exact per-90 rates.</p>"
+        "<p><strong>How to read it.</strong> The bigger the shape, the more complete the "
+        "attacking contribution — but shape <em>profile</em> matters more than area: a "
+        "pure finisher spikes toward npxG and shots, a creator toward xA and key passes, "
+        "a deep engine toward xGBuildup. Comparing a striker with a full-back is fair "
+        "here because each is measured against their own position group.</p>"
+    )
+    return block("Player comparison", body, about)
 
 
 EXPLORER_JS = """
@@ -1058,7 +1161,9 @@ EXPLORER_JS = """
     { key: 'adiff',   label: 'A−xA',  num: true, dec: 1, signed: true },
     { key: 'shots',   label: 'Shots', num: true, per90: true },
     { key: 'kp',      label: 'KP',    num: true, per90: true },
-    { key: 'npxg',    label: 'npxG',  num: true, per90: true, dec: 1 }
+    { key: 'npxg',    label: 'npxG',  num: true, per90: true, dec: 1 },
+    { key: 'chain',   label: 'xGCh',  num: true, per90: true, dec: 1 },
+    { key: 'buildup', label: 'xGB',   num: true, per90: true, dec: 1 }
   ];
   const state = { sortKey: 'xg', sortDir: -1, per90: false };
   const $ = (id) => document.getElementById(id);
@@ -1112,7 +1217,7 @@ EXPLORER_JS = """
 
     buildHeader();
     tbody.innerHTML = rows.map((p) =>
-      '<tr>' + COLS.map((c, i) => {
+      "<tr data-i='" + PLAYERS.indexOf(p) + "'>" + COLS.map((c, i) => {
         const cls = c.num ? 'num' : (i === 1 || i === 2 ? 'dim' : '');
         const strong = c.key === state.sortKey ? ' score' : '';
         return "<td class='" + cls + strong + "'>" + display(p, c) + '</td>';
@@ -1151,6 +1256,174 @@ EXPLORER_JS = """
   }));
   const initial = location.hash.slice(1);
   activate(document.getElementById('panel-' + initial) ? initial : tabs[0].dataset.panel);
+})();
+
+(function () {  // player profile cards + radar comparison
+  if (typeof PLAYERS === 'undefined') return;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const per90 = (p, k) => p.min > 0 ? p[k] * 90 / p.min : 0;
+  const posOf = (p) => p.pos.includes('GK') ? 'GK' : ((p.pos.match(/[DMF]/) || ['F'])[0]);
+  const POS_NAME = { GK: 'goalkeepers', D: 'defenders', M: 'midfielders', F: 'forwards' };
+  const MIN_PEER = 450;
+  const METRICS = [
+    { key: 'npxg',    label: 'npxG' },
+    { key: 'goals',   label: 'Goals' },
+    { key: 'shots',   label: 'Shots' },
+    { key: 'xa',      label: 'xA' },
+    { key: 'assists', label: 'Assists' },
+    { key: 'kp',      label: 'Key passes' },
+    { key: 'chain',   label: 'xGChain' },
+    { key: 'buildup', label: 'xGBuildup' }
+  ];
+  const RADAR = [
+    { key: 'npxg',    label: 'npxG' },
+    { key: 'shots',   label: 'Shots' },
+    { key: 'xa',      label: 'xA' },
+    { key: 'kp',      label: 'Key passes' },
+    { key: 'chain',   label: 'xGChain' },
+    { key: 'buildup', label: 'xGBuildup' }
+  ];
+
+  function peersOf(p) {
+    let peers = PLAYERS.filter((q) => q.min >= MIN_PEER && posOf(q) === posOf(p));
+    if (peers.length < 10) peers = PLAYERS.filter((q) => q.min >= MIN_PEER && posOf(q) !== 'GK');
+    return peers;
+  }
+  function percentile(p, key, peers) {
+    const v = per90(p, key);
+    const below = peers.filter((q) => per90(q, key) <= v).length;
+    return Math.round(100 * below / peers.length);
+  }
+  function ord(n) {
+    const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+  const signed = (v) => (v > 0 ? '+' : '') + v.toFixed(1).replace('-', '\\u2212');
+  const byName = (name) => PLAYERS.find((q) => q.name === name);
+
+  /* ---- profile card ---- */
+  const overlay = $('pd-overlay');
+  function closeDetail() { overlay.hidden = true; }
+  function openDetail(p) {
+    const peers = peersOf(p);
+    const bars = METRICS.map((m) => {
+      const pct = percentile(p, m.key, peers);
+      const cls = pct >= 70 ? 'hi' : pct >= 40 ? 'mid' : 'lo';
+      return "<div class='pd-row'><span class='pd-label'>" + m.label + " /90</span>" +
+        "<div class='pd-track'><div class='pd-fill " + cls + "' style='width:" + pct + "%'></div></div>" +
+        "<span class='pd-val'>" + per90(p, m.key).toFixed(2) + " <em>" + ord(pct) + "</em></span></div>";
+    }).join('');
+    const totals = [
+      ['Goals', p.goals], ['Assists', p.assists], ['Shots', p.shots],
+      ['Key passes', p.kp], ['G\\u2212xG', signed(p.gdiff)], ['A\\u2212xA', signed(p.adiff)]
+    ].map(([l, v]) =>
+      "<div><span class='pd-tv'>" + v + "</span><span class='pd-tl'>" + l + "</span></div>"
+    ).join('');
+    $('pd-modal').innerHTML =
+      "<div class='pd-head'><div><h4>" + esc(p.name) + "</h4>" +
+      "<p class='meta'>" + esc(p.team) + " \\u00b7 " + esc(p.pos) + " \\u00b7 " +
+      p.games + " apps, " + p.min + " min</p></div>" +
+      "<button id='pd-close' aria-label='Close'>\\u2715</button></div>" +
+      "<div class='pd-totals'>" + totals + "</div>" +
+      "<p class='meta'>Season totals above; bars below are per-90 rates as percentiles vs " +
+      (POS_NAME[posOf(p)] || 'players') + " with " + MIN_PEER + "+ minutes.</p>" +
+      bars +
+      "<button id='pd-compare' type='button'>Add to comparison</button>";
+    overlay.hidden = false;
+    $('pd-close').onclick = closeDetail;
+    $('pd-compare').onclick = () => { addToCompare(p.name); closeDetail(); };
+  }
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeDetail(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetail(); });
+  document.querySelector('#player-table tbody').addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-i]');
+    if (tr) openDetail(PLAYERS[Number(tr.dataset.i)]);
+  });
+
+  /* ---- comparison radar ---- */
+  function radarSvg(ps) {
+    const W = 460, H = 350, cx = W / 2, cy = H / 2 + 6, R = 118, N = RADAR.length;
+    const pt = (i, r) => {
+      const a = -Math.PI / 2 + i * 2 * Math.PI / N;
+      return (cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1);
+    };
+    let parts = '';
+    [25, 50, 75, 100].forEach((ring) => {
+      parts += "<polygon class='radar-grid' points='" +
+        RADAR.map((_, i) => pt(i, R * ring / 100)).join(' ') + "'/>";
+    });
+    RADAR.forEach((m, i) => {
+      parts += "<line class='radar-axis' x1='" + cx + "' y1='" + cy + "' x2='" +
+        pt(i, R).replace(',', "' y2='") + "'/>";
+      const a = -Math.PI / 2 + i * 2 * Math.PI / N;
+      const lx = cx + (R + 16) * Math.cos(a), ly = cy + (R + 16) * Math.sin(a);
+      const anchor = Math.abs(Math.cos(a)) < 0.3 ? 'middle' : (Math.cos(a) > 0 ? 'start' : 'end');
+      parts += "<text x='" + lx.toFixed(0) + "' y='" + (ly + 4).toFixed(0) +
+        "' text-anchor='" + anchor + "'>" + m.label + "</text>";
+    });
+    ps.forEach((p, i) => {
+      const peers = peersOf(p);
+      const pts = RADAR.map((m, j) => pt(j, R * percentile(p, m.key, peers) / 100)).join(' ');
+      parts += "<polygon class='radar-poly pc" + i + "' points='" + pts + "'><title>" +
+        esc(p.name) + "</title></polygon>";
+    });
+    return "<svg viewBox='0 0 " + W + " " + H + "' width='100%' style='max-width:520px;display:block;margin:0 auto' " +
+      "role='img' aria-label='Radar comparison of selected players'>" + parts + "</svg>";
+  }
+  function compareTable(ps) {
+    const head = "<tr><th>per 90 (percentile)</th>" +
+      ps.map((p, i) => "<th class='num'><span class='pc-dot pc" + i + "'></span>" + esc(p.name) + "</th>").join('') + '</tr>';
+    const rows = RADAR.map((m) =>
+      '<tr><td>' + m.label + '</td>' + ps.map((p) => {
+        const peers = peersOf(p);
+        return "<td class='num'>" + per90(p, m.key).toFixed(2) +
+          " <span class='dim'>(" + ord(percentile(p, m.key, peers)) + ")</span></td>";
+      }).join('') + '</tr>'
+    ).join('');
+    const info = "<tr><td class='dim'>Team \\u00b7 pos \\u00b7 minutes</td>" + ps.map((p) =>
+      "<td class='num dim'>" + esc(p.team) + " \\u00b7 " + esc(p.pos) + " \\u00b7 " + p.min + "'</td>"
+    ).join('') + '</tr>';
+    return "<div style='overflow-x:auto'><table>" + head + rows + info + '</table></div>';
+  }
+  function renderCompare() {
+    const seen = new Set();
+    const ps = [1, 2, 3].map((i) => byName(($('pc-' + i).value || '').trim()))
+      .filter((p) => p && !seen.has(p.name) && seen.add(p.name)).slice(0, 3);
+    const card = $('pc-card'), empty = $('pc-empty');
+    if (ps.length < 2) { card.hidden = true; empty.hidden = false; return; }
+    empty.hidden = true; card.hidden = false;
+    const legend = "<div class='pc-legend'>" + ps.map((p, i) =>
+      "<span><span class='pc-dot pc" + i + "'></span>" + esc(p.name) +
+      " <span class='dim'>(" + (POS_NAME[posOf(p)] || '') + ")</span></span>").join('') + '</div>';
+    card.innerHTML = legend + radarSvg(ps) + compareTable(ps);
+  }
+  function addToCompare(name) {
+    const inputs = [1, 2, 3].map((i) => $('pc-' + i));
+    const target = inputs.find((el) => !byName(el.value.trim())) || inputs[2];
+    target.value = name;
+    renderCompare();
+    document.querySelector("nav.tabs button[data-panel='players']").click();
+    $('pc-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  [1, 2, 3].forEach((i) => $('pc-' + i).addEventListener('input', renderCompare));
+  $('pc-clear').addEventListener('click', () => {
+    [1, 2, 3].forEach((i) => { $('pc-' + i).value = ''; });
+    renderCompare();
+  });
+
+  /* ---- deep links: #player=Name and #compare=Name,Name[,Name] ---- */
+  const hash = decodeURIComponent(location.hash.slice(1));
+  const showPlayersTab = () => document.querySelector("nav.tabs button[data-panel='players']").click();
+  if (hash.startsWith('player=')) {
+    showPlayersTab();
+    const p = byName(hash.slice(7));
+    if (p) openDetail(p);
+  } else if (hash.startsWith('compare=')) {
+    showPlayersTab();
+    hash.slice(8).split(',').slice(0, 3).forEach((n, i) => { $('pc-' + (i + 1)).value = n.trim(); });
+    renderCompare();
+  }
 })();
 """
 
@@ -1215,9 +1488,11 @@ def players_panel(db):
         "the creator was let down by finishing; above zero means teammates converted "
         "generously. xA is the fairer ranking of creativity than raw assists.</p>"
     )
+    players = load_players(db)
     return (
         f"<h2>Players <span class='dim'>({season_label(db)}, Understat)</span></h2>"
-        + player_explorer(db)
+        + player_explorer(players)
+        + player_compare(players)
         + block("Clinical finishers — most goals above xG",
                 player_table(finishing_rows(db, "DESC"), "G−xG"), finishing_about)
         + block("Wasteful in front of goal — most goals below xG",
