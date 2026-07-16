@@ -1146,6 +1146,66 @@ def player_compare(players):
     return block("Player comparison", body, about)
 
 
+def load_teams(db):
+    rows = db.execute(
+        """SELECT team, COUNT(*), SUM(pts), SUM(xpts), SUM(npxg), SUM(npxga),
+                  AVG(ppda), SUM(deep), SUM(deep_allowed),
+                  SUM(scored), SUM(missed), SUM(xg), SUM(xga)
+           FROM understat_team_matches GROUP BY team ORDER BY team"""
+    ).fetchall()
+    return [
+        {
+            "team": unescape(r[0]), "mp": r[1], "pts": r[2], "xpts": round(r[3], 1),
+            "npxg": round(r[4] / r[1], 2), "npxga": round(r[5] / r[1], 2),
+            "ppda": round(r[6], 1),
+            "deep": round(r[7] / r[1], 1), "deep_allowed": round(r[8] / r[1], 1),
+            "gpm": round(r[9] / r[1], 2), "cpm": round(r[10] / r[1], 2),
+            "gdiff": round(r[9] - r[11], 1), "gadiff": round(r[12] - r[10], 1),
+            "ptsdiff": round(r[2] - r[3], 1),
+        }
+        for r in rows
+    ]
+
+
+def team_compare(teams):
+    if not teams:
+        return ""
+    options = "".join(f"<option>{escape(t['team'])}</option>" for t in teams)
+    selects = "".join(
+        f"<select id='tc-{i}'><option value=''>Team {i}…</option>{options}</select>"
+        for i in (1, 2, 3)
+    )
+    payload = json.dumps(teams, ensure_ascii=False).replace("</", "<\\/")
+    body = (
+        f"<div class='controls'>{selects}"
+        "<button id='tc-clear' type='button'>Clear</button></div>"
+        "<div class='chart-card' id='tc-empty'><p class='dim' style='margin:4px 2px'>"
+        "Pick two or three teams above to see their playing styles side by side.</p></div>"
+        "<div class='chart-card' id='tc-card' hidden></div>"
+        f"<script>const TEAMS = {payload};</script>"
+    )
+    about = (
+        "<p><strong>What it shows.</strong> Up to three teams overlaid on a radar of six "
+        "style dimensions, each expressed as the team's <em>percentile</em> among the "
+        f"{len(teams)} sides in the league. <strong>Attack</strong> is non-penalty xG "
+        "created per match and <strong>Defence</strong> is non-penalty xG conceded "
+        "(flipped, so further out = fewer chances allowed). <strong>Finishing</strong> is "
+        "goals minus xG — conversion above or below what the chances deserved. "
+        "<strong>Pressing</strong> is PPDA flipped (opponent passes allowed per defensive "
+        "action — fewer means a higher press). <strong>Territory</strong> is deep "
+        "completions per match (passes received within ~20m of the opponent goal) and "
+        "<strong>Box defence</strong> is the same thing conceded, flipped.</p>"
+        "<p><strong>How to read it.</strong> The shape is the identity: a dominant "
+        "pressing side bulges toward Attack–Pressing–Territory, a low-block counter team "
+        "can look small here yet still win points on Finishing and Box defence. The "
+        "table underneath gives the raw per-match numbers behind each axis, plus points "
+        "vs expected points. Shots on target aren't in the data — Understat's team feed "
+        "doesn't publish them — so chance <em>quality</em> (xG) stands in for shot "
+        "accuracy.</p>"
+    )
+    return block("Team comparison", body, about)
+
+
 EXPLORER_JS = """
 (function () {
   if (typeof PLAYERS === 'undefined') return;
@@ -1432,6 +1492,111 @@ EXPLORER_JS = """
     renderCompare();
   }
 })();
+
+(function () {  // team comparison radar
+  if (typeof TEAMS === 'undefined') return;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const RADAR = [
+    { key: 'npxg',         label: 'Attack',      unit: 'npxG / match',         dec: 2 },
+    { key: 'npxga',        label: 'Defence',     unit: 'npxGA / match',        dec: 2, invert: true },
+    { key: 'gdiff',        label: 'Finishing',   unit: 'G \\u2212 xG (season)', dec: 1, signed: true },
+    { key: 'ppda',         label: 'Pressing',    unit: 'PPDA',                 dec: 1, invert: true },
+    { key: 'deep',         label: 'Territory',   unit: 'deep comp. / match',   dec: 1 },
+    { key: 'deep_allowed', label: 'Box defence', unit: 'deep allowed / match', dec: 1, invert: true }
+  ];
+  const EXTRA = [
+    { key: 'pts',     label: 'Points',                dec: 0 },
+    { key: 'xpts',    label: 'Expected points',       dec: 1 },
+    { key: 'ptsdiff', label: 'Pts \\u2212 xPts (luck)', dec: 1, signed: true },
+    { key: 'gpm',     label: 'Goals / match',         dec: 2 },
+    { key: 'cpm',     label: 'Conceded / match',      dec: 2 }
+  ];
+  function pct(t, m) {
+    const v = t[m.key];
+    const below = TEAMS.filter((q) => m.invert ? q[m.key] >= v : q[m.key] <= v).length;
+    return Math.round(100 * below / TEAMS.length);
+  }
+  function ord(n) {
+    const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+  function fmt(t, m) {
+    let s = t[m.key].toFixed(m.dec);
+    if (m.signed && t[m.key] > 0) s = '+' + s;
+    return s.replace('-', '\\u2212');
+  }
+  const byTeam = (name) => TEAMS.find((t) => t.team === String(name || '').trim());
+
+  function radarSvg(ts) {
+    const W = 460, H = 350, cx = W / 2, cy = H / 2 + 6, R = 118, N = RADAR.length;
+    const pt = (i, r) => {
+      const a = -Math.PI / 2 + i * 2 * Math.PI / N;
+      return (cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1);
+    };
+    let parts = '';
+    [25, 50, 75, 100].forEach((ring) => {
+      parts += "<polygon class='radar-grid' points='" +
+        RADAR.map((_, i) => pt(i, R * ring / 100)).join(' ') + "'/>";
+    });
+    RADAR.forEach((m, i) => {
+      parts += "<line class='radar-axis' x1='" + cx + "' y1='" + cy + "' x2='" +
+        pt(i, R).replace(',', "' y2='") + "'/>";
+      const a = -Math.PI / 2 + i * 2 * Math.PI / N;
+      const lx = cx + (R + 16) * Math.cos(a), ly = cy + (R + 16) * Math.sin(a);
+      const anchor = Math.abs(Math.cos(a)) < 0.3 ? 'middle' : (Math.cos(a) > 0 ? 'start' : 'end');
+      parts += "<text x='" + lx.toFixed(0) + "' y='" + (ly + 4).toFixed(0) +
+        "' text-anchor='" + anchor + "'>" + m.label + "</text>";
+    });
+    ts.forEach((t, i) => {
+      const pts = RADAR.map((m, j) => pt(j, R * pct(t, m) / 100)).join(' ');
+      parts += "<polygon class='radar-poly pc" + i + "' points='" + pts + "'><title>" +
+        esc(t.team) + "</title></polygon>";
+    });
+    return "<svg viewBox='0 0 " + W + " " + H + "' width='100%' style='max-width:520px;display:block;margin:0 auto' " +
+      "role='img' aria-label='Radar comparison of selected teams'>" + parts + "</svg>";
+  }
+  function compareTable(ts) {
+    const head = "<tr><th>metric (league percentile)</th>" +
+      ts.map((t, i) => "<th class='num'><span class='pc-dot pc" + i + "'></span>" + esc(t.team) + "</th>").join('') + '</tr>';
+    const rows = RADAR.map((m) =>
+      "<tr><td>" + m.label + " <span class='dim'>\\u00b7 " + m.unit + "</span></td>" +
+      ts.map((t) =>
+        "<td class='num'>" + fmt(t, m) + " <span class='dim'>(" + ord(pct(t, m)) + ")</span></td>"
+      ).join('') + '</tr>'
+    ).join('');
+    const extras = EXTRA.map((m) =>
+      "<tr><td class='dim'>" + m.label + '</td>' +
+      ts.map((t) => "<td class='num'>" + fmt(t, m) + '</td>').join('') + '</tr>'
+    ).join('');
+    return "<div style='overflow-x:auto'><table>" + head + rows + extras + '</table></div>';
+  }
+  function renderTC() {
+    const seen = new Set();
+    const ts = [1, 2, 3].map((i) => byTeam($('tc-' + i).value))
+      .filter((t) => t && !seen.has(t.team) && seen.add(t.team)).slice(0, 3);
+    const card = $('tc-card'), empty = $('tc-empty');
+    if (ts.length < 2) { card.hidden = true; empty.hidden = false; return; }
+    empty.hidden = true; card.hidden = false;
+    const legend = "<div class='pc-legend'>" + ts.map((t, i) =>
+      "<span><span class='pc-dot pc" + i + "'></span>" + esc(t.team) +
+      " <span class='dim'>(" + t.pts + " pts)</span></span>").join('') + '</div>';
+    card.innerHTML = legend + radarSvg(ts) + compareTable(ts);
+  }
+  [1, 2, 3].forEach((i) => $('tc-' + i).addEventListener('change', renderTC));
+  $('tc-clear').addEventListener('click', () => {
+    [1, 2, 3].forEach((i) => { $('tc-' + i).value = ''; });
+    renderTC();
+  });
+
+  /* deep link: #teams=Name,Name[,Name] */
+  const hash = decodeURIComponent(location.hash.slice(1));
+  if (hash.startsWith('teams=')) {
+    document.querySelector("nav.tabs button[data-panel='teams']").click();
+    hash.slice(6).split(',').slice(0, 3).forEach((n, i) => { $('tc-' + (i + 1)).value = n.trim(); });
+    renderTC();
+  }
+})();
 """
 
 
@@ -1464,7 +1629,8 @@ def season_label(db):
 def teams_panel(db):
     return (
         f"<h2>Team analytics <span class='dim'>({season_label(db)}, Understat)</span></h2>"
-        + xg_table(db) + style_scatter(db) + rolling_sparklines(db)
+        + xg_table(db) + team_compare(load_teams(db))
+        + style_scatter(db) + rolling_sparklines(db)
     )
 
 

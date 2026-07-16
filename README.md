@@ -37,8 +37,12 @@ be served as a web dashboard (see below). It has four tabs:
 
 - **League** — full standings computed from stored results (rank-trend arrows,
   W/D/L form chips), home/away split table, recent results, upcoming fixtures.
-- **Team analytics** — xG table (points vs expected points), pressing-vs-territory
-  scatter (PPDA against deep completions), rolling xG-difference form curves.
+- **Team analytics** — xG table (points vs expected points), a team comparison
+  block (pick 2–3 teams for a percentile radar over six style dimensions —
+  attack, defence, finishing, pressing, territory, box defence — with the raw
+  per-match numbers underneath, deep-linkable via `#teams=A,B,C`),
+  pressing-vs-territory scatter (PPDA against deep completions), rolling
+  xG-difference form curves.
 - **Players** — an explorer over every tracked player (~590): search, team /
   position / minutes filters, a per-90 toggle, and click-to-sort columns for
   goals, xG, G−xG, assists, xA, shots, key passes, xGChain, xGBuildup and more.
