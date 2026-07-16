@@ -79,8 +79,13 @@ only ~5 rows; full match data is obtained via the per-round endpoint instead).
 For full standings and richer stats either:
 
 - get a personal TheSportsDB key (Patreon, ~$10/mo), or
-- switch to [football-data.org](https://www.football-data.org/) (free key by email, full Serie A)
-  plus [API-Football](https://www.api-football.com/) (free key, 100 req/day, full Allsvenskan).
+- switch to [football-data.org](https://www.football-data.org/) (free key by email, full Serie A).
+
+[API-Football](https://www.api-football.com/) was considered for Allsvenskan, but its
+free plan turned out to be limited to **seasons 2022–2024** (verified 2026-07-16) —
+no current-season standings, fixtures, or match statistics — so it can't feed this
+dashboard without a paid plan (~$19/mo unlocks all seasons incl. shots on target).
+API keys live in `api_keys.json` (gitignored, never committed).
 
 League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (season = `2025-2026`).
 
@@ -88,7 +93,8 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
 
 - [x] Store fetched data in SQLite
 - [x] HTML report for viewing the data
-- [ ] Swap in full-data APIs (football-data.org + API-Football)
+- [ ] Swap in a full-data API for standings (football-data.org — API-Football's
+      free plan is stuck on 2022–2024 seasons, see above)
 - [x] xG analytics for Serie A via Understat (xG table, finishing boards, creators)
 - [x] Compute standings trends, form tables, home/away splits
 - [x] Team style profiles (PPDA pressing intensity vs deep completions)

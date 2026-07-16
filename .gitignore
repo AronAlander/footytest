@@ -3,3 +3,4 @@ report.html
 __pycache__/
 .venv/
 *.sqlite
+api_keys.json
