@@ -46,6 +46,8 @@ be served as a web dashboard (see below). It has four tabs:
 - **Players** — an explorer over every tracked player (~590): search, team /
   position / minutes filters, a per-90 toggle, and click-to-sort columns for
   goals, xG, G−xG, assists, xA, shots, key passes, xGChain, xGBuildup and more.
+  The table shows the top 25 by the current sort, with show-more buttons for
+  the rest, so the tab stays compact.
   Click any row for a profile card with season totals and per-90 percentile bars
   vs same-position peers; a comparison block overlays up to three players on a
   percentile radar (deep-linkable via `#player=Name` / `#compare=A,B,C`). Plus
@@ -61,7 +63,9 @@ Every chart and table has a collapsible **"How to read this"** explainer (what t
 metric is, how it's computed, how to interpret it), and each analytics tab opens
 with a collapsible **metric glossary** defining every abbreviation (xG, npxG,
 xGBuildup, PPDA, deep completions, xPts…) in plain language; abbreviated column
-headers also carry hover tooltips. Adapts to light/dark mode.
+headers also carry hover tooltips. Each tab opens with jump-chips that scroll to
+its sections, and a floating back-to-top button appears once you scroll. Adapts
+to light/dark mode.
 
 ## Web dashboard (GitHub Pages)
 

@@ -33,7 +33,8 @@ CSS = """
   --text-primary: #101010; --text-secondary: #52514e;
   --accent: #2a78d6; --accent-2: #7c5cff;
   --win: #0ca30c; --loss: #d03b3b; --draw: #8a8983;
-  --row-hover: #f0f4fa;
+  --row-hover: #f0f4fa; --row-alt: rgba(16,16,16,.026);
+  --glow: rgba(42,120,214,.10); --glow-2: rgba(124,92,255,.08);
   --shadow: 0 1px 2px rgba(20,20,20,.05), 0 4px 16px rgba(20,20,20,.05);
 }
 @media (prefers-color-scheme: dark) {
@@ -41,13 +42,19 @@ CSS = """
     --surface: #161615; --card: #212120; --border: #3a3936;
     --text-primary: #ffffff; --text-secondary: #c3c2b7;
     --accent: #3987e5; --accent-2: #9d86ff; --draw: #75746e;
-    --row-hover: #2a2b2e;
+    --row-hover: #2a2b2e; --row-alt: rgba(255,255,255,.03);
+    --glow: rgba(57,135,229,.17); --glow-2: rgba(157,134,255,.12);
     --shadow: 0 1px 2px rgba(0,0,0,.5), 0 4px 16px rgba(0,0,0,.35);
   }
 }
 * { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 body {
-  margin: 0; padding: 28px 24px 44px; background: var(--surface); color: var(--text-primary);
+  margin: 0; padding: 28px 24px 44px; color: var(--text-primary);
+  background: var(--surface);
+  background-image: radial-gradient(900px 340px at 18% -80px, var(--glow), transparent 70%),
+                    radial-gradient(700px 300px at 85% -120px, var(--glow-2), transparent 70%);
+  background-repeat: no-repeat;
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 .wrap { max-width: 1240px; margin: 0 auto; }
@@ -80,13 +87,29 @@ nav.tabs button {
 }
 nav.tabs button:hover { color: var(--text-primary); background: var(--row-hover); }
 nav.tabs button[aria-selected="true"] { color: #fff; background: var(--accent); }
+@supports (backdrop-filter: blur(6px)) {
+  nav.tabs { background: color-mix(in srgb, var(--card) 78%, transparent); backdrop-filter: blur(10px); }
+}
 .panel[hidden] { display: none; }
-.block { margin: 26px 0 30px; }
+.tagline { margin: 2px 0 0; color: var(--text-secondary); font-size: 14.5px; }
+.subnav { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 2px; }
+.subnav a {
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  border: 1px solid var(--border); background: var(--card); border-radius: 999px;
+  padding: 4px 12px; cursor: pointer; user-select: none;
+}
+.subnav a:hover { color: var(--accent); border-color: var(--accent); }
+.block { margin: 26px 0 30px; scroll-margin-top: 84px; }
 .block-head {
   display: flex; gap: 8px 14px; align-items: baseline; flex-wrap: wrap;
   margin-bottom: 10px;
 }
 .block-head h3 { flex: 1 1 auto; }
+.block-head h3::before {
+  content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 3px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  margin-right: 9px; vertical-align: -1px;
+}
 details.about { font-size: 13px; }
 details.about[open] { flex-basis: 100%; }
 details.about summary {
@@ -108,10 +131,11 @@ details.about summary:hover { border-color: var(--accent); }
 .about-body p { margin: 6px 0; }
 .about-body strong { color: var(--text-primary); }
 .card { background: var(--card); border: 1px solid var(--border);
-        border-radius: 10px; overflow-x: auto; box-shadow: var(--shadow); }
+        border-radius: 12px; overflow-x: auto; box-shadow: var(--shadow); }
 .chart-card { background: var(--card); border: 1px solid var(--border);
-              border-radius: 10px; padding: 14px; overflow-x: auto;
+              border-radius: 12px; padding: 14px; overflow-x: auto;
               box-shadow: var(--shadow); }
+tbody tr:nth-child(even) td { background: var(--row-alt); }
 tbody tr:hover td { background: var(--row-hover); }
 tr.zone-cl td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 tr.zone-rel td:first-child { box-shadow: inset 3px 0 0 var(--loss); }
@@ -246,6 +270,24 @@ details.glossary[open] summary { border-bottom: 1px solid var(--border); }
 .gl-grid > div { font-size: 13px; }
 .gl-grid dt { font-weight: 700; color: var(--text-primary); }
 .gl-grid dd { margin: 1px 0 0; color: var(--text-secondary); }
+.duo { display: grid; grid-template-columns: 1fr; gap: 0 24px; align-items: start; }
+@media (min-width: 1000px) { .duo { grid-template-columns: 1fr 1fr; } }
+.show-more { display: flex; gap: 10px; align-items: center; justify-content: center; margin: 12px 0 2px; }
+.show-more button {
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--accent);
+  background: var(--card); border: 1px solid var(--border); border-radius: 999px;
+  padding: 6px 16px; cursor: pointer;
+}
+.show-more button:hover { border-color: var(--accent); }
+#to-top {
+  position: fixed; right: 22px; bottom: 22px; z-index: 20;
+  width: 42px; height: 42px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--card); color: var(--text-secondary);
+  font-size: 18px; cursor: pointer; box-shadow: var(--shadow);
+  opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+#to-top.show { opacity: 1; pointer-events: auto; }
+#to-top:hover { color: var(--accent); border-color: var(--accent); }
 footer { margin-top: 32px; font-size: 13px; color: var(--text-secondary); }
 """
 
@@ -1110,13 +1152,15 @@ def player_explorer(players):
         "</div>"
         "<div class='card'><table id='player-table'><thead><tr></tr></thead>"
         "<tbody></tbody></table></div>"
+        "<div class='show-more' id='pe-more'></div>"
         "<div id='pd-overlay' hidden><div id='pd-modal' role='dialog' aria-modal='true'></div></div>"
         f"<script>const PLAYERS = {payload};</script>"
     )
     about = (
         f"<p><strong>What it shows.</strong> Every player Understat tracks this season "
-        f"({len(players)}). Search by name or club, filter by position and minutes, and "
-        "click any column header to sort (click again to flip direction). "
+        f"({len(players)}). The table starts with the top 25 by the current sort — use "
+        "the buttons under it to load more. Search by name or club, filter by position "
+        "and minutes, and click any column header to sort (click again to flip direction). "
         "<strong>Click a row</strong> to open that player's profile card, with season "
         "totals and percentile bars against players of the same position.</p>"
         "<p><strong>The columns.</strong> xG and xA are expected goals and expected "
@@ -1254,7 +1298,8 @@ EXPLORER_JS = """
     { key: 'chain',   label: 'xGCh',  num: true, per90: true, dec: 1, full: 'xGChain \\u2014 xG of every attacking move the player touched' },
     { key: 'buildup', label: 'xGB',   num: true, per90: true, dec: 1, full: 'xGBuildup \\u2014 xGChain minus shots and assist passes: pure build-up play' }
   ];
-  const state = { sortKey: 'xg', sortDir: -1, per90: false };
+  const PAGE = 25;
+  const state = { sortKey: 'xg', sortDir: -1, per90: false, limit: PAGE };
   const $ = (id) => document.getElementById(id);
   const thead = document.querySelector('#player-table thead tr');
   const tbody = document.querySelector('#player-table tbody');
@@ -1306,14 +1351,28 @@ EXPLORER_JS = """
     });
 
     buildHeader();
-    tbody.innerHTML = rows.map((p) =>
+    const shown = rows.slice(0, state.limit);
+    tbody.innerHTML = shown.map((p) =>
       "<tr data-i='" + PLAYERS.indexOf(p) + "'>" + COLS.map((c, i) => {
         const cls = c.num ? 'num' : (i === 1 || i === 2 ? 'dim' : '');
         const strong = c.key === state.sortKey ? ' score' : '';
         return "<td class='" + cls + strong + "'>" + display(p, c) + '</td>';
       }).join('') + '</tr>'
     ).join('');
-    $('pe-count').textContent = rows.length + ' of ' + PLAYERS.length + ' players';
+    $('pe-count').textContent = 'showing ' + shown.length + ' of ' + rows.length +
+      ' matching \\u00b7 ' + PLAYERS.length + ' tracked';
+    const more = $('pe-more');
+    if (rows.length > shown.length) {
+      more.innerHTML = "<button id='pe-more-btn' type='button'>Show 50 more</button>" +
+        "<button id='pe-all-btn' type='button'>Show all " + rows.length + "</button>";
+      $('pe-more-btn').onclick = () => { state.limit += 50; render(); };
+      $('pe-all-btn').onclick = () => { state.limit = Infinity; render(); };
+    } else if (state.limit > PAGE) {
+      more.innerHTML = "<button id='pe-less-btn' type='button'>Collapse to top " + PAGE + "</button>";
+      $('pe-less-btn').onclick = () => { state.limit = PAGE; render(); };
+    } else {
+      more.innerHTML = '';
+    }
   }
 
   thead.addEventListener('click', (e) => {
@@ -1625,6 +1684,38 @@ EXPLORER_JS = """
     renderTC();
   }
 })();
+
+(function () {  // per-tab section navigation chips
+  document.querySelectorAll('section.panel').forEach((panel) => {
+    const blocks = Array.from(panel.querySelectorAll('section.block'));
+    if (blocks.length < 3) return;
+    const nav = document.createElement('nav');
+    nav.className = 'subnav';
+    blocks.forEach((b) => {
+      const h = b.querySelector('h3');
+      if (!h) return;
+      const a = document.createElement('a');
+      a.textContent = h.textContent.split(' \\u2014 ')[0];
+      a.addEventListener('click', () => b.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      nav.appendChild(a);
+    });
+    const h2 = panel.querySelector('h2');
+    if (h2) h2.after(nav); else panel.prepend(nav);
+  });
+})();
+
+(function () {  // back-to-top button
+  const btn = document.createElement('button');
+  btn.id = 'to-top';
+  btn.title = 'Back to top';
+  btn.setAttribute('aria-label', 'Back to top');
+  btn.textContent = '\\u2191';
+  document.body.appendChild(btn);
+  btn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  window.addEventListener('scroll', () => {
+    btn.classList.toggle('show', window.scrollY > 500);
+  }, { passive: true });
+})();
 """
 
 
@@ -1756,10 +1847,12 @@ def players_panel(db):
         + metric_glossary()
         + player_explorer(players)
         + player_compare(players)
+        + "<div class='duo'>"
         + block("Clinical finishers — most goals above xG",
                 player_table(finishing_rows(db, "DESC"), "G−xG"), finishing_about)
         + block("Wasteful in front of goal — most goals below xG",
                 player_table(finishing_rows(db, "ASC"), "G−xG"), wasteful_about)
+        + "</div>"
         + block("Top creators by expected assists", creators_table(db), creators_about)
     )
 
@@ -1801,6 +1894,8 @@ def main() -> None:
         f"<meta name='viewport' content='width=device-width, initial-scale=1'>"
         f"<title>Football dashboard</title><style>{CSS}</style></head><body><div class='wrap'>"
         f"<header class='hero'><h1>Football dashboard</h1>"
+        f"<p class='tagline'>Serie A under the hood — standings, xG team analytics, "
+        f"player profiles and second-order insights.</p>"
         f"<div class='badges'>{badges}</div></header>"
         + tab_bar + panel_html
         + "<footer>Standings are computed from the stored results. Run "
