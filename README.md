@@ -39,7 +39,7 @@ in any browser (vanilla JavaScript, works offline from a double-click). It also
 writes an identical copy to `docs/index.html`, which is committed so the report can
 be served as a web dashboard (see below). A league switcher at the top flips the
 whole dashboard between the five leagues (deep-linkable by prefixing any link with
-`#lg=Premier_League&…`); below it are four tabs:
+`#lg=Premier_League&…`); below it are five tabs:
 
 - **League** — full standings computed from stored results (rank-trend arrows,
   W/D/L form chips), home/away split table, recent results, upcoming fixtures.
@@ -67,6 +67,12 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   npxGD, shot volume vs chance quality for the top shooters, hidden buildup
   engines (xGBuildup/90 leaders with barely any goals or assists), and penalty
   dependence.
+- **Best of Europe** — continental leaderboards pooling all five leagues: the
+  most dangerous attackers by npxG+xA per 90 and a merged justice table by
+  expected points per match (per match, since two leagues play 34 games and
+  three play 38). Opens with a prominent caveat: no cross-league adjustment is
+  applied, and leagues differ too much for the comparison to be fair — it's a
+  conversation starter, not a verdict. The league switcher hides on this tab.
 
 Every chart and table has a collapsible **"How to read this"** explainer (what the
 metric is, how it's computed, how to interpret it), and each analytics tab opens

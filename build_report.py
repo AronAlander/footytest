@@ -150,6 +150,10 @@ details.about summary:hover { border-color: var(--accent); }
 .chart-card { background: var(--card); border: 1px solid var(--border);
               border-radius: 12px; padding: 14px; overflow-x: auto;
               box-shadow: var(--shadow); }
+.caveat { border: 1px solid rgba(217, 119, 6, .4); border-left: 4px solid #d97706;
+          background: rgba(217, 119, 6, .08); border-radius: 12px;
+          padding: 12px 16px; margin: 16px 0 6px; }
+.caveat p { margin: 4px 0; }
 tbody tr:nth-child(even) td { background: var(--row-alt); }
 tbody tr:hover td { background: var(--row-hover); }
 tr.zone-cl td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
@@ -1134,6 +1138,113 @@ def insights_panel(db, leagues):
     )
 
 
+# ------------------------------------------------------ best of europe tab
+
+def europe_attackers_table(db, limit=25, min_minutes=1350):
+    rows = db.execute(
+        """SELECT player_name, team, league, minutes, npg, assists, npxg, xa,
+                  (npxg + xa) * 90.0 / minutes AS threat
+           FROM understat_players WHERE minutes >= ?
+           ORDER BY threat DESC LIMIT ?""",
+        (min_minutes, limit),
+    ).fetchall()
+    if not rows:
+        return ""
+    body = ""
+    for rank, (name, team, lg, minutes, npg, assists, npxg, xa, threat) in enumerate(rows, 1):
+        body += (
+            f"<tr><td class='num'>{rank}</td><td>{escape(unescape(name))}</td>"
+            f"<td class='dim'>{escape(unescape(team))}</td><td class='dim'>{escape(lg)}</td>"
+            f"<td class='num'>{minutes}</td>"
+            f"<td class='num'>{npxg * 90 / minutes:.2f}</td>"
+            f"<td class='num'>{xa * 90 / minutes:.2f}</td>"
+            f"<td class='num score'>{threat:.2f}</td>"
+            f"<td class='num'>{npg}+{assists}</td></tr>"
+        )
+    card = (
+        "<div class='card'><table><thead><tr>"
+        "<th class='num'>#</th><th>Player</th><th>Team</th><th>League</th>"
+        "<th class='num'>Min</th><th class='num'>npxG/90</th><th class='num'>xA/90</th>"
+        "<th class='num'>npxG+xA/90</th><th class='num'>npG+A</th>"
+        f"</tr></thead><tbody>{body}</tbody></table></div>"
+    )
+    about = (
+        f"<p><strong>What it shows.</strong> The {limit} most dangerous attackers across "
+        "all five leagues, ranked by npxG+xA per 90 — the value of the shots a player "
+        "takes plus the chances they create, penalties excluded, per full match played. "
+        f"Only players with {min_minutes}+ minutes (roughly 15 full matches) qualify, so "
+        "small-sample super-subs don't flood the list. npG+A is the raw non-penalty "
+        "goals plus assists actually banked.</p>"
+        "<p><strong>How to read it.</strong> This is a threat ranking, not a talent "
+        "ranking: it measures the danger a player generated in <em>their own</em> "
+        "league (see the note at the top of this tab). It also leans attacking by "
+        "construction — deep playmakers and defenders live in the xGBuildup column "
+        "of the player explorer, not here.</p>"
+    )
+    return block("Most dangerous attackers in Europe", card, about)
+
+
+def europe_justice_table(db, limit=20):
+    rows = db.execute(
+        """SELECT team, league, COUNT(*), SUM(pts), SUM(xpts), SUM(npxgd)
+           FROM understat_team_matches GROUP BY team, league
+           ORDER BY SUM(xpts) * 1.0 / COUNT(*) DESC LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    if not rows:
+        return ""
+    body = ""
+    for rank, (team, lg, games, pts, xpts, npxgd) in enumerate(rows, 1):
+        body += (
+            f"<tr><td class='num'>{rank}</td><td>{escape(team)}</td>"
+            f"<td class='dim'>{escape(lg)}</td><td class='num'>{games}</td>"
+            f"<td class='num score'>{xpts / games:.2f}</td>"
+            f"<td class='num'>{pts / games:.2f}</td>"
+            f"<td class='num'>{fmt_delta_html((pts - xpts) / games, 2)}</td>"
+            f"<td class='num'>{fmt_delta_html(npxgd / games, 2)}</td></tr>"
+        )
+    card = (
+        "<div class='card'><table><thead><tr>"
+        "<th class='num'>#</th><th>Team</th><th>League</th><th class='num'>P</th>"
+        "<th class='num'>xPts/m</th><th class='num'>Pts/m</th>"
+        "<th class='num'>Pts−xPts/m</th><th class='num'>npxGD/m</th>"
+        f"</tr></thead><tbody>{body}</tbody></table></div>"
+    )
+    about = (
+        f"<p><strong>What it shows.</strong> The continental justice table: the {limit} "
+        "strongest teams in Europe by <em>expected</em> points per match, i.e. what each "
+        "team's chances deserved. Everything is per match because the Bundesliga and "
+        "Ligue 1 play 34 games while the other three play 38 — season totals would "
+        "flatter the longer leagues.</p>"
+        "<p><strong>How to read it.</strong> npxGD/m (non-penalty xG difference per "
+        "match) is the best single strength number; Pts−xPts/m above zero means the "
+        "team banked more than its chances deserved. And once more: each team earned "
+        "these numbers against its own league's opposition, so this ranks domestic "
+        "dominance, not head-to-head strength.</p>"
+    )
+    return block("Continental justice table — xPts per match", card, about)
+
+
+def europe_panel(db):
+    caveat = (
+        "<div class='caveat'>"
+        "<p><strong>Read this first.</strong> This tab pours five very different "
+        "leagues into one pot — and that comparison is fundamentally flawed. The xG "
+        "model prices a chance the same everywhere, but the leagues differ wildly in "
+        "pace, defensive quality, tactical style and squad depth: 0.8 npxG+xA per 90 "
+        "against Ligue 1 defences is not the same achievement as the same number in "
+        "the Premier League, and no cross-league adjustment is applied here.</p>"
+        "<p>Treat these boards as a fun conversation starter, not a verdict.</p>"
+        "</div>"
+    )
+    return (
+        f"<h2>Best of Europe <span class='dim'>({season_label(db)}, Understat)</span></h2>"
+        "<p class='meta'>Continental leaderboards: the five leagues' players and teams "
+        "in one view.</p>"
+        + caveat + europe_attackers_table(db) + europe_justice_table(db)
+    )
+
+
 # -------------------------------------------------------------- player tab
 
 def finishing_rows(db, league, order, limit=8, min_minutes=900):
@@ -1518,6 +1629,9 @@ EXPLORER_JS = """
   function activate(name) {
     tabs.forEach((b) => b.setAttribute('aria-selected', b.dataset.panel === name ? 'true' : 'false'));
     document.querySelectorAll('.panel').forEach((p) => { p.hidden = p.id !== 'panel-' + name; });
+    // the league switcher is meaningless on the continental tab
+    const lgs = document.querySelector('nav.lgswitch');
+    if (lgs) lgs.style.display = name === 'europe' ? 'none' : '';
   }
   tabs.forEach((b) => b.addEventListener('click', () => {
     activate(b.dataset.panel);
@@ -2060,6 +2174,8 @@ def main() -> None:
         panels.append(("teams", "Team analytics", teams_panel(db, leagues)))
         panels.append(("players", "Players", players_panel(db, leagues)))
         panels.append(("insights", "Insights", insights_panel(db, leagues)))
+        if len(leagues) > 1:
+            panels.append(("europe", "Best of Europe", europe_panel(db)))
 
     lg_bar = ""
     if len(leagues) > 1:
