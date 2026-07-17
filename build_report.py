@@ -758,6 +758,10 @@ def rolling_sparklines(db, league):
     ) if r[0] in rolling]
 
     n_matches = max(len(v) for v in series.values())
+    # clipPath ids must be unique across the whole page: every league's
+    # sparklines coexist in the DOM, and a duplicate id resolves to the
+    # (possibly hidden) first occurrence, breaking the green/red split
+    lg_slug = league.lower().replace(" ", "-")
     w, h = 220, 64
     mid = h / 2
     amp = mid - 6
@@ -780,15 +784,15 @@ def rolling_sparklines(db, league):
             f"season range {fmt_delta(min(values), 2)} to {fmt_delta(max(values), 2)}, "
             f"latest {fmt_delta(last, 2)}</title>"
             f"<defs>"
-            f"<clipPath id='sp{idx}t'><rect x='-4' y='-4' width='{w + 8}' height='{mid + 4}'/></clipPath>"
-            f"<clipPath id='sp{idx}b'><rect x='-4' y='{mid}' width='{w + 8}' height='{mid + 4}'/></clipPath>"
+            f"<clipPath id='sp-{lg_slug}-{idx}t'><rect x='-4' y='-4' width='{w + 8}' height='{mid + 4}'/></clipPath>"
+            f"<clipPath id='sp-{lg_slug}-{idx}b'><rect x='-4' y='{mid}' width='{w + 8}' height='{mid + 4}'/></clipPath>"
             f"</defs>"
             f"<line class='gridline' x1='{w / 2}' y1='2' x2='{w / 2}' y2='{h - 2}'/>"
-            f"<polygon class='spark-area up' points='{area}' clip-path='url(#sp{idx}t)'/>"
-            f"<polygon class='spark-area down' points='{area}' clip-path='url(#sp{idx}b)'/>"
+            f"<polygon class='spark-area up' points='{area}' clip-path='url(#sp-{lg_slug}-{idx}t)'/>"
+            f"<polygon class='spark-area down' points='{area}' clip-path='url(#sp-{lg_slug}-{idx}b)'/>"
             f"<line class='zeroline' x1='0' y1='{mid}' x2='{w}' y2='{mid}'/>"
-            f"<polyline class='spark-line up' points='{points}' clip-path='url(#sp{idx}t)'/>"
-            f"<polyline class='spark-line down' points='{points}' clip-path='url(#sp{idx}b)'/>"
+            f"<polyline class='spark-line up' points='{points}' clip-path='url(#sp-{lg_slug}-{idx}t)'/>"
+            f"<polyline class='spark-line down' points='{points}' clip-path='url(#sp-{lg_slug}-{idx}b)'/>"
             f"<circle class='spark-dot {sign}' cx='{pts[-1][0]:.1f}' cy='{pts[-1][1]:.1f}' r='3'/>"
             "</svg></div>"
         )
