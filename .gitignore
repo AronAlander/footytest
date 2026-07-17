@@ -1,5 +1,6 @@
 data/
 report.html
+/archive/
 __pycache__/
 .venv/
 *.sqlite

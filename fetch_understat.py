@@ -8,13 +8,16 @@ Note: Understat covers only the big five leagues plus Russia - Allsvenskan
 has no free xG source.
 
 Usage:
-    python fetch_understat.py
+    python fetch_understat.py                # current season (auto-detected)
+    python fetch_understat.py 2018 2019      # specific seasons (starting year)
+    python fetch_understat.py --backfill     # every season Understat has (2014+)
 """
 
 import gzip
 import html
 import json
 import sqlite3
+import sys
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -32,6 +35,7 @@ LEAGUES = {
 # campaigns start in August, so the season flips automatically on 1 August
 _NOW = datetime.now()
 SEASON = str(_NOW.year if _NOW.month >= 8 else _NOW.year - 1)
+FIRST_SEASON = 2014  # Understat's history starts with 2014/15
 REQUEST_PAUSE = 2.0
 
 HEADERS = {
@@ -110,17 +114,17 @@ def ppda_ratio(value):
     return None
 
 
-def fetch_league(db, league, slug, fetched_at):
-    url = f"https://understat.com/getLeagueData/{slug}/{SEASON}"
+def fetch_league(db, league, slug, season, fetched_at):
+    url = f"https://understat.com/getLeagueData/{slug}/{season}"
     print(f"Fetching {url} ...")
-    headers = dict(HEADERS, Referer=f"https://understat.com/league/{slug}/{SEASON}")
+    headers = dict(HEADERS, Referer=f"https://understat.com/league/{slug}/{season}")
     request = urllib.request.Request(url, headers=headers)
     raw = urllib.request.urlopen(request, timeout=60).read()
     if raw[:2] == b"\x1f\x8b":
         raw = gzip.decompress(raw)
     data = json.loads(raw)
 
-    (DATA_DIR / f"understat_{slug.lower()}_{SEASON}.json").write_text(
+    (DATA_DIR / f"understat_{slug.lower()}_{season}.json").write_text(
         json.dumps(data, indent=2), encoding="utf-8"
     )
 
@@ -131,7 +135,7 @@ def fetch_league(db, league, slug, fetched_at):
             "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 # some names arrive entity-encoded ("M&#039;Bala Nzola")
-                SEASON, league, p["id"], html.unescape(p.get("player_name") or ""),
+                season, league, p["id"], html.unescape(p.get("player_name") or ""),
                 html.unescape(p.get("team_title") or ""),
                 p.get("position"), int(p.get("games") or 0), int(p.get("time") or 0),
                 int(p.get("goals") or 0), float(p.get("xG") or 0),
@@ -150,7 +154,7 @@ def fetch_league(db, league, slug, fetched_at):
                 "INSERT OR REPLACE INTO understat_team_matches VALUES "
                 "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    SEASON, league, team["title"], match.get("date"), match.get("h_a"),
+                    season, league, team["title"], match.get("date"), match.get("h_a"),
                     float(match.get("xG") or 0), float(match.get("xGA") or 0),
                     float(match.get("npxG") or 0), float(match.get("npxGA") or 0),
                     ppda_ratio(match.get("ppda")), ppda_ratio(match.get("ppda_allowed")),
@@ -165,16 +169,31 @@ def fetch_league(db, league, slug, fetched_at):
     print(f"  {league}: {len(players)} players, {match_count} team-match rows")
 
 
+def seasons_from_args(argv):
+    if "--backfill" in argv:
+        return [str(y) for y in range(FIRST_SEASON, int(SEASON) + 1)]
+    explicit = [a for a in argv if not a.startswith("-")]
+    if explicit:
+        bad = [a for a in explicit if not a.isdigit() or not FIRST_SEASON <= int(a) <= int(SEASON)]
+        if bad:
+            raise SystemExit(f"Season must be a starting year {FIRST_SEASON}-{SEASON}, got: {' '.join(bad)}")
+        return explicit
+    return [SEASON]
+
+
 def main() -> None:
     DATA_DIR.mkdir(exist_ok=True)
     db = sqlite3.connect(DB_PATH)
     migrate_if_needed(db)
     fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    for league, slug in LEAGUES.items():
-        fetch_league(db, league, slug, fetched_at)
-        db.commit()
-        time.sleep(REQUEST_PAUSE)
+    seasons = seasons_from_args(sys.argv[1:])
+    for season in seasons:
+        print(f"--- season {season}/{int(season) % 100 + 1} ---")
+        for league, slug in LEAGUES.items():
+            fetch_league(db, league, slug, season, fetched_at)
+            db.commit()
+            time.sleep(REQUEST_PAUSE)
 
     totals = db.execute(
         "SELECT league, COUNT(*) FROM understat_players GROUP BY league"

@@ -107,6 +107,14 @@ nav.lgswitch button[aria-selected="true"] {
   border-color: transparent;
 }
 .tagline { margin: 2px 0 0; color: var(--text-secondary); font-size: 14.5px; }
+nav.seasonnav { margin: 18px 0 0; }
+nav.seasonnav label { font-size: 13px; color: var(--text-secondary); margin-right: 6px; }
+nav.seasonnav select {
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--text-primary);
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; cursor: pointer;
+}
+nav.seasonnav select:hover { border-color: var(--accent); }
 .subnav { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 2px; }
 .subnav a {
   font-size: 12px; font-weight: 600; color: var(--text-secondary);
@@ -2386,22 +2394,73 @@ def scope_to_current_season(db):
         )
 
 
-def main() -> None:
-    if not DB_PATH.exists():
-        raise SystemExit("No football.sqlite found - run `python fetch_data.py` first.")
-    db = sqlite3.connect(DB_PATH)
-    scope_to_current_season(db)
+def scope_to_archive_season(db, season):
+    # archive pages are Understat-only: matchday results and standings
+    # snapshots are tracked for the current season, not backfilled
+    db.execute("CREATE TEMP VIEW matches AS SELECT * FROM main.matches WHERE 0")
+    db.execute("CREATE TEMP VIEW standings AS SELECT * FROM main.standings WHERE 0")
+    for table in ("understat_players", "understat_team_matches"):
+        db.execute(
+            f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} "
+            f"WHERE season = '{season}'"
+        )
+
+
+def season_slug(season):
+    """Understat starting year -> archive file stem, '2018' -> '2018-19'."""
+    return f"{season}-{(int(season) + 1) % 100:02d}"
+
+
+def season_nav(db, current_page_season=None):
+    """Dropdown linking the current dashboard and the archive pages.
+    current_page_season is None on the live dashboard, else the archive season."""
+    seasons = [r[0] for r in db.execute(
+        "SELECT DISTINCT season FROM main.understat_players ORDER BY season DESC"
+    )]
+    if len(seasons) < 2:
+        return ""
+    current = seasons[0]
+    options = []
+    for s in seasons:
+        label = f"{s}/{int(s) % 100 + 1}" + (" (current)" if s == current else "")
+        if s == current_page_season or (current_page_season is None and s == current):
+            href = ""  # this page
+        elif s == current:
+            href = "../index.html"
+        elif current_page_season is None:
+            href = f"archive/{season_slug(s)}.html"
+        else:
+            href = f"{season_slug(s)}.html"
+        options.append(
+            f"<option value='{escape(href)}'{' selected' if not href else ''}>"
+            f"{escape(label)}</option>"
+        )
+    return (
+        "<nav class='seasonnav'><label for='season-select'>Season</label>"
+        "<select id='season-select' "
+        "onchange='if(this.value)location.href=this.value'>"
+        + "".join(options) + "</select></nav>"
+    )
+
+
+def build_page(db, nav, generated, archive_label=None):
+    """The full dashboard HTML. archive_label (e.g. '2018/19') switches to the
+    archive layout: Understat tabs only, no volatile 'Generated' badge so the
+    file only changes when the code or data does."""
+    archive = archive_label is not None
+    league_table = "understat_players" if archive else "matches"
     stored = [
-        r[0] for r in db.execute("SELECT DISTINCT league FROM matches ORDER BY league")
+        r[0] for r in db.execute(f"SELECT DISTINCT league FROM {league_table} ORDER BY league")
         if r[0] not in HIDDEN_LEAGUES
     ]
     leagues = [lg for lg in LEAGUE_ORDER if lg in stored]
     leagues += [lg for lg in stored if lg not in leagues]
-    generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    panels = [("league", "League", "".join(
-        lgview(lg, league_section(db, lg), i == 0) for i, lg in enumerate(leagues)
-    ))]
+    panels = []
+    if not archive:
+        panels.append(("league", "League", "".join(
+            lgview(lg, league_section(db, lg), i == 0) for i, lg in enumerate(leagues)
+        )))
     if understat_available(db):
         panels.append(("teams", "Team analytics", teams_panel(db, leagues)))
         panels.append(("players", "Players", players_panel(db, leagues)))
@@ -2426,31 +2485,78 @@ def main() -> None:
         for i, (pid, _, content) in enumerate(panels)
     )
 
-    badges = "".join(
-        f"<span class='badge'>{escape(text)}</span>"
-        for text in ([f"Big five leagues {season_label(db)}".strip()]
-                     + ["TheSportsDB + Understat", f"Generated {generated}"])
-    )
-    html = (
+    if archive:
+        badge_texts = [f"Big five leagues {archive_label}", "Season archive", "Understat"]
+        title = f"Football dashboard — {archive_label}"
+        tagline = (
+            f"The {archive_label} season in the rear-view mirror — xG team analytics, "
+            "player profiles and second-order insights, frozen at full time. "
+            "Matchday results and standings live on the current dashboard only."
+        )
+        footer = ("Season archive — final Understat data for a finished campaign. "
+                  "Rebuilt whenever the report generator changes.")
+    else:
+        badge_texts = [f"Big five leagues {season_label(db)}".strip(),
+                       "TheSportsDB + Understat", f"Generated {generated}"]
+        title = "Football dashboard"
+        tagline = ("The big five European leagues under the hood — standings, "
+                   "xG team analytics, player profiles and second-order insights.")
+        footer = ("Standings are computed from the stored results. Run "
+                  "<code>python fetch_data.py</code> and <code>python fetch_understat.py</code> "
+                  "regularly to keep the database current.")
+    badges = "".join(f"<span class='badge'>{escape(t)}</span>" for t in badge_texts)
+
+    return (
         f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         f"<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        f"<title>Football dashboard</title><style>{CSS}</style></head><body><div class='wrap'>"
+        f"<title>{escape(title)}</title><style>{CSS}</style></head><body><div class='wrap'>"
         f"<header class='hero'><h1>Football dashboard</h1>"
-        f"<p class='tagline'>The big five European leagues under the hood — standings, "
-        f"xG team analytics, player profiles and second-order insights.</p>"
+        f"<p class='tagline'>{tagline}</p>"
         f"<div class='badges'>{badges}</div></header>"
-        + lg_bar + tab_bar + panel_html
-        + "<footer>Standings are computed from the stored results. Run "
-        "<code>python fetch_data.py</code> and <code>python fetch_understat.py</code> "
-        "regularly to keep the database current.</footer></div>"
+        + nav + lg_bar + tab_bar + panel_html
+        + f"<footer>{footer}</footer></div>"
         f"<script>{EXPLORER_JS}</script></body></html>"
     )
+
+
+def main() -> None:
+    if not DB_PATH.exists():
+        raise SystemExit("No football.sqlite found - run `python fetch_data.py` first.")
+    generated = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    db = sqlite3.connect(DB_PATH)
+    scope_to_current_season(db)
+    html = build_page(db, season_nav(db), generated)
     REPORT_PATH.write_text(html, encoding="utf-8")
     DOCS_PATH.parent.mkdir(exist_ok=True)
     DOCS_PATH.write_text(html, encoding="utf-8")
+    archive_seasons = [r[0] for r in db.execute(
+        "SELECT DISTINCT season FROM main.understat_players "
+        "WHERE season < (SELECT MAX(season) FROM main.understat_players) "
+        "ORDER BY season DESC"
+    )]
     db.close()
     print(f"Report written to {REPORT_PATH}")
     print(f"Dashboard copy written to {DOCS_PATH} (commit it and it's served by GitHub Pages)")
+
+    # one frozen page per past season, next to the report and under docs/
+    # (the local copy keeps report.html's season dropdown working offline)
+    local_dir = PROJECT_DIR / "archive"
+    docs_dir = DOCS_PATH.parent / "archive"
+    for target in (local_dir, docs_dir):
+        target.mkdir(exist_ok=True)
+    for season in archive_seasons:
+        db = sqlite3.connect(DB_PATH)
+        scope_to_archive_season(db, season)
+        label = f"{season}/{int(season) % 100 + 1}"
+        html = build_page(db, season_nav(db, season), generated, archive_label=label)
+        for target in (local_dir, docs_dir):
+            (target / f"{season_slug(season)}.html").write_text(html, encoding="utf-8")
+        db.close()
+    if archive_seasons:
+        print(f"Archive pages written for {len(archive_seasons)} seasons "
+              f"({season_slug(archive_seasons[-1])} … {season_slug(archive_seasons[0])}) "
+              f"to {docs_dir} and {local_dir}")
 
 
 if __name__ == "__main__":

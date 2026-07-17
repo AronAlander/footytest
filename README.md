@@ -25,6 +25,15 @@ The season is picked automatically: both fetchers flip to the new campaign on
 and chart to each league's current season — older seasons stay in the database
 as history but never mix into the dashboard. No annual maintenance needed.
 
+Older seasons are browsable too: a **Season** dropdown in the header links to one
+frozen archive page per past season (`docs/archive/2014-15.html` …). Understat's
+history goes back to 2014/15, and `python fetch_understat.py --backfill` pulls
+all of it (~55 requests, a couple of minutes). Archive pages carry the four
+Understat tabs — team analytics, players, insights, Best of Europe — including
+the team head-to-head deep dive; matchday results and standings snapshots exist
+for the current season only (backfilling them from TheSportsDB would take
+~2,000 throttled requests, an hour+ — skipped for now).
+
 `fetch_data.py` downloads league tables, results, and fixtures for all five leagues
 and stores them in `football.sqlite` (matches are upserted; standings are saved as dated
 snapshots, so history accumulates the more often you run it). Matches are fetched
@@ -136,3 +145,8 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
       dependence, shot diet, hidden buildup engines, penalty dependence
 - [x] Automatic season rollover (fetchers flip on 1 August; the report scopes
       to each league's current season, keeping old seasons as history)
+- [x] Season archive: Understat backfill to 2014/15 and one frozen archive page
+      per past season, linked from a Season dropdown
+- [ ] Backfill matchday results for old seasons from TheSportsDB (works on the
+      test key but needs ~2,000 throttled requests; would enable the League tab
+      and meetings-by-round on archive pages)
