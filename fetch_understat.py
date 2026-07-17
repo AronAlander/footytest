@@ -28,7 +28,10 @@ LEAGUES = {
     "Bundesliga": "Bundesliga",
     "Ligue 1": "Ligue_1",
 }
-SEASON = "2025"  # Understat labels seasons by starting year: 2025 = 2025/26
+# Understat labels seasons by starting year (2025 = 2025/26); the autumn-spring
+# campaigns start in August, so the season flips automatically on 1 August
+_NOW = datetime.now()
+SEASON = str(_NOW.year if _NOW.month >= 8 else _NOW.year - 1)
 REQUEST_PAUSE = 2.0
 
 HEADERS = {

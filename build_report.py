@@ -564,7 +564,7 @@ def xg_table(db, league):
         """SELECT team, COUNT(*), SUM(pts), SUM(xpts), SUM(scored), SUM(missed),
                   SUM(xg), SUM(xga), SUM(npxgd)
            FROM understat_team_matches WHERE league = ?
-           GROUP BY team ORDER BY SUM(pts) DESC, SUM(xpts) DESC""",
+           GROUP BY team ORDER BY SUM(pts) DESC, SUM(xpts) DESC, team""",
         (league,),
     ).fetchall()
     if not rows:
@@ -780,7 +780,7 @@ def rolling_sparklines(db, league):
     max_abs = max(abs(v) for values in rolling.values() for v in values)
     order = [r[0] for r in db.execute(
         "SELECT team FROM understat_team_matches WHERE league = ? "
-        "GROUP BY team ORDER BY SUM(pts) DESC", (league,)
+        "GROUP BY team ORDER BY SUM(pts) DESC, team", (league,)
     ) if r[0] in rolling]
 
     n_matches = max(len(v) for v in series.values())
@@ -1033,7 +1033,7 @@ def shot_diet_scatter(db, league, top_shooters=30, min_minutes=900):
     rows = db.execute(
         """SELECT player_name, team, minutes, shots, npg, npxg FROM understat_players
            WHERE league = ? AND minutes >= ? AND shots > 0
-           ORDER BY shots DESC LIMIT ?""",
+           ORDER BY shots DESC, player_name LIMIT ?""",
         (league, min_minutes, top_shooters),
     ).fetchall()
     if len(rows) < 2:
@@ -1076,7 +1076,7 @@ def buildup_table(db, league, limit=12, min_minutes=1800):
         """SELECT player_name, team, position, minutes, xg_buildup, xg_chain,
                   goals + assists
            FROM understat_players WHERE league = ? AND minutes >= ?
-           ORDER BY xg_buildup * 90.0 / minutes DESC LIMIT ?""",
+           ORDER BY xg_buildup * 90.0 / minutes DESC, player_name LIMIT ?""",
         (league, min_minutes, limit),
     ).fetchall()
     if not rows:
@@ -1118,7 +1118,7 @@ def penalty_table(db, league, limit=8):
     rows = db.execute(
         """SELECT player_name, team, goals, goals - npg, xg - npxg
            FROM understat_players WHERE league = ? AND goals > npg
-           ORDER BY goals - npg DESC, goals DESC LIMIT ?""",
+           ORDER BY goals - npg DESC, goals DESC, player_name LIMIT ?""",
         (league, limit),
     ).fetchall()
     if not rows:
@@ -1176,7 +1176,7 @@ def europe_attackers_table(db, limit=25, min_minutes=1350):
         """SELECT player_name, team, league, minutes, npg, assists, npxg, xa,
                   (npxg + xa) * 90.0 / minutes AS threat
            FROM understat_players WHERE minutes >= ?
-           ORDER BY threat DESC LIMIT ?""",
+           ORDER BY threat DESC, player_name LIMIT ?""",
         (min_minutes, limit),
     ).fetchall()
     if not rows:
@@ -1219,7 +1219,7 @@ def europe_justice_table(db, limit=20):
     rows = db.execute(
         """SELECT team, league, COUNT(*), SUM(pts), SUM(xpts), SUM(npxgd)
            FROM understat_team_matches GROUP BY team, league
-           ORDER BY SUM(xpts) * 1.0 / COUNT(*) DESC LIMIT ?""",
+           ORDER BY SUM(xpts) * 1.0 / COUNT(*) DESC, team LIMIT ?""",
         (limit,),
     ).fetchall()
     if not rows:
@@ -1282,7 +1282,7 @@ def finishing_rows(db, league, order, limit=8, min_minutes=900):
     return db.execute(
         f"""SELECT player_name, team, minutes, shots, goals, xg, goals - xg AS diff
             FROM understat_players WHERE league = ? AND minutes >= ?
-            ORDER BY diff {order} LIMIT ?""",
+            ORDER BY diff {order}, player_name LIMIT ?""",
         (league, min_minutes, limit),
     ).fetchall()
 
@@ -1308,7 +1308,7 @@ def creators_table(db, league, limit=8, min_minutes=900):
     rows = db.execute(
         """SELECT player_name, team, minutes, key_passes, assists, xa, assists - xa
            FROM understat_players WHERE league = ? AND minutes >= ?
-           ORDER BY xa DESC LIMIT ?""",
+           ORDER BY xa DESC, player_name LIMIT ?""",
         (league, min_minutes, limit),
     ).fetchall()
     body = ""
@@ -1331,7 +1331,8 @@ def load_players(db, league):
     rows = db.execute(
         """SELECT player_name, team, position, games, minutes, goals, xg,
                   assists, xa, shots, key_passes, npg, npxg, xg_chain, xg_buildup
-           FROM understat_players WHERE league = ? ORDER BY xg DESC""",
+           FROM understat_players WHERE league = ?
+           ORDER BY xg DESC, player_name, team""",
         (league,),
     ).fetchall()
     return [
@@ -2352,10 +2353,44 @@ def players_panel(db, leagues):
     )
 
 
+def scope_to_current_season(db):
+    # the fetchers keep prior seasons in the database (season is part of each
+    # primary key), and no query in this file filters on it: these temp views
+    # shadow the real tables so the report never mixes seasons. Per-league
+    # rather than global, because calendar-year leagues (Allsvenskan) label
+    # seasons differently from the autumn-spring big five.
+    #
+    # matches/standings anchor on the newest season with a COMPLETED match, not
+    # MAX(season): TheSportsDB publishes next season's fixtures early, and a
+    # plain MAX would scope a league to a handful of unplayed games all summer.
+    # Seasons newer than the anchor stay visible (upcoming fixtures), which is
+    # safe because only the anchor season can contain completed matches.
+    played = (
+        "(SELECT MAX(u.season) FROM main.matches u "
+        "WHERE u.league = t.league AND u.home_score IS NOT NULL)"
+    )
+    db.execute(
+        "CREATE TEMP VIEW matches AS SELECT * FROM main.matches t "
+        f"WHERE t.season >= {played}"
+    )
+    db.execute(
+        "CREATE TEMP VIEW standings AS SELECT * FROM main.standings t "
+        f"WHERE t.season >= {played}"
+    )
+    # Understat only serves played matches, so newest-with-rows is safe here
+    for table in ("understat_players", "understat_team_matches"):
+        db.execute(
+            f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} t "
+            f"WHERE t.season = (SELECT MAX(u.season) FROM main.{table} u "
+            f"WHERE u.league = t.league)"
+        )
+
+
 def main() -> None:
     if not DB_PATH.exists():
         raise SystemExit("No football.sqlite found - run `python fetch_data.py` first.")
     db = sqlite3.connect(DB_PATH)
+    scope_to_current_season(db)
     stored = [
         r[0] for r in db.execute("SELECT DISTINCT league FROM matches ORDER BY league")
         if r[0] not in HIDDEN_LEAGUES

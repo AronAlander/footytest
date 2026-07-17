@@ -20,6 +20,11 @@ python fetch_understat.py
 python build_report.py
 ```
 
+The season is picked automatically: both fetchers flip to the new campaign on
+1 August (European seasons run autumn–spring), and the report scopes every table
+and chart to each league's current season — older seasons stay in the database
+as history but never mix into the dashboard. No annual maintenance needed.
+
 `fetch_data.py` downloads league tables, results, and fixtures for all five leagues
 and stores them in `football.sqlite` (matches are upserted; standings are saved as dated
 snapshots, so history accumulates the more often you run it). Matches are fetched
@@ -129,3 +134,5 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
 - [x] Web dashboard for visualizations (GitHub Pages from `docs/`)
 - [x] Hidden analytics: justice table, luck quadrants, chaos index, venue
       dependence, shot diet, hidden buildup engines, penalty dependence
+- [x] Automatic season rollover (fetchers flip on 1 August; the report scopes
+      to each league's current season, keeping old seasons as history)

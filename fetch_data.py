@@ -31,14 +31,19 @@ LEAGUES = {
     #     "season": str(date.today().year),
     #     "rounds": 30,
     # },
-    # The big five European leagues, all autumn-spring; bump the season
-    # strings when the new campaigns start in August
-    "Serie A": {"id": "4332", "season": "2025-2026", "rounds": 38},
-    "Premier League": {"id": "4328", "season": "2025-2026", "rounds": 38},
-    "La Liga": {"id": "4335", "season": "2025-2026", "rounds": 38},
-    "Bundesliga": {"id": "4331", "season": "2025-2026", "rounds": 34},
-    "Ligue 1": {"id": "4334", "season": "2025-2026", "rounds": 34},
+    # The big five European leagues, all autumn-spring; SEASON below flips
+    # to the new campaign automatically on 1 August, no manual bump needed
+    "Serie A": {"id": "4332", "season": None, "rounds": 38},
+    "Premier League": {"id": "4328", "season": None, "rounds": 38},
+    "La Liga": {"id": "4335", "season": None, "rounds": 38},
+    "Bundesliga": {"id": "4331", "season": None, "rounds": 34},
+    "Ligue 1": {"id": "4334", "season": None, "rounds": 34},
 }
+_START_YEAR = date.today().year if date.today().month >= 8 else date.today().year - 1
+SEASON = f"{_START_YEAR}-{_START_YEAR + 1}"
+for _league in LEAGUES.values():
+    if _league["season"] is None:
+        _league["season"] = SEASON
 
 PROJECT_DIR = Path(__file__).parent
 DATA_DIR = PROJECT_DIR / "data"
