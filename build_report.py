@@ -275,6 +275,25 @@ svg .radar-poly { fill-opacity: 0.14; stroke-width: 2; }
 svg .radar-poly.pc0 { stroke: var(--accent); fill: var(--accent); }
 svg .radar-poly.pc1 { stroke: var(--win); fill: var(--win); }
 svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
+.h2h-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+         color: var(--text-secondary); margin: 20px 0 8px; font-weight: 700; }
+.h2h-metric { margin: 9px 0; }
+.h2h-lab { text-align: center; font-size: 11px; color: var(--text-secondary);
+           text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+.h2h-row { display: flex; align-items: center; gap: 10px; }
+.h2h-val { flex: 0 0 108px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.h2h-val.a { text-align: right; }
+.h2h-val.lead { font-weight: 700; }
+.h2h-bar { flex: 1; display: flex; height: 10px; border-radius: 5px; overflow: hidden;
+           background: var(--surface); border: 1px solid var(--border); }
+.h2h-bar i { display: block; height: 100%; }
+.h2h-bar i.a { background: var(--accent); }
+.h2h-bar i.b { background: var(--win); margin-left: auto; }
+.h2h-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
+@media (max-width: 760px) { .h2h-cols { grid-template-columns: 1fr; } }
+svg .h2h-line { fill: none; stroke-width: 2; }
+svg .h2h-line.a { stroke: var(--accent); }
+svg .h2h-line.b { stroke: var(--win); }
 #player-table th.sortable { cursor: pointer; user-select: none; }
 #player-table th.sortable:hover { color: var(--text-primary); }
 #player-table th .arrow { font-size: 10px; }
@@ -1425,7 +1444,24 @@ def load_teams(db, league):
     ]
 
 
-def team_compare(teams_by_lg):
+def load_team_matches(db, league):
+    # per-team chronological match lists power the head-to-head deep dive:
+    # each entry is [date, home_away, goals_for, goals_against, xg, xga, npxgd, pts]
+    rows = db.execute(
+        """SELECT team, match_date, home_away, scored, missed, xg, xga, npxgd, pts
+           FROM understat_team_matches WHERE league = ? ORDER BY team, match_date""",
+        (league,),
+    ).fetchall()
+    out = {}
+    for r in rows:
+        out.setdefault(unescape(r[0]), []).append(
+            [r[1][:10], r[2], r[3], r[4],
+             round(r[5], 2), round(r[6], 2), round(r[7], 2), r[8]]
+        )
+    return out
+
+
+def team_compare(teams_by_lg, tm_by_lg):
     if not any(teams_by_lg.values()):
         return ""
     # select options are (re)built client-side per league
@@ -1434,13 +1470,19 @@ def team_compare(teams_by_lg):
         for i in (1, 2, 3)
     )
     payload = json.dumps(teams_by_lg, ensure_ascii=False).replace("</", "<\\/")
+    tm_payload = json.dumps(
+        tm_by_lg, ensure_ascii=False, separators=(",", ":")
+    ).replace("</", "<\\/")
     body = (
         f"<div class='controls'>{selects}"
         "<button id='tc-clear' type='button'>Clear</button></div>"
         "<div class='chart-card' id='tc-empty'><p class='dim' style='margin:4px 2px'>"
-        "Pick two or three teams above to see their playing styles side by side.</p></div>"
+        "Pick two or three teams above to see their playing styles side by side. "
+        "Picking exactly <em>two</em> unlocks a head-to-head deep dive: this season's "
+        "meetings, a tale-of-the-tape bar duel, recent form, home/away splits and "
+        "overlaid form curves.</p></div>"
         "<div class='chart-card' id='tc-card' hidden></div>"
-        f"<script>const TEAMS_BY_LG = {payload};</script>"
+        f"<script>const TEAMS_BY_LG = {payload};\nconst TM_BY_LG = {tm_payload};</script>"
     )
     about = (
         "<p><strong>What it shows.</strong> Up to three teams overlaid on a radar of six "
@@ -1460,6 +1502,15 @@ def team_compare(teams_by_lg):
         "vs expected points. Shots on target aren't in the data — Understat's team feed "
         "doesn't publish them — so chance <em>quality</em> (xG) stands in for shot "
         "accuracy.</p>"
+        "<p><strong>Head-to-head mode.</strong> With exactly two teams picked, the card "
+        "goes deeper: a tale-of-the-tape strip where each bar is split by the two sides' "
+        "league-percentile share (the longer half leads, the number in brackets is the "
+        "league rank as a percentile ordinal), this season's actual meetings between the "
+        "clubs with the score <em>and</em> each side's xG that day, the last five "
+        "results, points and non-penalty xG difference split by home/away, and both "
+        "teams' rolling 6-match npxGD form curves overlaid on one chart — so you can "
+        "see not just who is better on the season, but who is better <em>right "
+        "now</em>, and what happened when they actually met.</p>"
     )
     return block("Team comparison", body, about)
 
@@ -1846,6 +1897,7 @@ EXPLORER_JS = """
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   let TEAMS = TEAMS_BY_LG[window.CUR_LG] || [];
+  let TM = TM_BY_LG[window.CUR_LG] || {};
   function rebuildSelects() {
     const options = TEAMS.map((t) => '<option>' + esc(t.team) + '</option>').join('');
     [1, 2, 3].forEach((i) => {
@@ -1926,6 +1978,124 @@ EXPLORER_JS = """
     ).join('');
     return "<div style='overflow-x:auto'><table>" + head + rows + extras + '</table></div>';
   }
+
+  /* ---- head-to-head deep dive: shown when exactly two teams are picked ---- */
+  const TAPE = RADAR.concat([
+    { key: 'pts',  label: 'Points',          unit: 'season total', dec: 0 },
+    { key: 'xpts', label: 'Expected points', unit: 'season total', dec: 1 },
+    { key: 'gpm',  label: 'Goals',           unit: 'per match',    dec: 2 },
+    { key: 'cpm',  label: 'Conceded',        unit: 'per match',    dec: 2, invert: true }
+  ]);
+  function tapeHtml(a, b) {
+    const rows = TAPE.map((m) => {
+      const pa = pct(a, m), pb = pct(b, m);
+      const shareA = pa + pb === 0 ? 50 : Math.round(100 * pa / (pa + pb));
+      const cell = (t, p, side, lead) =>
+        "<span class='h2h-val " + side + (lead ? ' lead' : '') + "'>" + fmt(t, m) +
+        " <span class='dim'>(" + ord(p) + ")</span></span>";
+      return "<div class='h2h-metric'><div class='h2h-lab'>" + m.label +
+        ' \\u00b7 ' + m.unit + "</div><div class='h2h-row'>" +
+        cell(a, pa, 'a', pa > pb) +
+        "<div class='h2h-bar'><i class='a' style='width:" + shareA + "%'></i>" +
+        "<i class='b' style='width:" + (100 - shareA) + "%'></i></div>" +
+        cell(b, pb, 'b', pb > pa) + '</div></div>';
+    }).join('');
+    return "<div class='h2h-h'>Tale of the tape <span class='dim'>" +
+      '\\u00b7 bars split by league percentile</span></div>' + rows;
+  }
+  function meetingsHtml(a, b) {
+    const A = TM[a.team] || [], B = TM[b.team] || [];
+    const rows = [];
+    A.forEach((m) => {
+      // the fixture appears in both teams' lists: same date, opposite venue,
+      // mirrored score AND mirrored xG (score alone can collide on a shared matchday)
+      const hit = B.some((q) => q[0] === m[0] && q[1] !== m[1] &&
+        q[2] === m[3] && q[3] === m[2] && q[4] === m[5] && q[5] === m[4]);
+      if (!hit) return;
+      const home = m[1] === 'h' ? a : b, away = m[1] === 'h' ? b : a;
+      const gs = m[1] === 'h' ? [m[2], m[3]] : [m[3], m[2]];
+      const xs = m[1] === 'h' ? [m[4], m[5]] : [m[5], m[4]];
+      rows.push("<tr><td class='dim'>" + m[0] + '</td><td>' + esc(home.team) +
+        " <span class='score'>" + gs[0] + '\\u2013' + gs[1] + '</span> ' + esc(away.team) +
+        "</td><td class='num dim'>xG " + xs[0].toFixed(2) + '\\u2013' + xs[1].toFixed(2) +
+        '</td></tr>');
+    });
+    const body = rows.length
+      ? "<div style='overflow-x:auto'><table>" + rows.join('') + '</table></div>'
+      : "<p class='dim'>No meetings between these two so far this season.</p>";
+    return "<div class='h2h-h'>Meetings this season</div>" + body;
+  }
+  function formHtml(a, b) {
+    const chips = (t) => (TM[t.team] || []).slice(-5).map((m) => {
+      const r = m[7] === 3 ? 'W' : m[7] === 1 ? 'D' : 'L';
+      return "<span class='chip " + r + "'>" + r + '</span>';
+    }).join('');
+    const line = (t, i) => "<p style='margin:7px 0'><span class='pc-dot pc" + i + "'></span>" +
+      esc(t.team) + ' \\u00a0' + chips(t) + '</p>';
+    return "<div class='h2h-h'>Last five matches <span class='dim'>\\u00b7 newest right</span></div>" +
+      line(a, 0) + line(b, 1);
+  }
+  function splitHtml(a, b) {
+    const agg = (t, ha) => {
+      const l = (TM[t.team] || []).filter((m) => m[1] === ha);
+      if (!l.length) return ['\\u2013', '\\u2013'];
+      const pts = l.reduce((s, m) => s + m[7], 0) / l.length;
+      const nd = l.reduce((s, m) => s + m[6], 0) / l.length;
+      return [pts.toFixed(2), ((nd > 0 ? '+' : '') + nd.toFixed(2)).replace('-', '\\u2212')];
+    };
+    const row = (t, i) => {
+      const h = agg(t, 'h'), aw = agg(t, 'a');
+      return "<tr><td><span class='pc-dot pc" + i + "'></span>" + esc(t.team) + '</td>' +
+        [h[0], aw[0], h[1], aw[1]].map((v) => "<td class='num'>" + v + '</td>').join('') + '</tr>';
+    };
+    return "<div class='h2h-h'>Home / away split <span class='dim'>\\u00b7 per match</span></div>" +
+      "<div style='overflow-x:auto'><table><tr><th></th><th class='num'>pts home</th>" +
+      "<th class='num'>pts away</th><th class='num'>npxGD home</th><th class='num'>npxGD away</th></tr>" +
+      row(a, 0) + row(b, 1) + '</table></div>';
+  }
+  function curveHtml(a, b) {
+    const roll = (t) => {
+      const vals = (TM[t.team] || []).map((m) => m[6]);
+      return vals.map((_, i) => {
+        const s = vals.slice(Math.max(0, i - 5), i + 1);
+        return s.reduce((x, y) => x + y, 0) / s.length;
+      });
+    };
+    const sa = roll(a), sb = roll(b);
+    const n = Math.max(sa.length, sb.length);
+    if (n < 2) return '';
+    const W = 640, H = 210, pl = 40, pr = 12, ptop = 12, pbot = 22;
+    const maxAbs = Math.max(0.5, ...sa.map(Math.abs), ...sb.map(Math.abs)) * 1.08;
+    const x = (i) => pl + (W - pl - pr) * i / (n - 1);
+    const y = (v) => ptop + (H - ptop - pbot) * (1 - (v + maxAbs) / (2 * maxAbs));
+    const line = (s, cls) => "<polyline class='h2h-line " + cls + "' points='" +
+      s.map((v, i) => x(i).toFixed(1) + ',' + y(v).toFixed(1)).join(' ') + "'/>";
+    const lab = (v) => (v > 0 ? '+' : v < 0 ? '\\u2212' : '') + Math.abs(v).toFixed(1);
+    let g = '';
+    [maxAbs * 0.85, -maxAbs * 0.85].forEach((v) => {
+      g += "<line class='gridline' x1='" + pl + "' y1='" + y(v).toFixed(1) +
+        "' x2='" + (W - pr) + "' y2='" + y(v).toFixed(1) + "'/>";
+    });
+    g += "<line class='zeroline' x1='" + pl + "' y1='" + y(0).toFixed(1) +
+      "' x2='" + (W - pr) + "' y2='" + y(0).toFixed(1) + "'/>";
+    [maxAbs * 0.85, 0, -maxAbs * 0.85].forEach((v) => {
+      g += "<text x='" + (pl - 6) + "' y='" + (y(v) + 4).toFixed(1) +
+        "' text-anchor='end'>" + lab(v) + '</text>';
+    });
+    g += "<text x='" + ((pl + W - pr) / 2).toFixed(0) + "' y='" + (H - 5) +
+      "' text-anchor='middle'>match number</text>";
+    return "<div class='h2h-h'>Form curves <span class='dim'>\\u00b7 rolling 6-match " +
+      'npxG difference</span></div>' +
+      "<svg viewBox='0 0 " + W + ' ' + H + "' width='100%' style='max-width:680px;display:block' " +
+      "role='img' aria-label='Overlaid rolling form curves of both teams'>" +
+      g + line(sa, 'a') + line(sb, 'b') + '</svg>';
+  }
+  function h2hHtml(a, b) {
+    return tapeHtml(a, b) +
+      "<div class='h2h-cols'><div>" + meetingsHtml(a, b) + '</div><div>' +
+      formHtml(a, b) + splitHtml(a, b) + '</div></div>' + curveHtml(a, b);
+  }
+
   function renderTC() {
     const seen = new Set();
     const ts = [1, 2, 3].map((i) => byTeam($('tc-' + i).value))
@@ -1936,7 +2106,8 @@ EXPLORER_JS = """
     const legend = "<div class='pc-legend'>" + ts.map((t, i) =>
       "<span><span class='pc-dot pc" + i + "'></span>" + esc(t.team) +
       " <span class='dim'>(" + t.pts + " pts)</span></span>").join('') + '</div>';
-    card.innerHTML = legend + radarSvg(ts) + compareTable(ts);
+    card.innerHTML = legend + radarSvg(ts) +
+      (ts.length === 2 ? h2hHtml(ts[0], ts[1]) : compareTable(ts));
   }
   [1, 2, 3].forEach((i) => $('tc-' + i).addEventListener('change', renderTC));
   $('tc-clear').addEventListener('click', () => {
@@ -1945,6 +2116,7 @@ EXPLORER_JS = """
   });
   document.addEventListener('leaguechange', () => {
     TEAMS = TEAMS_BY_LG[window.CUR_LG] || [];
+    TM = TM_BY_LG[window.CUR_LG] || {};
     rebuildSelects();
     renderTC();
   });
@@ -2102,7 +2274,8 @@ def teams_panel(db, leagues):
     return (
         f"<h2>Team analytics <span class='dim'>({season_label(db)}, Understat)</span></h2>"
         + metric_glossary() + tables
-        + team_compare({lg: load_teams(db, lg) for lg in leagues})
+        + team_compare({lg: load_teams(db, lg) for lg in leagues},
+                       {lg: load_team_matches(db, lg) for lg in leagues})
         + charts
     )
 

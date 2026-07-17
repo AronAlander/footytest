@@ -48,7 +48,12 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   attack, defence, finishing, pressing, territory, box defence — with the raw
   per-match numbers underneath, deep-linkable via `#teams=A,B,C`),
   pressing-vs-territory scatter (PPDA against deep completions), rolling
-  xG-difference form curves.
+  xG-difference form curves. Picking exactly **two** teams turns the comparison
+  into a head-to-head deep dive: a tale-of-the-tape bar duel across ten metrics
+  (bars split by league-percentile share), this season's actual meetings between
+  the clubs with the score and both sides' xG, last-five form chips, points and
+  npxGD split by home/away, and both teams' rolling form curves overlaid on one
+  chart.
 - **Players** — an explorer over every tracked player (~590): search, team /
   position / minutes filters, a per-90 toggle, and click-to-sort columns for
   goals, xG, G−xG, assists, xA, shots, key passes, xGChain, xGBuildup and more.
