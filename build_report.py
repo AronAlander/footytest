@@ -294,6 +294,9 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 svg .h2h-line { fill: none; stroke-width: 2; }
 svg .h2h-line.a { stroke: var(--accent); }
 svg .h2h-line.b { stroke: var(--win); }
+svg .h2h-dot { stroke: var(--card); stroke-width: 1; }
+svg .h2h-dot.a { fill: var(--accent); }
+svg .h2h-dot.b { fill: var(--win); }
 #player-table th.sortable { cursor: pointer; user-select: none; }
 #player-table th.sortable:hover { color: var(--text-primary); }
 #player-table th .arrow { font-size: 10px; }
@@ -798,6 +801,14 @@ def rolling_sparklines(db, league):
         last = values[-1]
         sign = "up" if last >= 0 else "down"
         val_cls = "pos" if last > 0 else "neg" if last < 0 else "dim"
+        # one small dot per matchday so single matches are visible on the curve;
+        # rolling index i covers the window ending at matchday ROLLING_WINDOW + i
+        dots = "".join(
+            f"<circle class='spark-dot {'up' if v >= 0 else 'down'}' "
+            f"cx='{x:.1f}' cy='{y:.1f}' r='1.7'>"
+            f"<title>matchday {ROLLING_WINDOW + i}: {fmt_delta(v, 2)}</title></circle>"
+            for i, (v, (x, y)) in enumerate(zip(values, pts))
+        )
         cells.append(
             f"<div class='spark'><p class='name'><span class='rank'>{idx + 1}</span> "
             f"{escape(team)}<span class='val {val_cls}'>{fmt_delta(last, 2)}</span></p>"
@@ -816,6 +827,7 @@ def rolling_sparklines(db, league):
             f"<line class='zeroline' x1='0' y1='{mid}' x2='{w}' y2='{mid}'/>"
             f"<polyline class='spark-line up' points='{points}' clip-path='url(#sp-{lg_slug}-{idx}t)'/>"
             f"<polyline class='spark-line down' points='{points}' clip-path='url(#sp-{lg_slug}-{idx}b)'/>"
+            f"{dots}"
             f"<circle class='spark-dot {sign}' cx='{pts[-1][0]:.1f}' cy='{pts[-1][1]:.1f}' r='3'/>"
             "</svg></div>"
         )
@@ -824,8 +836,8 @@ def rolling_sparklines(db, league):
         f"matchday {ROLLING_WINDOW} → {n_matches}, the faint vertical line is "
         f"mid-season · <span class='pos'>green above zero</span> = out-creating "
         f"opponents, <span class='neg'>red below</span> = out-created · all panels "
-        f"share the same ±{max_abs:.1f} scale · dot and number = latest "
-        f"{ROLLING_WINDOW}-match window</p>"
+        f"share the same ±{max_abs:.1f} scale · one dot per matchday (hover for its "
+        f"value), the big dot and number = latest {ROLLING_WINDOW}-match window</p>"
     )
     chart = f"<div class='chart-card'>{legend}<div class='spark-grid'>{''.join(cells)}</div></div>"
     about = (
@@ -2055,21 +2067,27 @@ EXPLORER_JS = """
   }
   function curveHtml(a, b) {
     const roll = (t) => {
-      const vals = (TM[t.team] || []).map((m) => m[6]);
-      return vals.map((_, i) => {
-        const s = vals.slice(Math.max(0, i - 5), i + 1);
-        return s.reduce((x, y) => x + y, 0) / s.length;
+      const ms = TM[t.team] || [];
+      return ms.map((m, i) => {
+        const s = ms.slice(Math.max(0, i - 5), i + 1);
+        return { d: m[0], v: s.reduce((x, q) => x + q[6], 0) / s.length };
       });
     };
     const sa = roll(a), sb = roll(b);
     const n = Math.max(sa.length, sb.length);
     if (n < 2) return '';
-    const W = 640, H = 210, pl = 40, pr = 12, ptop = 12, pbot = 22;
-    const maxAbs = Math.max(0.5, ...sa.map(Math.abs), ...sb.map(Math.abs)) * 1.08;
+    const W = 640, H = 222, pl = 40, pr = 12, ptop = 12, pbot = 34;
+    const maxAbs = Math.max(0.5,
+      ...sa.map((p) => Math.abs(p.v)), ...sb.map((p) => Math.abs(p.v))) * 1.08;
     const x = (i) => pl + (W - pl - pr) * i / (n - 1);
     const y = (v) => ptop + (H - ptop - pbot) * (1 - (v + maxAbs) / (2 * maxAbs));
     const line = (s, cls) => "<polyline class='h2h-line " + cls + "' points='" +
-      s.map((v, i) => x(i).toFixed(1) + ',' + y(v).toFixed(1)).join(' ') + "'/>";
+      s.map((p, i) => x(i).toFixed(1) + ',' + y(p.v).toFixed(1)).join(' ') + "'/>";
+    const dots = (s, cls) => s.map((p, i) =>
+      "<circle class='h2h-dot " + cls + "' cx='" + x(i).toFixed(1) + "' cy='" +
+      y(p.v).toFixed(1) + "' r='2.4'><title>match " + (i + 1) + ' \\u00b7 ' + p.d +
+      ' \\u00b7 ' + ((p.v > 0 ? '+' : '') + p.v.toFixed(2)).replace('-', '\\u2212') +
+      '</title></circle>').join('');
     const lab = (v) => (v > 0 ? '+' : v < 0 ? '\\u2212' : '') + Math.abs(v).toFixed(1);
     let g = '';
     [maxAbs * 0.85, -maxAbs * 0.85].forEach((v) => {
@@ -2082,13 +2100,19 @@ EXPLORER_JS = """
       g += "<text x='" + (pl - 6) + "' y='" + (y(v) + 4).toFixed(1) +
         "' text-anchor='end'>" + lab(v) + '</text>';
     });
-    g += "<text x='" + ((pl + W - pr) / 2).toFixed(0) + "' y='" + (H - 5) +
+    for (let i = 5; i <= n; i += 5) {
+      g += "<line class='gridline' x1='" + x(i - 1).toFixed(1) + "' y1='" + (H - pbot) +
+        "' x2='" + x(i - 1).toFixed(1) + "' y2='" + (H - pbot + 4) + "'/>" +
+        "<text x='" + x(i - 1).toFixed(1) + "' y='" + (H - 18) +
+        "' text-anchor='middle'>" + i + '</text>';
+    }
+    g += "<text x='" + ((pl + W - pr) / 2).toFixed(0) + "' y='" + (H - 4) +
       "' text-anchor='middle'>match number</text>";
     return "<div class='h2h-h'>Form curves <span class='dim'>\\u00b7 rolling 6-match " +
-      'npxG difference</span></div>' +
+      'npxG difference \\u00b7 one dot per match, hover for date and value</span></div>' +
       "<svg viewBox='0 0 " + W + ' ' + H + "' width='100%' style='max-width:680px;display:block' " +
       "role='img' aria-label='Overlaid rolling form curves of both teams'>" +
-      g + line(sa, 'a') + line(sb, 'b') + '</svg>';
+      g + line(sa, 'a') + line(sb, 'b') + dots(sa, 'a') + dots(sb, 'b') + '</svg>';
   }
   function h2hHtml(a, b) {
     return tapeHtml(a, b) +
