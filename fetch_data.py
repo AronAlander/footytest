@@ -23,14 +23,14 @@ REQUEST_PAUSE = 2.1  # test key allows ~30 requests/minute
 RETRY_WAIT = 35      # seconds to back off after HTTP 429
 
 LEAGUES = {
-    # Allsvenskan is on hold while the project focuses on Serie A analytics
-    # (no free xG source exists for it) - uncomment to fetch it again:
-    # "Allsvenskan": {
-    #     "id": "4347",
-    #     # Allsvenskan runs over a calendar year
-    #     "season": str(date.today().year),
-    #     "rounds": 30,
-    # },
+    # Allsvenskan is back (2026-07-17): FotMob supplies its xG via
+    # fetch_fotmob.py, TheSportsDB the results and standings as usual
+    "Allsvenskan": {
+        "id": "4347",
+        # Allsvenskan runs over a calendar year
+        "season": str(date.today().year),
+        "rounds": 30,
+    },
     # The big five European leagues, all autumn-spring; SEASON below flips
     # to the new campaign automatically on 1 August, no manual bump needed
     "Serie A": {"id": "4332", "season": None, "rounds": 38},

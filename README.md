@@ -2,13 +2,10 @@
 Not serious work, just trying some good'ol vibecoding.
 
 Analytics tool for the **big five European leagues** — Serie A, Premier League,
-La Liga, Bundesliga and Ligue 1 — built on free, no-signup data sources. The
-dashboard has a league switcher; every tab (standings, team analytics, players,
-insights) works for all five leagues.
-
-Allsvenskan support is on hold — no free advanced-stats source exists for it. To
-bring back its basic data, uncomment its entry in `fetch_data.py` and remove it
-from `HIDDEN_LEAGUES` in `build_report.py`.
+La Liga, Bundesliga and Ligue 1 — **plus Allsvenskan**, built on free, no-signup
+data sources. The dashboard has a league switcher; every tab (standings, team
+analytics, players, insights) works for all five big leagues, and Allsvenskan
+gets standings plus an xG-powered reduced set (see below).
 
 ## Quick start
 
@@ -17,6 +14,7 @@ Requires Python 3.10+ (standard library only, no dependencies):
 ```
 python fetch_data.py
 python fetch_understat.py
+python fetch_fotmob.py
 python build_report.py
 ```
 
@@ -45,8 +43,19 @@ responses are also kept in `data/` for debugging.
 `fetch_understat.py` pulls advanced stats for all five leagues from Understat's
 public JSON endpoint (no signup, one request per league): per-match team
 xG/xGA/xPts/PPDA and per-player xG/xA for ~2,800 players. Understat only covers
-the big five leagues plus Russia — which is why Allsvenskan (no free xG source)
-stays on hold.
+the big five leagues plus Russia.
+
+`fetch_fotmob.py` covers **Allsvenskan** from FotMob's unofficial JSON endpoints
+(no key, no signing — verified 2026-07-17, but unofficial means it can break
+without notice): full player leaderboards (xG, xA, xGOT, shots on target,
+chances created; seasons back to 2017) and per-match team stats (xG, npxG,
+xGOT, shots on target, possession) at one request per match — a season is ~240
+matches, re-runs fetch only new results. FotMob has no PPDA, deep completions,
+xGChain/xGBuildup or xPts; xPts is computed here from each match's xG with a
+Poisson model. In the dashboard Allsvenskan therefore gets the League tab, the
+xG table, form curves, the team head-to-head deep dive (with a reduced radar)
+and curated player boards — but not the full player explorer or the
+pressing/territory charts, and it stays out of Best of Europe.
 
 `build_report.py` turns the database into a self-contained `report.html` — open it
 in any browser (vanilla JavaScript, works offline from a double-click). It also
@@ -139,7 +148,8 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
 - [x] Compute standings trends, form tables, home/away splits
 - [x] Team style profiles (PPDA pressing intensity vs deep completions)
 - [x] Rolling xG-difference form curves
-- [ ] xG for Allsvenskan via FotMob (unofficial API, fragile)
+- [x] xG for Allsvenskan via FotMob (unofficial API — xG/xA/xGOT/SoT, player
+      boards, xG table, form curves, head-to-head; Poisson-computed xPts)
 - [x] Web dashboard for visualizations (GitHub Pages from `docs/`)
 - [x] Hidden analytics: justice table, luck quadrants, chaos index, venue
       dependence, shot diet, hidden buildup engines, penalty dependence

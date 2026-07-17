@@ -21,10 +21,15 @@ REPORT_PATH = PROJECT_DIR / "report.html"
 DOCS_PATH = PROJECT_DIR / "docs" / "index.html"  # committed copy, served by GitHub Pages
 
 # Leagues kept in the database but left out of the report for now
-HIDDEN_LEAGUES = {"Allsvenskan"}
+HIDDEN_LEAGUES = set()  # Allsvenskan came off the bench 2026-07-17 (FotMob xG)
 
 # Preferred order of the league switcher; anything else stored comes after
-LEAGUE_ORDER = ["Serie A", "Premier League", "La Liga", "Bundesliga", "Ligue 1"]
+LEAGUE_ORDER = ["Serie A", "Premier League", "La Liga", "Bundesliga", "Ligue 1",
+                "Allsvenskan"]
+
+# leagues whose advanced stats come from Understat; Allsvenskan's come from
+# FotMob instead (no PPDA / deep completions / xGChain, but real per-match xG)
+UNDERSTAT_LEAGUES = ["Serie A", "Premier League", "La Liga", "Bundesliga", "Ligue 1"]
 
 FORM_WINDOW = 5     # matches shown in the form column
 TREND_WINDOW = 5    # rounds used for the rank-trend arrow
@@ -1171,7 +1176,7 @@ def insights_panel(db, leagues):
         lgview(lg, content(lg), i == 0) for i, lg in enumerate(leagues)
     )
     return (
-        f"<h2>Insights <span class='dim'>({season_label(db)}, Understat)</span></h2>"
+        f"<h2>Insights <span class='dim'>({sources_label(db, leagues)})</span></h2>"
         "<p class='meta'>Second-order reads of the xG data: what the raw tables hide.</p>"
         + metric_glossary() + views
     )
@@ -1225,10 +1230,12 @@ def europe_attackers_table(db, limit=25, min_minutes=1350):
 
 def europe_justice_table(db, limit=20):
     rows = db.execute(
-        """SELECT team, league, COUNT(*), SUM(pts), SUM(xpts), SUM(npxgd)
-           FROM understat_team_matches GROUP BY team, league
+        f"""SELECT team, league, COUNT(*), SUM(pts), SUM(xpts), SUM(npxgd)
+           FROM understat_team_matches
+           WHERE league IN ({",".join("?" * len(UNDERSTAT_LEAGUES))})
+           GROUP BY team, league
            ORDER BY SUM(xpts) * 1.0 / COUNT(*) DESC, team LIMIT ?""",
-        (limit,),
+        (*UNDERSTAT_LEAGUES, limit),
     ).fetchall()
     if not rows:
         return ""
@@ -1451,12 +1458,15 @@ def load_teams(db, league):
            FROM understat_team_matches WHERE league = ? GROUP BY team ORDER BY team""",
         (league,),
     ).fetchall()
+    # FotMob-backed leagues have no PPDA/deep completions: those stay None
+    # and the comparison UI drops the corresponding axes client-side
+    per_match = lambda v, n, dec: round(v / n, dec) if v is not None else None
     return [
         {
             "team": unescape(r[0]), "mp": r[1], "pts": r[2], "xpts": round(r[3], 1),
             "npxg": round(r[4] / r[1], 2), "npxga": round(r[5] / r[1], 2),
-            "ppda": round(r[6], 1),
-            "deep": round(r[7] / r[1], 1), "deep_allowed": round(r[8] / r[1], 1),
+            "ppda": round(r[6], 1) if r[6] is not None else None,
+            "deep": per_match(r[7], r[1], 1), "deep_allowed": per_match(r[8], r[1], 1),
             "gpm": round(r[9] / r[1], 2), "cpm": round(r[10] / r[1], 2),
             "gdiff": round(r[9] - r[11], 1), "gadiff": round(r[12] - r[10], 1),
             "ptsdiff": round(r[2] - r[3], 1),
@@ -1647,13 +1657,21 @@ EXPLORER_JS = """
 
     buildHeader();
     const shown = rows.slice(0, state.limit);
-    tbody.innerHTML = shown.map((p) =>
-      "<tr data-i='" + PLAYERS.indexOf(p) + "'>" + COLS.map((c, i) => {
-        const cls = c.num ? 'num' : (i === 1 || i === 2 ? 'dim' : '');
-        const strong = c.key === state.sortKey ? ' score' : '';
-        return "<td class='" + cls + strong + "'>" + display(p, c) + '</td>';
-      }).join('') + '</tr>'
-    ).join('');
+    if (!PLAYERS.length) {
+      // FotMob-backed leagues (Allsvenskan) have no Understat player feed;
+      // their curated boards live further down the tab
+      tbody.innerHTML = "<tr><td colspan='" + COLS.length + "' class='dim'>" +
+        'No per-player Understat data for this league \\u2014 see the boards ' +
+        'below (FotMob).</td></tr>';
+    } else {
+      tbody.innerHTML = shown.map((p) =>
+        "<tr data-i='" + PLAYERS.indexOf(p) + "'>" + COLS.map((c, i) => {
+          const cls = c.num ? 'num' : (i === 1 || i === 2 ? 'dim' : '');
+          const strong = c.key === state.sortKey ? ' score' : '';
+          return "<td class='" + cls + strong + "'>" + display(p, c) + '</td>';
+        }).join('') + '</tr>'
+      ).join('');
+    }
     $('pe-count').textContent = 'showing ' + shown.length + ' of ' + rows.length +
       ' matching \\u00b7 ' + PLAYERS.length + ' tracked';
     const more = $('pe-more');
@@ -1829,9 +1847,9 @@ EXPLORER_JS = """
     let parts = '';
     [25, 50, 75, 100].forEach((ring) => {
       parts += "<polygon class='radar-grid' points='" +
-        RADAR.map((_, i) => pt(i, R * ring / 100)).join(' ') + "'/>";
+        AX.map((_, i) => pt(i, R * ring / 100)).join(' ') + "'/>";
     });
-    RADAR.forEach((m, i) => {
+    AX.forEach((m, i) => {
       parts += "<line class='radar-axis' x1='" + cx + "' y1='" + cy + "' x2='" +
         pt(i, R).replace(',', "' y2='") + "'/>";
       const a = -Math.PI / 2 + i * 2 * Math.PI / N;
@@ -1852,7 +1870,7 @@ EXPLORER_JS = """
   function compareTable(ps) {
     const head = "<tr><th>per 90 (percentile)</th>" +
       ps.map((p, i) => "<th class='num'><span class='pc-dot pc" + i + "'></span>" + esc(p.name) + "</th>").join('') + '</tr>';
-    const rows = RADAR.map((m) =>
+    const rows = axesOf(RADAR, ts).map((m) =>
       '<tr><td>' + m.label + '</td>' + ps.map((p) => {
         const peers = peersOf(p);
         return "<td class='num'>" + per90(p, m.key).toFixed(2) +
@@ -1945,6 +1963,9 @@ EXPLORER_JS = """
     const below = TEAMS.filter((q) => m.invert ? q[m.key] >= v : q[m.key] <= v).length;
     return Math.round(100 * below / TEAMS.length);
   }
+  // FotMob-backed leagues (Allsvenskan) have no PPDA/deep completions, so
+  // any axis where a selected team is missing the number is dropped
+  const axesOf = (list, ts) => list.filter((m) => ts.every((t) => t[m.key] != null));
   function ord(n) {
     const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
     return n + (s[(v - 20) % 10] || s[v] || s[0]);
@@ -1957,7 +1978,9 @@ EXPLORER_JS = """
   const byTeam = (name) => TEAMS.find((t) => t.team === String(name || '').trim());
 
   function radarSvg(ts) {
-    const W = 460, H = 350, cx = W / 2, cy = H / 2 + 6, R = 118, N = RADAR.length;
+    const AX = axesOf(RADAR, ts);
+    if (AX.length < 3) return '';
+    const W = 460, H = 350, cx = W / 2, cy = H / 2 + 6, R = 118, N = AX.length;
     const pt = (i, r) => {
       const a = -Math.PI / 2 + i * 2 * Math.PI / N;
       return (cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1);
@@ -1965,9 +1988,9 @@ EXPLORER_JS = """
     let parts = '';
     [25, 50, 75, 100].forEach((ring) => {
       parts += "<polygon class='radar-grid' points='" +
-        RADAR.map((_, i) => pt(i, R * ring / 100)).join(' ') + "'/>";
+        AX.map((_, i) => pt(i, R * ring / 100)).join(' ') + "'/>";
     });
-    RADAR.forEach((m, i) => {
+    AX.forEach((m, i) => {
       parts += "<line class='radar-axis' x1='" + cx + "' y1='" + cy + "' x2='" +
         pt(i, R).replace(',', "' y2='") + "'/>";
       const a = -Math.PI / 2 + i * 2 * Math.PI / N;
@@ -1977,7 +2000,7 @@ EXPLORER_JS = """
         "' text-anchor='" + anchor + "'>" + m.label + "</text>";
     });
     ts.forEach((t, i) => {
-      const pts = RADAR.map((m, j) => pt(j, R * pct(t, m) / 100)).join(' ');
+      const pts = AX.map((m, j) => pt(j, R * pct(t, m) / 100)).join(' ');
       parts += "<polygon class='radar-poly pc" + i + "' points='" + pts + "'><title>" +
         esc(t.team) + "</title></polygon>";
     });
@@ -1987,7 +2010,7 @@ EXPLORER_JS = """
   function compareTable(ts) {
     const head = "<tr><th>metric (league percentile)</th>" +
       ts.map((t, i) => "<th class='num'><span class='pc-dot pc" + i + "'></span>" + esc(t.team) + "</th>").join('') + '</tr>';
-    const rows = RADAR.map((m) =>
+    const rows = axesOf(RADAR, ts).map((m) =>
       "<tr><td>" + m.label + " <span class='dim'>\\u00b7 " + m.unit + "</span></td>" +
       ts.map((t) =>
         "<td class='num'>" + fmt(t, m) + " <span class='dim'>(" + ord(pct(t, m)) + ")</span></td>"
@@ -2008,7 +2031,7 @@ EXPLORER_JS = """
     { key: 'cpm',  label: 'Conceded',        unit: 'per match',    dec: 2, invert: true }
   ]);
   function tapeHtml(a, b) {
-    const rows = TAPE.map((m) => {
+    const rows = axesOf(TAPE, [a, b]).map((m) => {
       const pa = pct(a, m), pb = pct(b, m);
       const shareA = pa + pb === 0 ? 50 : Math.round(100 * pa / (pa + pb));
       const cell = (t, p, side, lead) =>
@@ -2222,6 +2245,18 @@ def league_section(db, league):
     )
 
 
+def sources_label(db, leagues):
+    """Header suffix: which source covers what, e.g.
+    '2025/26, Understat · Allsvenskan 2026, FotMob'."""
+    label = f"{season_label(db)}, Understat"
+    if "Allsvenskan" in leagues and fotmob_available(db):
+        season = db.execute(
+            "SELECT MAX(season) FROM main.fotmob_team_matches"
+        ).fetchone()[0]
+        label += f" · Allsvenskan {season}, FotMob"
+    return label
+
+
 def understat_available(db):
     tables = {r[0] for r in db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'understat%'"
@@ -2229,6 +2264,15 @@ def understat_available(db):
     if "understat_team_matches" not in tables:
         return False
     return db.execute("SELECT COUNT(*) FROM understat_team_matches").fetchone()[0] > 0
+
+
+def fotmob_available(db):
+    tables = {r[0] for r in db.execute(
+        "SELECT name FROM main.sqlite_master WHERE type='table' AND name LIKE 'fotmob%'"
+    )}
+    if not {"fotmob_team_matches", "fotmob_players"} <= tables:
+        return False
+    return db.execute("SELECT COUNT(*) FROM main.fotmob_team_matches").fetchone()[0] > 0
 
 
 def season_label(db):
@@ -2305,12 +2349,67 @@ def teams_panel(db, leagues):
         for i, lg in enumerate(leagues)
     )
     return (
-        f"<h2>Team analytics <span class='dim'>({season_label(db)}, Understat)</span></h2>"
+        f"<h2>Team analytics <span class='dim'>({sources_label(db, leagues)})</span></h2>"
         + metric_glossary() + tables
         + team_compare({lg: load_teams(db, lg) for lg in leagues},
                        {lg: load_team_matches(db, lg) for lg in leagues})
         + charts
     )
+
+
+def fotmob_attackers_table(db, league, limit=25, min_minutes=450):
+    rows = db.execute(
+        """SELECT player_name, team, minutes, goals, xg, assists, xa,
+                  shots, shots_on_target, chances_created,
+                  (xg + xa) * 90.0 / minutes AS threat
+           FROM fotmob_players WHERE league = ? AND minutes >= ?
+           ORDER BY threat DESC, player_name LIMIT ?""",
+        (league, min_minutes, limit),
+    ).fetchall()
+    if not rows:
+        return ""
+    body = ""
+    for i, (name, team, minutes, goals, xg, assists, xa, shots, sot, cc, threat) in enumerate(rows, 1):
+        body += (
+            f"<tr><td class='num'>{i}</td><td>{escape(name)}</td>"
+            f"<td class='dim'>{escape(team)}</td><td class='num'>{minutes}</td>"
+            f"<td class='num'>{goals}</td><td class='num'>{xg:.1f}</td>"
+            f"<td class='num'>{assists}</td><td class='num'>{xa:.1f}</td>"
+            f"<td class='num'>{shots if shots is not None else '–'}</td>"
+            f"<td class='num'>{sot if sot is not None else '–'}</td>"
+            f"<td class='num'>{cc}</td><td class='num score'>{threat:.2f}</td></tr>"
+        )
+    table = (
+        "<div class='card'><table><thead><tr>"
+        "<th class='num'>#</th><th>Player</th><th>Team</th><th class='num'>Min</th>"
+        "<th class='num'>G</th><th class='num' title='expected goals'>xG</th>"
+        "<th class='num'>A</th><th class='num' title='expected assists'>xA</th>"
+        "<th class='num'>Shots</th><th class='num' title='shots on target'>SoT</th>"
+        "<th class='num' title='chances created'>CC</th>"
+        "<th class='num' title='xG + xA per 90 minutes'>xG+xA/90</th>"
+        f"</tr></thead><tbody>{body}</tbody></table></div>"
+    )
+    about = (
+        "<p><strong>What it shows.</strong> The league's most dangerous attackers "
+        "(450+ minutes), ranked by expected goals plus expected assists per 90 "
+        "minutes — chance quality created for themselves and for teammates.</p>"
+        "<p><strong>Where the numbers come from.</strong> Allsvenskan has no free "
+        "Understat-style feed, so these stats come from FotMob (Opta data): xG, xA, "
+        "shots, shots on target and chances created. xGChain, xGBuildup and "
+        "per-player non-penalty xG aren't published there, which is why this league "
+        "has curated boards instead of the full player explorer.</p>"
+    )
+    return block("Most dangerous attackers — xG + xA per 90", table, about)
+
+
+def fotmob_finishing_rows(db, league, order, limit=10, min_minutes=600):
+    # 600 minutes rather than 900: Allsvenskan plays 30 rounds, not 38
+    return db.execute(
+        f"""SELECT player_name, team, minutes, shots, goals, xg, goals - xg AS diff
+            FROM fotmob_players WHERE league = ? AND minutes >= ?
+            ORDER BY diff {order}, player_name LIMIT ?""",
+        (league, min_minutes, limit),
+    ).fetchall()
 
 
 def players_panel(db, leagues):
@@ -2341,6 +2440,21 @@ def players_panel(db, leagues):
         "generously. xA is the fairer ranking of creativity than raw assists.</p>"
     )
     def boards(lg):
+        if lg not in UNDERSTAT_LEAGUES:
+            # FotMob-backed league: curated boards instead of the explorer
+            if not fotmob_available(db):
+                return ""
+            return (
+                fotmob_attackers_table(db, lg)
+                + "<div class='duo'>"
+                + block("Clinical finishers — most goals above xG",
+                        player_table(fotmob_finishing_rows(db, lg, "DESC"), "G−xG"),
+                        finishing_about)
+                + block("Wasteful in front of goal — most goals below xG",
+                        player_table(fotmob_finishing_rows(db, lg, "ASC"), "G−xG"),
+                        wasteful_about)
+                + "</div>"
+            )
         return (
             "<div class='duo'>"
             + block("Clinical finishers — most goals above xG",
@@ -2353,7 +2467,7 @@ def players_panel(db, leagues):
     players_by_lg = {lg: load_players(db, lg) for lg in leagues}
     views = "".join(lgview(lg, boards(lg), i == 0) for i, lg in enumerate(leagues))
     return (
-        f"<h2>Players <span class='dim'>({season_label(db)}, Understat)</span></h2>"
+        f"<h2>Players <span class='dim'>({sources_label(db, leagues)})</span></h2>"
         + metric_glossary()
         + player_explorer(players_by_lg)
         + player_compare()
@@ -2386,19 +2500,53 @@ def scope_to_current_season(db):
         f"WHERE t.season >= {played}"
     )
     # Understat only serves played matches, so newest-with-rows is safe here
-    for table in ("understat_players", "understat_team_matches"):
+    db.execute(
+        "CREATE TEMP VIEW understat_players AS "
+        "SELECT * FROM main.understat_players t "
+        "WHERE t.season = (SELECT MAX(u.season) FROM main.understat_players u "
+        "WHERE u.league = t.league)"
+    )
+    # Allsvenskan's per-match xG comes from FotMob, projected into the
+    # Understat shape (PPDA/deep don't exist there and stay NULL) so the
+    # xG table, form curves, head-to-head and npxGD insights just work.
+    # Databases that never ran fetch_fotmob.py simply skip the union.
+    understat_current = (
+        "SELECT season, league, team, match_date, home_away, xg, xga, npxg, npxga, "
+        "       ppda, ppda_allowed, deep, deep_allowed, scored, missed, xpts, "
+        "       result, pts, npxgd, fetched_at "
+        "FROM main.understat_team_matches t "
+        "WHERE t.season = (SELECT MAX(u.season) FROM main.understat_team_matches u "
+        "WHERE u.league = t.league)"
+    )
+    if fotmob_available(db):
         db.execute(
-            f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} t "
-            f"WHERE t.season = (SELECT MAX(u.season) FROM main.{table} u "
-            f"WHERE u.league = t.league)"
+            "CREATE TEMP VIEW understat_team_matches AS " + understat_current +
+            " UNION ALL "
+            "SELECT season, league, team, match_date, home_away, xg, xga, npxg, npxga, "
+            "       NULL, NULL, NULL, NULL, scored, missed, xpts, result, pts, npxgd, fetched_at "
+            "FROM main.fotmob_team_matches f "
+            "WHERE f.season = (SELECT MAX(u.season) FROM main.fotmob_team_matches u "
+            "WHERE u.league = f.league)"
         )
+        db.execute(
+            "CREATE TEMP VIEW fotmob_players AS "
+            "SELECT * FROM main.fotmob_players t "
+            "WHERE t.season = (SELECT MAX(u.season) FROM main.fotmob_players u "
+            "WHERE u.league = t.league)"
+        )
+    else:
+        db.execute("CREATE TEMP VIEW understat_team_matches AS " + understat_current)
 
 
 def scope_to_archive_season(db, season):
-    # archive pages are Understat-only: matchday results and standings
-    # snapshots are tracked for the current season, not backfilled
+    # archive pages are Understat-only: matchday results, standings snapshots
+    # and the FotMob-based Allsvenskan data all stay on the live dashboard
     db.execute("CREATE TEMP VIEW matches AS SELECT * FROM main.matches WHERE 0")
     db.execute("CREATE TEMP VIEW standings AS SELECT * FROM main.standings WHERE 0")
+    if fotmob_available(db):
+        db.execute(
+            "CREATE TEMP VIEW fotmob_players AS SELECT * FROM main.fotmob_players WHERE 0"
+        )
     for table in ("understat_players", "understat_team_matches"):
         db.execute(
             f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} "
@@ -2496,11 +2644,12 @@ def build_page(db, nav, generated, archive_label=None):
         footer = ("Season archive — final Understat data for a finished campaign. "
                   "Rebuilt whenever the report generator changes.")
     else:
-        badge_texts = [f"Big five leagues {season_label(db)}".strip(),
-                       "TheSportsDB + Understat", f"Generated {generated}"]
+        badge_texts = [f"Big five + Allsvenskan {season_label(db)}".strip(),
+                       "TheSportsDB + Understat + FotMob", f"Generated {generated}"]
         title = "Football dashboard"
-        tagline = ("The big five European leagues under the hood — standings, "
-                   "xG team analytics, player profiles and second-order insights.")
+        tagline = ("The big five European leagues — plus Allsvenskan — under the hood: "
+                   "standings, xG team analytics, player profiles and second-order "
+                   "insights.")
         footer = ("Standings are computed from the stored results. Run "
                   "<code>python fetch_data.py</code> and <code>python fetch_understat.py</code> "
                   "regularly to keep the database current.")

@@ -430,13 +430,21 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
 
     buildHeader();
     const shown = rows.slice(0, state.limit);
-    tbody.innerHTML = shown.map((p) =>
-      "<tr data-i='" + PLAYERS.indexOf(p) + "'>" + COLS.map((c, i) => {
-        const cls = c.num ? 'num' : (i === 1 || i === 2 ? 'dim' : '');
-        const strong = c.key === state.sortKey ? ' score' : '';
-        return "<td class='" + cls + strong + "'>" + display(p, c) + '</td>';
-      }).join('') + '</tr>'
-    ).join('');
+    if (!PLAYERS.length) {
+      // FotMob-backed leagues (Allsvenskan) have no Understat player feed;
+      // their curated boards live further down the tab
+      tbody.innerHTML = "<tr><td colspan='" + COLS.length + "' class='dim'>" +
+        'No per-player Understat data for this league \u2014 see the boards ' +
+        'below (FotMob).</td></tr>';
+    } else {
+      tbody.innerHTML = shown.map((p) =>
+        "<tr data-i='" + PLAYERS.indexOf(p) + "'>" + COLS.map((c, i) => {
+          const cls = c.num ? 'num' : (i === 1 || i === 2 ? 'dim' : '');
+          const strong = c.key === state.sortKey ? ' score' : '';
+          return "<td class='" + cls + strong + "'>" + display(p, c) + '</td>';
+        }).join('') + '</tr>'
+      ).join('');
+    }
     $('pe-count').textContent = 'showing ' + shown.length + ' of ' + rows.length +
       ' matching \u00b7 ' + PLAYERS.length + ' tracked';
     const more = $('pe-more');
@@ -612,9 +620,9 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
     let parts = '';
     [25, 50, 75, 100].forEach((ring) => {
       parts += "<polygon class='radar-grid' points='" +
-        RADAR.map((_, i) => pt(i, R * ring / 100)).join(' ') + "'/>";
+        AX.map((_, i) => pt(i, R * ring / 100)).join(' ') + "'/>";
     });
-    RADAR.forEach((m, i) => {
+    AX.forEach((m, i) => {
       parts += "<line class='radar-axis' x1='" + cx + "' y1='" + cy + "' x2='" +
         pt(i, R).replace(',', "' y2='") + "'/>";
       const a = -Math.PI / 2 + i * 2 * Math.PI / N;
@@ -635,7 +643,7 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
   function compareTable(ps) {
     const head = "<tr><th>per 90 (percentile)</th>" +
       ps.map((p, i) => "<th class='num'><span class='pc-dot pc" + i + "'></span>" + esc(p.name) + "</th>").join('') + '</tr>';
-    const rows = RADAR.map((m) =>
+    const rows = axesOf(RADAR, ts).map((m) =>
       '<tr><td>' + m.label + '</td>' + ps.map((p) => {
         const peers = peersOf(p);
         return "<td class='num'>" + per90(p, m.key).toFixed(2) +
@@ -728,6 +736,9 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
     const below = TEAMS.filter((q) => m.invert ? q[m.key] >= v : q[m.key] <= v).length;
     return Math.round(100 * below / TEAMS.length);
   }
+  // FotMob-backed leagues (Allsvenskan) have no PPDA/deep completions, so
+  // any axis where a selected team is missing the number is dropped
+  const axesOf = (list, ts) => list.filter((m) => ts.every((t) => t[m.key] != null));
   function ord(n) {
     const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
     return n + (s[(v - 20) % 10] || s[v] || s[0]);
@@ -740,7 +751,9 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
   const byTeam = (name) => TEAMS.find((t) => t.team === String(name || '').trim());
 
   function radarSvg(ts) {
-    const W = 460, H = 350, cx = W / 2, cy = H / 2 + 6, R = 118, N = RADAR.length;
+    const AX = axesOf(RADAR, ts);
+    if (AX.length < 3) return '';
+    const W = 460, H = 350, cx = W / 2, cy = H / 2 + 6, R = 118, N = AX.length;
     const pt = (i, r) => {
       const a = -Math.PI / 2 + i * 2 * Math.PI / N;
       return (cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1);
@@ -748,9 +761,9 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
     let parts = '';
     [25, 50, 75, 100].forEach((ring) => {
       parts += "<polygon class='radar-grid' points='" +
-        RADAR.map((_, i) => pt(i, R * ring / 100)).join(' ') + "'/>";
+        AX.map((_, i) => pt(i, R * ring / 100)).join(' ') + "'/>";
     });
-    RADAR.forEach((m, i) => {
+    AX.forEach((m, i) => {
       parts += "<line class='radar-axis' x1='" + cx + "' y1='" + cy + "' x2='" +
         pt(i, R).replace(',', "' y2='") + "'/>";
       const a = -Math.PI / 2 + i * 2 * Math.PI / N;
@@ -760,7 +773,7 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
         "' text-anchor='" + anchor + "'>" + m.label + "</text>";
     });
     ts.forEach((t, i) => {
-      const pts = RADAR.map((m, j) => pt(j, R * pct(t, m) / 100)).join(' ');
+      const pts = AX.map((m, j) => pt(j, R * pct(t, m) / 100)).join(' ');
       parts += "<polygon class='radar-poly pc" + i + "' points='" + pts + "'><title>" +
         esc(t.team) + "</title></polygon>";
     });
@@ -770,7 +783,7 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
   function compareTable(ts) {
     const head = "<tr><th>metric (league percentile)</th>" +
       ts.map((t, i) => "<th class='num'><span class='pc-dot pc" + i + "'></span>" + esc(t.team) + "</th>").join('') + '</tr>';
-    const rows = RADAR.map((m) =>
+    const rows = axesOf(RADAR, ts).map((m) =>
       "<tr><td>" + m.label + " <span class='dim'>\u00b7 " + m.unit + "</span></td>" +
       ts.map((t) =>
         "<td class='num'>" + fmt(t, m) + " <span class='dim'>(" + ord(pct(t, m)) + ")</span></td>"
@@ -791,7 +804,7 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
     { key: 'cpm',  label: 'Conceded',        unit: 'per match',    dec: 2, invert: true }
   ]);
   function tapeHtml(a, b) {
-    const rows = TAPE.map((m) => {
+    const rows = axesOf(TAPE, [a, b]).map((m) => {
       const pa = pct(a, m), pb = pct(b, m);
       const shareA = pa + pb === 0 ? 50 : Math.round(100 * pa / (pa + pb));
       const cell = (t, p, side, lead) =>
