@@ -1252,8 +1252,8 @@ def player_explorer(players_by_lg):
 
 
 def player_compare():
-    # datalist options are built client-side per league ("Name — Team" values:
-    # Chromium's dropdown displays option inner text as the primary line)
+    # datalist options are built client-side over every league ("Name — Team · League"
+    # values), so the comparison works across leagues regardless of the switcher
     inputs = "".join(
         f"<input list='pc-list' id='pc-{i}' placeholder='Player {i}…' autocomplete='off'>"
         for i in (1, 2, 3)
@@ -1264,7 +1264,8 @@ def player_compare():
         "<datalist id='pc-list'></datalist>"
         "<div class='chart-card' id='pc-empty'><p class='dim' style='margin:4px 2px'>"
         "Pick two or three players above (or use “Add to comparison” on a player card) "
-        "to see their profiles side by side.</p></div>"
+        "to see their profiles side by side. The search covers all five leagues, so "
+        "cross-league match-ups work too.</p></div>"
         "<div class='chart-card' id='pc-card' hidden></div>"
     )
     about = (
@@ -1275,13 +1276,18 @@ def player_compare():
         "(involvement anywhere in a scoring move) and xGBuildup (build-up play only, "
         "shots and assists excluded — see the glossary at the top of this tab). "
         "Each axis is the player's <em>percentile</em> among "
-        "players of the same position with 450+ minutes, so a defender isn't drowned by "
-        "striker numbers; the table below gives the exact per-90 rates.</p>"
+        "players of the same position <em>in their own league</em> with 450+ minutes, "
+        "so a defender isn't drowned by striker numbers; the table below gives the "
+        "exact per-90 rates.</p>"
         "<p><strong>How to read it.</strong> The bigger the shape, the more complete the "
         "attacking contribution — but shape <em>profile</em> matters more than area: a "
         "pure finisher spikes toward npxG and shots, a creator toward xA and key passes, "
         "a deep engine toward xGBuildup. Comparing a striker with a full-back is fair "
-        "here because each is measured against their own position group.</p>"
+        "here because each is measured against their own position group — and since the "
+        "search spans all five leagues, cross-league match-ups work the same way: each "
+        "player is ranked against their own league's peers, so the radar answers "
+        "“who dominates their context more”, not who would outscore whom in the same "
+        "league.</p>"
     )
     return block("Player comparison", body, about)
 
@@ -1527,9 +1533,14 @@ EXPLORER_JS = """
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   let PLAYERS = PLAYERS_BY_LG[window.CUR_LG] || [];
+  // flat list over every league: the comparison search is cross-league
+  const ALL = [];
+  Object.keys(PLAYERS_BY_LG).forEach((lg) => {
+    PLAYERS_BY_LG[lg].forEach((p) => { p.lg = lg; ALL.push(p); });
+  });
   function rebuildList() {
-    $('pc-list').innerHTML = PLAYERS.map((p) =>
-      '<option value="' + esc(p.name) + ' \\u2014 ' + esc(p.team) + '"></option>').join('');
+    $('pc-list').innerHTML = ALL.map((p) =>
+      '<option value="' + esc(p.name) + ' \\u2014 ' + esc(p.team) + ' \\u00b7 ' + esc(p.lg) + '"></option>').join('');
   }
   const per90 = (p, k) => p.min > 0 ? p[k] * 90 / p.min : 0;
   const posOf = (p) => p.pos.includes('GK') ? 'GK' : ((p.pos.match(/[DMF]/) || ['F'])[0]);
@@ -1555,8 +1566,11 @@ EXPLORER_JS = """
   ];
 
   function peersOf(p) {
-    let peers = PLAYERS.filter((q) => q.min >= MIN_PEER && posOf(q) === posOf(p));
-    if (peers.length < 10) peers = PLAYERS.filter((q) => q.min >= MIN_PEER && posOf(q) !== 'GK');
+    // percentiles are always vs same-position peers in the player's own league,
+    // so a profile reads the same here as on the player's card
+    const pool = PLAYERS_BY_LG[p.lg] || PLAYERS;
+    let peers = pool.filter((q) => q.min >= MIN_PEER && posOf(q) === posOf(p));
+    if (peers.length < 10) peers = pool.filter((q) => q.min >= MIN_PEER && posOf(q) !== 'GK');
     return peers;
   }
   function percentile(p, key, peers) {
@@ -1571,9 +1585,13 @@ EXPLORER_JS = """
   const signed = (v) => (v > 0 ? '+' : '') + v.toFixed(1).replace('-', '\\u2212');
   const byName = (raw) => {
     const s = String(raw || '').trim();
-    // accept both "Name" and the datalist's "Name — Team" form
-    return PLAYERS.find((q) => q.name === s) ||
-           PLAYERS.find((q) => q.name === s.split(' \\u2014 ')[0].trim());
+    // accept both "Name" and the datalist's "Name — Team · League" form;
+    // same-named players are disambiguated by team, then by current league
+    const name = s.split(' \\u2014 ')[0].trim();
+    const team = (s.split(' \\u2014 ')[1] || '').split(' \\u00b7 ')[0].trim();
+    const cands = ALL.filter((q) => q.name === name);
+    return cands.find((q) => q.team === team) ||
+           cands.find((q) => q.lg === window.CUR_LG) || cands[0];
   };
 
   /* ---- profile card ---- */
@@ -1596,17 +1614,17 @@ EXPLORER_JS = """
     ).join('');
     $('pd-modal').innerHTML =
       "<div class='pd-head'><div><h4>" + esc(p.name) + "</h4>" +
-      "<p class='meta'>" + esc(p.team) + " \\u00b7 " + esc(p.pos) + " \\u00b7 " +
+      "<p class='meta'>" + esc(p.team) + " \\u00b7 " + esc(p.lg) + " \\u00b7 " + esc(p.pos) + " \\u00b7 " +
       p.games + " apps, " + p.min + " min</p></div>" +
       "<button id='pd-close' aria-label='Close'>\\u2715</button></div>" +
       "<div class='pd-totals'>" + totals + "</div>" +
       "<p class='meta'>Season totals above; bars below are per-90 rates as percentiles vs " +
-      (POS_NAME[posOf(p)] || 'players') + " with " + MIN_PEER + "+ minutes.</p>" +
+      esc(p.lg) + " " + (POS_NAME[posOf(p)] || 'players') + " with " + MIN_PEER + "+ minutes.</p>" +
       bars +
       "<button id='pd-compare' type='button'>Add to comparison</button>";
     overlay.hidden = false;
     $('pd-close').onclick = closeDetail;
-    $('pd-compare').onclick = () => { addToCompare(p.name); closeDetail(); };
+    $('pd-compare').onclick = () => { addToCompare(p); closeDetail(); };
   }
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeDetail(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetail(); });
@@ -1655,27 +1673,27 @@ EXPLORER_JS = """
           " <span class='dim'>(" + ord(percentile(p, m.key, peers)) + ")</span></td>";
       }).join('') + '</tr>'
     ).join('');
-    const info = "<tr><td class='dim'>Team \\u00b7 pos \\u00b7 minutes</td>" + ps.map((p) =>
-      "<td class='num dim'>" + esc(p.team) + " \\u00b7 " + esc(p.pos) + " \\u00b7 " + p.min + "'</td>"
+    const info = "<tr><td class='dim'>Team \\u00b7 league \\u00b7 pos \\u00b7 minutes</td>" + ps.map((p) =>
+      "<td class='num dim'>" + esc(p.team) + " \\u00b7 " + esc(p.lg) + " \\u00b7 " + esc(p.pos) + " \\u00b7 " + p.min + "'</td>"
     ).join('') + '</tr>';
     return "<div style='overflow-x:auto'><table>" + head + rows + info + '</table></div>';
   }
   function renderCompare() {
     const seen = new Set();
     const ps = [1, 2, 3].map((i) => byName(($('pc-' + i).value || '').trim()))
-      .filter((p) => p && !seen.has(p.name) && seen.add(p.name)).slice(0, 3);
+      .filter((p) => p && !seen.has(p) && seen.add(p)).slice(0, 3);
     const card = $('pc-card'), empty = $('pc-empty');
     if (ps.length < 2) { card.hidden = true; empty.hidden = false; return; }
     empty.hidden = true; card.hidden = false;
     const legend = "<div class='pc-legend'>" + ps.map((p, i) =>
       "<span><span class='pc-dot pc" + i + "'></span>" + esc(p.name) +
-      " <span class='dim'>(" + (POS_NAME[posOf(p)] || '') + ")</span></span>").join('') + '</div>';
+      " <span class='dim'>(" + esc(p.lg) + ' ' + (POS_NAME[posOf(p)] || '') + ")</span></span>").join('') + '</div>';
     card.innerHTML = legend + radarSvg(ps) + compareTable(ps);
   }
-  function addToCompare(name) {
+  function addToCompare(p) {
     const inputs = [1, 2, 3].map((i) => $('pc-' + i));
     const target = inputs.find((el) => !byName(el.value.trim())) || inputs[2];
-    target.value = name;
+    target.value = p.name + ' \\u2014 ' + p.team + ' \\u00b7 ' + p.lg;
     renderCompare();
     document.querySelector("nav.tabs button[data-panel='players']").click();
     $('pc-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1686,10 +1704,9 @@ EXPLORER_JS = """
     renderCompare();
   });
   document.addEventListener('leaguechange', () => {
+    // the comparison is cross-league, so it survives a league switch;
+    // PLAYERS only backs the explorer's row-click -> profile card mapping
     PLAYERS = PLAYERS_BY_LG[window.CUR_LG] || [];
-    rebuildList();
-    [1, 2, 3].forEach((i) => { $('pc-' + i).value = ''; });
-    renderCompare();
     closeDetail();
   });
   rebuildList();

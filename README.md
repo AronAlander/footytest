@@ -56,8 +56,11 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   the rest, so the tab stays compact.
   Click any row for a profile card with season totals and per-90 percentile bars
   vs same-position peers; a comparison block overlays up to three players on a
-  percentile radar (deep-linkable via `#player=Name` / `#compare=A,B,C`). Plus
-  curated boards for clinical/wasteful finishers and top creators.
+  percentile radar (deep-linkable via `#player=Name` / `#compare=A,B,C`). The
+  comparison search spans **all five leagues**, so cross-league match-ups work
+  (Haaland vs Lautaro, say) — each player is ranked against same-position peers
+  in their own league, and the pick survives switching leagues. Plus curated
+  boards for clinical/wasteful finishers and top creators.
 - **Insights** — second-order reads of the xG data: the justice table (league
   re-ranked by expected points), finishing-vs-goalkeeping luck quadrants, a
   quality-vs-volatility "chaos index", home/away venue dependence by underlying
