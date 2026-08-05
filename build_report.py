@@ -11,7 +11,7 @@ JavaScript for tabs and the player explorer (works offline from file://).
 
 import json
 import sqlite3
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from html import escape, unescape
 from pathlib import Path
 
@@ -2245,6 +2245,87 @@ def league_section(db, league):
     )
 
 
+# ------------------------------------------------------------ preseason tab
+
+PRESEASON_BACK_DAYS = 75    # friendlies played within this window count
+PRESEASON_AHEAD_DAYS = 45   # ...as do ones scheduled this far ahead
+
+
+def preseason_available(db):
+    """True when friendlies fall inside the display window — outside the
+    summer the tab disappears on its own."""
+    if not db.execute(
+        "SELECT name FROM main.sqlite_master WHERE type='table' AND name='preseason_matches'"
+    ).fetchone():
+        return False
+    lo = (date.today() - timedelta(days=PRESEASON_BACK_DAYS)).isoformat()
+    hi = (date.today() + timedelta(days=PRESEASON_AHEAD_DAYS)).isoformat()
+    return db.execute(
+        "SELECT COUNT(*) FROM main.preseason_matches WHERE match_date BETWEEN ? AND ?",
+        (lo, hi),
+    ).fetchone()[0] > 0
+
+
+def preseason_table(db, league, finished, limit=40):
+    today = date.today()
+    if finished:
+        rows = db.execute(
+            """SELECT match_date, home_team, home_score, away_score, away_team
+               FROM main.preseason_matches
+               WHERE league = ? AND finished = 1 AND match_date >= ?
+               ORDER BY match_date DESC, match_id LIMIT ?""",
+            (league, (today - timedelta(days=PRESEASON_BACK_DAYS)).isoformat(), limit),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT match_date, home_team, home_score, away_score, away_team
+               FROM main.preseason_matches
+               WHERE league = ? AND finished = 0 AND match_date BETWEEN ? AND ?
+               ORDER BY match_date, match_id LIMIT ?""",
+            (league, today.isoformat(),
+             (today + timedelta(days=PRESEASON_AHEAD_DAYS)).isoformat(), limit),
+        ).fetchall()
+    if not rows:
+        return "<p class='dim'>Nothing in the calendar right now.</p>"
+    body = ""
+    for match_date, home, hs, as_, away in rows:
+        score = (f"<span class='score'>{hs} – {as_}</span>"
+                 if hs is not None else "<span class='dim'>vs</span>")
+        body += (
+            f"<tr><td class='dim'>{escape(match_date or '')}</td>"
+            f"<td style='text-align:right'>{escape(home or '')}</td>"
+            f"<td style='text-align:center'>{score}</td>"
+            f"<td>{escape(away or '')}</td></tr>"
+        )
+    return f"<div class='card'><table><tbody>{body}</tbody></table></div>"
+
+
+def preseason_panel(db, leagues):
+    caveat = (
+        "<div class='caveat'>"
+        "<p><strong>Friendlies lie.</strong> Preseason matches are played with rotated "
+        "line-ups, experimental shapes and one eye on fitness — the results say little "
+        "about the season ahead, and FotMob publishes no xG for them. This tab is for "
+        "keeping an eye on what the clubs are up to over the summer, nothing more.</p>"
+        "</div>"
+    )
+
+    def content(lg):
+        return (
+            block("Recent friendlies", preseason_table(db, lg, finished=True))
+            + block("Upcoming friendlies", preseason_table(db, lg, finished=False))
+        )
+
+    views = "".join(lgview(lg, content(lg), i == 0) for i, lg in enumerate(leagues))
+    return (
+        "<h2>Preseason <span class='dim'>(club friendlies, FotMob)</span></h2>"
+        "<p class='meta'>Summer friendlies for the league's clubs — recent scores and "
+        "the upcoming schedule. This tab only appears while friendlies are being "
+        "played; once the season proper is under way it retires itself.</p>"
+        + caveat + views
+    )
+
+
 def sources_label(db, leagues):
     """Header suffix: which source covers what, e.g.
     '2025/26, Understat · Allsvenskan 2026, FotMob'."""
@@ -2609,6 +2690,8 @@ def build_page(db, nav, generated, archive_label=None):
         panels.append(("league", "League", "".join(
             lgview(lg, league_section(db, lg), i == 0) for i, lg in enumerate(leagues)
         )))
+        if preseason_available(db):
+            panels.append(("preseason", "Preseason", preseason_panel(db, leagues)))
     if understat_available(db):
         panels.append(("teams", "Team analytics", teams_panel(db, leagues)))
         panels.append(("players", "Players", players_panel(db, leagues)))

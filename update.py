@@ -17,7 +17,7 @@ from datetime import date
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).parent
-FETCHERS = ["fetch_data.py", "fetch_understat.py", "fetch_fotmob.py"]
+FETCHERS = ["fetch_data.py", "fetch_understat.py", "fetch_fotmob.py", "fetch_preseason.py"]
 SITE_URL = "https://aronalander.github.io/footytest/"
 
 

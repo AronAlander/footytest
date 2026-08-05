@@ -23,6 +23,7 @@ which redeploys the live dashboard. The steps can of course be run individually:
 python fetch_data.py
 python fetch_understat.py
 python fetch_fotmob.py
+python fetch_preseason.py
 python build_report.py
 ```
 
@@ -64,6 +65,13 @@ Poisson model. In the dashboard Allsvenskan therefore gets the League tab, the
 xG table, form curves, the team head-to-head deep dive (with a reduced radar)
 and curated player boards — but not the full player explorer or the
 pressing/territory charts, and it stays out of Best of Europe.
+
+`fetch_preseason.py` pulls **club friendlies** for all six leagues' teams from the
+same unofficial FotMob endpoints (one request per club, ~125 in total, about four
+minutes). FotMob publishes no xG for friendlies, so this feeds a scores-and-schedule
+view only: a seasonal **Preseason** tab in the dashboard that appears while
+friendlies are being played (recent results and upcoming fixtures per league) and
+retires itself once the window has passed.
 
 `build_report.py` turns the database into a self-contained `report.html` — open it
 in any browser (vanilla JavaScript, works offline from a double-click). It also
