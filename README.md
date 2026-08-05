@@ -12,6 +12,14 @@ gets standings plus an xG-powered reduced set (see below).
 Requires Python 3.10+ (standard library only, no dependencies):
 
 ```
+python update.py
+```
+
+That runs the whole pipeline — the three fetchers below, then the report build.
+Add `--push` (or just double-click `update.bat`) to also commit `docs/` and push,
+which redeploys the live dashboard. The steps can of course be run individually:
+
+```
 python fetch_data.py
 python fetch_understat.py
 python fetch_fotmob.py
