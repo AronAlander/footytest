@@ -33,15 +33,15 @@ def git(*args: str, capture: bool = False) -> subprocess.CompletedProcess:
 
 def push_site() -> bool:
     print(f"\n{'=' * 60}\n>>> publish to GitHub Pages\n{'=' * 60}", flush=True)
+    # commit docs/ BEFORE pulling: the build just rewrote it, and
+    # `git pull --rebase` refuses to run over unstaged changes
+    if git("status", "--porcelain", "docs", capture=True).stdout.strip():
+        git("add", "docs")
+        if git("commit", "-m", f"Update data {date.today().isoformat()}").returncode != 0:
+            print("! git commit failed")
+            return False
     if git("pull", "--rebase").returncode != 0:
-        print("! git pull failed -- resolve manually, then commit and push docs/ yourself")
-        return False
-    if not git("status", "--porcelain", "docs", capture=True).stdout.strip():
-        print("docs/ unchanged since the last publish -- nothing to push")
-        return True
-    git("add", "docs")
-    if git("commit", "-m", f"Update data {date.today().isoformat()}").returncode != 0:
-        print("! git commit failed")
+        print("! git pull failed -- resolve manually, then `git push` yourself")
         return False
     if git("push").returncode != 0:
         print("! git push failed -- check the network / GitHub credentials and push manually")
