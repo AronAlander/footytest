@@ -126,6 +126,21 @@ headers also carry hover tooltips. Each tab opens with jump-chips that scroll to
 its sections, and a floating back-to-top button appears once you scroll. Adapts
 to light/dark mode.
 
+## Automatic daily updates (GitHub Actions)
+
+The site also updates itself: `.github/workflows/update.yml` runs the whole
+pipeline on GitHub's servers every day at 03:15 UTC (after the evening matches),
+commits `docs/` and pushes, and Pages redeploys — no local machine needed.
+The database is kept in the Actions cache between runs; on a cold cache the
+Understat history is backfilled first so archive pages survive. The run uses
+`--strict`: if any fetcher fails (an API down, or FotMob blocking cloud IPs),
+nothing is rebuilt or published and the site simply stays on yesterday's data.
+It can also be triggered by hand from the repo's **Actions** tab ("Run
+workflow"). Note: GitHub pauses scheduled workflows after ~60 days without
+repository activity — one click in the Actions tab re-enables it. Running
+`update.py` locally still works exactly as before and the two never conflict
+(both pull --rebase before pushing).
+
 ## Web dashboard (GitHub Pages)
 
 `docs/index.html` is a committed copy of the report, so the repo can serve it as a

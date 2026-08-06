@@ -1,0 +1,63 @@
+name: Update dashboard
+
+# Unattended daily update: fetch fresh data, rebuild the report, commit docs/.
+# GitHub Pages then redeploys the site automatically. The database is gitignored,
+# so it lives in the Actions cache between runs; on a cold cache the Understat
+# history (2014/15+) is backfilled first so the archive pages stay intact.
+# --strict means a failed fetcher aborts the run and the site is left untouched
+# rather than published with partial data.
+
+on:
+  schedule:
+    - cron: "15 3 * * *"  # daily 03:15 UTC, after the evening matches are in
+  workflow_dispatch:      # manual "Run workflow" button in the Actions tab
+  push:
+    paths:
+      - ".github/workflows/update.yml"  # a change to this file test-runs it once
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-dashboard
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore database from cache
+        uses: actions/cache@v4
+        with:
+          path: football.sqlite
+          key: football-db-${{ github.run_id }}
+          restore-keys: |
+            football-db-
+
+      - name: Fetch data and rebuild the report
+        run: |
+          if [ ! -f football.sqlite ]; then
+            echo "Cold cache: backfilling Understat history first"
+            python fetch_understat.py --backfill
+          fi
+          python update.py --strict
+
+      - name: Commit and push if the site changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs
+          if git diff --cached --quiet; then
+            echo "No changes to publish."
+          else
+            git commit -m "Auto-update data $(date -u +%F)"
+            git pull --rebase
+            git push
+          fi

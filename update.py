@@ -1,6 +1,6 @@
 """One-command site update: fetch fresh data, rebuild the report, publish.
 
-Runs the three fetchers and then build_report.py. A fetcher that fails
+Runs the four fetchers and then build_report.py. A fetcher that fails
 (an API being down, say) is reported loudly but does not stop the run --
 the report simply rebuilds on the last good data already in the database.
 Only a build failure aborts.
@@ -8,6 +8,9 @@ Only a build failure aborts.
 Usage:
     python update.py          # fetch + rebuild (report.html, docs/)
     python update.py --push   # ...then commit docs/ and push to GitHub Pages
+    python update.py --strict # abort BEFORE the build if any fetcher failed
+                              # (used by the unattended GitHub Actions run, so
+                              # partial data is never published)
 """
 
 import subprocess
@@ -52,10 +55,14 @@ def push_site() -> bool:
 
 def main() -> None:
     push = "--push" in sys.argv[1:]
+    strict = "--strict" in sys.argv[1:]
     start = time.time()
 
     failed = [script for script in FETCHERS if not run_step(script)]
     if failed:
+        if strict:
+            sys.exit(f"! fetch failed for: {', '.join(failed)} -- strict mode, "
+                     "site NOT rebuilt or published")
         print(f"\n! fetch failed for: {', '.join(failed)} -- rebuilding on last good data")
 
     if not run_step("build_report.py"):
