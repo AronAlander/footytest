@@ -1571,6 +1571,7 @@ EXPLORER_JS = """
     if (b.dataset.lg === window.CUR_LG) return;
     window.CUR_LG = b.dataset.lg;
     apply();
+    if (window.syncHash) window.syncHash();
     document.dispatchEvent(new CustomEvent('leaguechange'));
   }));
   apply();
@@ -1723,9 +1724,19 @@ EXPLORER_JS = """
     const lgs = document.querySelector('nav.lgswitch');
     if (lgs) lgs.style.display = name === 'europe' ? 'none' : '';
   }
+  // keep the hash mirroring the current league + tab so a season switch
+  // (the dropdown carries location.hash across) can restore both
+  window.syncHash = function () {
+    const parts = [];
+    if (window.CUR_LG && document.querySelector('nav.lgswitch button'))
+      parts.push('lg=' + window.CUR_LG.replace(/ /g, '_'));
+    const active = document.querySelector("nav.tabs button[aria-selected='true']");
+    if (active) parts.push(active.dataset.panel);
+    history.replaceState(null, '', '#' + parts.join('&'));
+  };
   tabs.forEach((b) => b.addEventListener('click', () => {
     activate(b.dataset.panel);
-    history.replaceState(null, '', '#' + b.dataset.panel);
+    window.syncHash();
   }));
   const initial = decodeURIComponent(location.hash.slice(1)).split('&')
     .filter((s) => s && !s.includes('='))[0] || '';
@@ -2667,7 +2678,7 @@ def season_nav(db, current_page_season=None):
     return (
         "<nav class='seasonnav'><label for='season-select'>Season</label>"
         "<select id='season-select' "
-        "onchange='if(this.value)location.href=this.value'>"
+        "onchange='if(this.value)location.href=this.value+location.hash'>"
         + "".join(options) + "</select></nav>"
     )
 
