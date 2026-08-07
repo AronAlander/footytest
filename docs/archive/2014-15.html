@@ -4,6 +4,7 @@
   --text-primary: #101010; --text-secondary: #52514e;
   --accent: #2a78d6; --accent-2: #7c5cff;
   --win: #0ca30c; --loss: #d03b3b; --draw: #8a8983;
+  --away: #eb6834;  /* predictions bar away pole; validated vs --accent for CVD */
   --row-hover: #f0f4fa; --row-alt: rgba(16,16,16,.026);
   --glow: rgba(42,120,214,.10); --glow-2: rgba(124,92,255,.08);
   --shadow: 0 1px 2px rgba(20,20,20,.05), 0 4px 16px rgba(20,20,20,.05);
@@ -13,6 +14,7 @@
     --surface: #161615; --card: #212120; --border: #3a3936;
     --text-primary: #ffffff; --text-secondary: #c3c2b7;
     --accent: #3987e5; --accent-2: #9d86ff; --draw: #75746e;
+    --away: #e0602e;
     --row-hover: #2a2b2e; --row-alt: rgba(255,255,255,.03);
     --glow: rgba(57,135,229,.17); --glow-2: rgba(157,134,255,.12);
     --shadow: 0 1px 2px rgba(0,0,0,.5), 0 4px 16px rgba(0,0,0,.35);
@@ -264,6 +266,19 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
            background: var(--surface); border: 1px solid var(--border); }
 .h2h-bar i { display: block; height: 100%; }
 .h2h-bar i.a { background: var(--accent); }
+.prob { display: flex; gap: 2px; height: 18px; min-width: 170px; }
+.prob i {
+  font-style: normal; height: 100%; border-radius: 3px; overflow: hidden;
+  font-size: 11px; font-weight: 600; line-height: 18px; color: #fff;
+  text-align: center; white-space: nowrap;
+}
+.prob i.h { background: var(--accent); }
+.prob i.d { background: var(--draw); }
+.prob i.a { background: var(--away); }
+.pdot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  vertical-align: -1px; margin-right: 4px;
+}
 .h2h-bar i.b { background: var(--win); margin-left: auto; }
 .h2h-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
 @media (max-width: 760px) { .h2h-cols { grid-template-columns: 1fr; } }

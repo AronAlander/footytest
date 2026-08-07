@@ -10,7 +10,10 @@ JavaScript for tabs and the player explorer (works offline from file://).
 """
 
 import json
+import math
+import re
 import sqlite3
+import unicodedata
 from datetime import date, datetime, timedelta
 from html import escape, unescape
 from pathlib import Path
@@ -41,6 +44,7 @@ CSS = """
   --text-primary: #101010; --text-secondary: #52514e;
   --accent: #2a78d6; --accent-2: #7c5cff;
   --win: #0ca30c; --loss: #d03b3b; --draw: #8a8983;
+  --away: #eb6834;  /* predictions bar away pole; validated vs --accent for CVD */
   --row-hover: #f0f4fa; --row-alt: rgba(16,16,16,.026);
   --glow: rgba(42,120,214,.10); --glow-2: rgba(124,92,255,.08);
   --shadow: 0 1px 2px rgba(20,20,20,.05), 0 4px 16px rgba(20,20,20,.05);
@@ -50,6 +54,7 @@ CSS = """
     --surface: #161615; --card: #212120; --border: #3a3936;
     --text-primary: #ffffff; --text-secondary: #c3c2b7;
     --accent: #3987e5; --accent-2: #9d86ff; --draw: #75746e;
+    --away: #e0602e;
     --row-hover: #2a2b2e; --row-alt: rgba(255,255,255,.03);
     --glow: rgba(57,135,229,.17); --glow-2: rgba(157,134,255,.12);
     --shadow: 0 1px 2px rgba(0,0,0,.5), 0 4px 16px rgba(0,0,0,.35);
@@ -301,6 +306,19 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
            background: var(--surface); border: 1px solid var(--border); }
 .h2h-bar i { display: block; height: 100%; }
 .h2h-bar i.a { background: var(--accent); }
+.prob { display: flex; gap: 2px; height: 18px; min-width: 170px; }
+.prob i {
+  font-style: normal; height: 100%; border-radius: 3px; overflow: hidden;
+  font-size: 11px; font-weight: 600; line-height: 18px; color: #fff;
+  text-align: center; white-space: nowrap;
+}
+.prob i.h { background: var(--accent); }
+.prob i.d { background: var(--draw); }
+.prob i.a { background: var(--away); }
+.pdot {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+  vertical-align: -1px; margin-right: 4px;
+}
 .h2h-bar i.b { background: var(--win); margin-left: auto; }
 .h2h-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
 @media (max-width: 760px) { .h2h-cols { grid-template-columns: 1fr; } }
@@ -568,6 +586,219 @@ def matches_table(db, league, finished, limit=10):
             f"<td>{escape(away or '')}</td></tr>"
         )
     return f"<div class='card'><table><tbody>{body}</tbody></table></div>"
+
+
+# ------------------------------------------------------------- predictions
+
+PREDICT_HALF_LIFE_DAYS = 240  # a match this old carries half the weight
+PREDICT_MAX_GOALS = 10        # Poisson score grid per side
+PREDICT_SHOWN = 10            # fixtures predicted per league
+
+# TheSportsDB fixture names -> xG-source (Understat/FotMob) names, for the
+# pairs that normalisation alone cannot bridge; extended when the build
+# prints an "no xG history matched" warning for a club that has history
+PREDICT_ALIASES = {
+    "Inter Milan": "Inter",  # bare "Inter" is a subset of both Milan clubs
+    "Borussia Mönchengladbach": "Borussia M.Gladbach",
+    "Köln": "FC Cologne",
+    "Hamburg": "Hamburger SV",
+    "RB Leipzig": "RasenBallsport Leipzig",
+    "Halmstad": "Halmstads BK",
+}
+
+
+def _predict_norm(name):
+    """Club-name join key: ASCII-folded, lowercased, generic club tokens
+    dropped, remaining tokens sorted so word order does not matter."""
+    s = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode()
+    s = re.sub(r"[^a-z0-9 ]", " ", s.lower())
+    drop = {
+        "fc", "afc", "cf", "ac", "as", "ss", "ssc", "us", "ud", "cd", "rc",
+        "rcd", "sc", "sd", "sv", "bsc", "vfl", "vfb", "tsg", "fsv", "spvgg",
+        "if", "ff", "bk", "sk", "fk", "aif", "club", "de", "cp", "calcio",
+        "1899", "1846", "1860", "04", "05", "09", "1", "96", "98", "99",
+    }
+    toks = [t for t in s.split() if t not in drop]
+    return " ".join(sorted(toks)) or s.strip()
+
+
+def _predict_mapping(fixture_names, strength_names):
+    """Fixture name -> strengths name (or None when nothing matches safely)."""
+    by_norm = {_predict_norm(n): n for n in strength_names}
+    tokens = {n: set(_predict_norm(n).split()) for n in strength_names}
+    mapping = {}
+    for name in fixture_names:
+        if name in PREDICT_ALIASES:
+            mapping[name] = PREDICT_ALIASES[name]
+            continue
+        norm = _predict_norm(name)
+        if norm in by_norm:
+            mapping[name] = by_norm[norm]
+            continue
+        want = set(norm.split())
+        subset = [n for n, t in tokens.items() if want <= t or t <= want]
+        mapping[name] = subset[0] if len(subset) == 1 else None
+    return mapping
+
+
+def _team_strengths(db, league):
+    """Recency-weighted mean xG for/against per team, plus the league's mean
+    xG per team per match and its home-advantage ratio."""
+    rows = db.execute(
+        """SELECT team, match_date, home_away, xg, xga
+           FROM understat_team_matches
+           WHERE league = ? AND xg IS NOT NULL AND xga IS NOT NULL""",
+        (league,),
+    ).fetchall()
+    today = date.today()
+    teams = {}
+    venue = {"h": [0.0, 0.0], "a": [0.0, 0.0]}  # weighted xg sum, weight
+    for team, match_date, home_away, xg, xga in rows:
+        try:
+            days = (today - datetime.strptime(match_date[:10], "%Y-%m-%d").date()).days
+        except (TypeError, ValueError):
+            continue
+        w = 0.5 ** (max(days, 0) / PREDICT_HALF_LIFE_DAYS)
+        rec = teams.setdefault(team, [0.0, 0.0, 0.0, 0])
+        rec[0] += w * xg
+        rec[1] += w * xga
+        rec[2] += w
+        rec[3] += 1
+        if home_away in venue:
+            venue[home_away][0] += w * xg
+            venue[home_away][1] += w
+    strengths = {
+        t: (r[0] / r[2], r[1] / r[2], r[3]) for t, r in teams.items() if r[2] > 0
+    }
+    total_xg = venue["h"][0] + venue["a"][0]
+    total_w = venue["h"][1] + venue["a"][1]
+    mu = total_xg / total_w if total_w else 0.0
+    home_adv = 1.0
+    if venue["h"][1] and venue["a"][1] and venue["a"][0]:
+        home_adv = (venue["h"][0] / venue["h"][1]) / (venue["a"][0] / venue["a"][1])
+    return strengths, mu, home_adv
+
+
+def _poisson_vec(lam):
+    p = [math.exp(-lam)]
+    for k in range(1, PREDICT_MAX_GOALS + 1):
+        p.append(p[-1] * lam / k)
+    return p
+
+
+def _outcome_probs(lam_home, lam_away):
+    """P(home win), P(draw), P(away win) and the single most likely score."""
+    ph, pa = _poisson_vec(lam_home), _poisson_vec(lam_away)
+    home = draw = away = 0.0
+    best, best_p = (0, 0), -1.0
+    for i, pi in enumerate(ph):
+        for j, pj in enumerate(pa):
+            p = pi * pj
+            if i > j:
+                home += p
+            elif i == j:
+                draw += p
+            else:
+                away += p
+            if p > best_p:
+                best_p, best = p, (i, j)
+    total = home + draw + away
+    return home / total, draw / total, away / total, best
+
+
+def predictions_block(db, league):
+    fixtures = db.execute(
+        """SELECT match_date, round, home_team, away_team
+           FROM matches WHERE league = ? AND home_score IS NULL AND match_date >= ?
+           ORDER BY match_date, event_id LIMIT ?""",
+        (league, date.today().isoformat(), PREDICT_SHOWN),
+    ).fetchall()
+    if not fixtures:
+        return ""
+    strengths, mu, home_adv = _team_strengths(db, league)
+    if not strengths or mu <= 0:
+        return ""
+    names = sorted({n for _, _, h, a in fixtures for n in (h, a)})
+    mapping = _predict_mapping(names, list(strengths))
+    unmatched = sorted(n for n in names if mapping.get(n) is None)
+    if unmatched:
+        print(f"  ! predictions ({league}): no xG history matched for: "
+              + ", ".join(unmatched))
+    sqrt_ha = math.sqrt(home_adv)
+
+    def seg(cls, share):
+        pct = f"{share * 100:.0f}%"
+        label = pct if share >= 0.15 else ""
+        return (f"<i class='{cls}' style='width:{share * 100:.1f}%'>{label}</i>")
+
+    body = ""
+    for match_date, rnd, home, away in fixtures:
+        rnd_label = f"R{rnd}" if rnd else ""
+        mapped_home, mapped_away = mapping.get(home), mapping.get(away)
+        if not mapped_home or not mapped_away:
+            missing = home if not mapped_home else away
+            body += (
+                f"<tr><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
+                f"<td style='text-align:right'>{escape(home)}</td>"
+                f"<td colspan='2' class='dim' style='text-align:center'>no xG history for {escape(missing)}</td>"
+                f"<td>{escape(away)}</td><td class='num dim'>–</td><td class='num dim'>–</td></tr>"
+            )
+            continue
+        att_h, def_h, n_h = strengths[mapped_home]
+        att_a, def_a, n_a = strengths[mapped_away]
+        lam_home = max(0.1, min(6.0, att_h * def_a / mu * sqrt_ha))
+        lam_away = max(0.1, min(6.0, att_a * def_h / mu / sqrt_ha))
+        p_home, p_draw, p_away, (best_h, best_a) = _outcome_probs(lam_home, lam_away)
+        tip = (f"{home} {p_home * 100:.0f}% · draw {p_draw * 100:.0f}% · "
+               f"{away} {p_away * 100:.0f}% (on {min(n_h, n_a)}+ matches each)")
+        bar = (f"<div class='prob' title='{escape(tip)}'>"
+               + seg("h", p_home) + seg("d", p_draw) + seg("a", p_away) + "</div>")
+        body += (
+            f"<tr><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
+            f"<td style='text-align:right'>{escape(home)}</td>"
+            f"<td style='min-width:180px'>{bar}</td>"
+            f"<td>{escape(away)}</td>"
+            f"<td class='num'>{best_h}–{best_a}</td>"
+            f"<td class='num dim'>{lam_home:.1f}–{lam_away:.1f}</td></tr>"
+        )
+    caveat = (
+        "<div class='caveat'><strong>A model, not a promise.</strong> These "
+        "probabilities come from a small Poisson model over each club's "
+        "recency-weighted xG — nothing else. It has never heard of transfers, "
+        "injuries, suspensions or new managers, and until the new season "
+        "produces matches it leans entirely on last season's form. Newly "
+        "promoted clubs have no top-flight xG history, so their fixtures go "
+        "unpredicted. A conversation starter — never betting advice.</div>"
+    )
+    legend = (
+        "<p class='meta'><span class='pdot' style='background:var(--accent)'></span>home win&ensp;"
+        "<span class='pdot' style='background:var(--draw)'></span>draw&ensp;"
+        "<span class='pdot' style='background:var(--away)'></span>away win&ensp;·&ensp;"
+        "hover a bar for the exact split</p>"
+    )
+    table = (
+        "<div class='card'><table><thead><tr>"
+        "<th>Date</th><th></th><th style='text-align:right'>Home</th>"
+        "<th>Probabilities</th><th>Away</th>"
+        "<th class='num' title='The single most likely exact score — even the "
+        "favourite scoreline rarely tops 15%'>Likely</th>"
+        "<th class='num' title='The model&#39;s expected goals for each side'>xG f&#39;cast</th>"
+        "</tr></thead><tbody>" + body + "</tbody></table></div>"
+    )
+    about = (
+        "Each club gets an <strong>attack</strong> and <strong>defence</strong> "
+        "strength: its recency-weighted average xG for and against (a match "
+        f"{PREDICT_HALF_LIFE_DAYS} days old counts half as much as one today). "
+        "For a fixture, the home side's expected goals are its attack scaled by "
+        "the opponent's defence relative to the league average, times a "
+        "home-advantage factor measured from the league's own home/away xG "
+        "split — and the same, mirrored, for the visitors. Feeding both "
+        "expectations through independent Poisson distributions gives a "
+        "probability for every scoreline, summed into the win/draw/win split "
+        "shown in the bar. <em>Likely</em> is the single most probable exact "
+        "score; <em>xG f'cast</em> is each side's expected goals."
+    )
+    return block("Predictions (xG Poisson model)", caveat + legend + table, about=about)
 
 
 # ------------------------------------------------------- understat sections
@@ -2253,6 +2484,7 @@ def league_section(db, league):
         + home_away_table(db, league)
         + block("Recent results", matches_table(db, league, finished=True))
         + block("Upcoming fixtures", matches_table(db, league, finished=False))
+        + predictions_block(db, league)
     )
 
 

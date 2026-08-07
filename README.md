@@ -81,7 +81,15 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
 `#lg=Premier_League&…`); below it are five tabs:
 
 - **League** — full standings computed from stored results (rank-trend arrows,
-  W/D/L form chips), home/away split table, recent results, upcoming fixtures.
+  W/D/L form chips), home/away split table, recent results, upcoming fixtures,
+  and a **predictions block**: a small Poisson model over each club's
+  recency-weighted xG turns the next ten fixtures into win/draw/win
+  probability bars with the most likely score and an xG forecast. Home
+  advantage is measured from the league's own home/away xG split; newly
+  promoted clubs (no top-flight xG history) are honestly left unpredicted,
+  and the block opens with a caveat that the model knows nothing about
+  transfers, injuries or managers — a conversation starter, not betting
+  advice.
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw
