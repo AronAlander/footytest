@@ -755,7 +755,7 @@ def predictions_block(db, league):
             body += (
                 f"<tr><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
                 f"<td style='text-align:right'>{escape(home)}</td>"
-                f"<td colspan='2' class='dim' style='text-align:center'>no xG history for {escape(missing)}</td>"
+                f"<td class='dim' style='text-align:center'>no xG history for {escape(missing)}</td>"
                 f"<td>{escape(away)}</td><td class='num dim'>–</td><td class='num dim'>–</td></tr>"
             )
             continue
