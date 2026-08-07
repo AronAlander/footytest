@@ -597,6 +597,11 @@ PREDICT_LOOKBACK_DAYS = 400   # strengths may reach into last season: backtest
 PREDICT_GOALS_BLEND = 0.3     # strengths = 70% non-penalty xG + 30% actual
                               # goals; the backtest's best variant, and the
                               # weight sweep's optimum (0.1-0.5 tried)
+PREDICT_DEEP_POWER = 0.15     # territory term: attack scaled by (team deep
+                              # completions / league average) ** this. Chosen
+                              # on pre-2021 seasons, gain held on 2021+; PPDA
+                              # tested the same way came out at exactly zero.
+                              # Leagues without the metric (Allsvenskan) skip it.
 PREDICT_MAX_GOALS = 10        # Poisson score grid per side
 PREDICT_SHOWN = 10            # fixtures predicted per league
 
@@ -656,21 +661,25 @@ def _team_strengths(db, league):
     # and npxG+goals is the strength definition the backtest scored best
     cutoff = (date.today() - timedelta(days=PREDICT_LOOKBACK_DAYS)).isoformat()
     sql = """SELECT team, match_date, home_away,
-                    COALESCE(npxg, xg), COALESCE(npxga, xga), scored, missed
+                    COALESCE(npxg, xg), COALESCE(npxga, xga), scored, missed, {deep}
              FROM {table}
              WHERE league = ? AND xg IS NOT NULL AND xga IS NOT NULL
                AND match_date >= ?"""
     rows = db.execute(
-        sql.format(table="main.understat_team_matches"), (league, cutoff)
+        sql.format(table="main.understat_team_matches", deep="deep"),
+        (league, cutoff),
     ).fetchall()
     if fotmob_available(db):
+        # FotMob has no deep-completions metric — the territory term skips
         rows += db.execute(
-            sql.format(table="main.fotmob_team_matches"), (league, cutoff)
+            sql.format(table="main.fotmob_team_matches", deep="NULL"),
+            (league, cutoff),
         ).fetchall()
     today = date.today()
     teams = {}
     venue = {"h": [0.0, 0.0], "a": [0.0, 0.0]}  # weighted attack sum, weight
-    for team, match_date, home_away, npxg, npxga, scored, missed in rows:
+    lg_deep_sum, lg_deep_w = 0.0, 0.0
+    for team, match_date, home_away, npxg, npxga, scored, missed, deep in rows:
         try:
             days = (today - datetime.strptime(match_date[:10], "%Y-%m-%d").date()).days
         except (TypeError, ValueError):
@@ -678,16 +687,22 @@ def _team_strengths(db, league):
         w = 0.5 ** (max(days, 0) / PREDICT_HALF_LIFE_DAYS)
         attack = (1 - PREDICT_GOALS_BLEND) * npxg + PREDICT_GOALS_BLEND * (scored or 0)
         defence = (1 - PREDICT_GOALS_BLEND) * npxga + PREDICT_GOALS_BLEND * (missed or 0)
-        rec = teams.setdefault(team, [0.0, 0.0, 0.0, 0])
+        rec = teams.setdefault(team, [0.0, 0.0, 0.0, 0, 0.0, 0.0])
         rec[0] += w * attack
         rec[1] += w * defence
         rec[2] += w
         rec[3] += 1
+        if deep is not None:
+            rec[4] += w * deep
+            rec[5] += w
+            lg_deep_sum += w * deep
+            lg_deep_w += w
         if home_away in venue:
             venue[home_away][0] += w * attack
             venue[home_away][1] += w
     strengths = {
-        t: (r[0] / r[2], r[1] / r[2], r[3]) for t, r in teams.items() if r[2] > 0
+        t: (r[0] / r[2], r[1] / r[2], r[3], (r[4] / r[5]) if r[5] else None)
+        for t, r in teams.items() if r[2] > 0
     }
     total_xg = venue["h"][0] + venue["a"][0]
     total_w = venue["h"][1] + venue["a"][1]
@@ -695,7 +710,8 @@ def _team_strengths(db, league):
     home_adv = 1.0
     if venue["h"][1] and venue["a"][1] and venue["a"][0]:
         home_adv = (venue["h"][0] / venue["h"][1]) / (venue["a"][0] / venue["a"][1])
-    return strengths, mu, home_adv
+    lg_deep = lg_deep_sum / lg_deep_w if lg_deep_w else None
+    return strengths, mu, home_adv, lg_deep
 
 
 def _poisson_vec(lam):
@@ -734,7 +750,7 @@ def predictions_block(db, league):
     ).fetchall()
     if not fixtures:
         return ""
-    strengths, mu, home_adv = _team_strengths(db, league)
+    strengths, mu, home_adv, lg_deep = _team_strengths(db, league)
     if not strengths or mu <= 0:
         return ""
     names = sorted({n for _, _, h, a in fixtures for n in (h, a)})
@@ -763,10 +779,15 @@ def predictions_block(db, league):
                 f"<td>{escape(away)}</td><td class='num dim'>–</td><td class='num dim'>–</td></tr>"
             )
             continue
-        att_h, def_h, n_h = strengths[mapped_home]
-        att_a, def_a, n_a = strengths[mapped_away]
-        lam_home = max(0.1, min(6.0, att_h * def_a / mu * sqrt_ha))
-        lam_away = max(0.1, min(6.0, att_a * def_h / mu / sqrt_ha))
+        att_h, def_h, n_h, deep_h = strengths[mapped_home]
+        att_a, def_a, n_a, deep_a = strengths[mapped_away]
+        lam_home = att_h * def_a / mu * sqrt_ha
+        lam_away = att_a * def_h / mu / sqrt_ha
+        if lg_deep and deep_h is not None and deep_a is not None:
+            lam_home *= (deep_h / lg_deep) ** PREDICT_DEEP_POWER
+            lam_away *= (deep_a / lg_deep) ** PREDICT_DEEP_POWER
+        lam_home = max(0.1, min(6.0, lam_home))
+        lam_away = max(0.1, min(6.0, lam_away))
         p_home, p_draw, p_away, (best_h, best_a) = _outcome_probs(lam_home, lam_away)
         tip = (f"{home} {p_home * 100:.0f}% · draw {p_draw * 100:.0f}% · "
                f"{away} {p_away * 100:.0f}% (on {min(n_h, n_a)}+ matches each)")
@@ -822,7 +843,13 @@ def predictions_block(db, league):
         "expectations through independent Poisson distributions gives a "
         "probability for every scoreline, summed into the win/draw/win split "
         "shown in the bar. <em>Likely</em> is the single most probable exact "
-        "score; <em>xG f'cast</em> is each side's expected goals. Strengths "
+        "score; <em>xG f'cast</em> is each side's expected goals. In the "
+        "Understat leagues a small territory term also scales each attack by "
+        "the club's deep-completions rate relative to the league average — "
+        "validated on held-out seasons, unlike pressing intensity (PPDA), "
+        "which was tried the same way, carried no extra signal, and stays "
+        "out. Allsvenskan's feed has no deep-completions metric, so its "
+        "model simply omits the term. Strengths "
         f"may look up to {PREDICT_LOOKBACK_DAYS} days back — across the "
         "season boundary — because replaying every stored season "
         "(backtest.py, 21,700 matches) scored that window best — as it did "

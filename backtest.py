@@ -25,6 +25,11 @@ log-loss (lower is better), accuracy of the most likely outcome.
 An earlier version of this script also raced the lookback window itself:
 the 400-day cross-season window beat same-season-only on every metric
 (and predicts early-season rounds), which is why production uses it.
+Style metrics were screened separately with an era split (coefficient
+swept on pre-2021 seasons, verified on 2021+): a deep-completions
+territory term at exponent 0.15 held its gain out-of-sample and ships in
+production for the leagues that have the metric; PPDA's optimum was
+exactly zero and it stays out.
 
 Usage:
     python backtest.py

@@ -98,7 +98,12 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   window on every metric (and keeps early-season rounds predictable),
   and team strengths are a 70/30 blend of non-penalty xG and actual
   goals — penalties are noise, finishing skill is real — which beat pure
-  xG, pure npxG and every other blend weight tried.
+  xG, pure npxG and every other blend weight tried. In the Understat
+  leagues the attack is additionally scaled by a small deep-completions
+  territory term (validated on held-out seasons: coefficient chosen on
+  pre-2021 data, gain confirmed on 2021+); PPDA was screened the same
+  way, showed zero extra signal beyond xG, and was left out. Allsvenskan
+  has no deep-completions data, so its model simply omits the term.
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw
