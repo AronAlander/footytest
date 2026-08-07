@@ -89,7 +89,14 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   promoted clubs (no top-flight xG history) are honestly left unpredicted,
   and the block opens with a caveat that the model knows nothing about
   transfers, injuries or managers — a conversation starter, not betting
-  advice.
+  advice. The model is validated by `python backtest.py`, which replays
+  every stored season (21,700 matches back to 2014/15) predicting each
+  match only from data available before it: Brier 0.586 and 53% outcome
+  accuracy, against 0.646 / 44% for guessing by league base rates —
+  approaching, not matching, bookmaker quality. The backtest also chose
+  the model's 400-day cross-season lookback over a same-season-only
+  window (better on every metric, and it keeps early-season rounds
+  predictable).
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw

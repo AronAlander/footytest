@@ -591,6 +591,9 @@ def matches_table(db, league, finished, limit=10):
 # ------------------------------------------------------------- predictions
 
 PREDICT_HALF_LIFE_DAYS = 240  # a match this old carries half the weight
+PREDICT_LOOKBACK_DAYS = 400   # strengths may reach into last season: backtest
+                              # over 21,700 matches (backtest.py) scored the
+                              # cross-season window better on every metric
 PREDICT_MAX_GOALS = 10        # Poisson score grid per side
 PREDICT_SHOWN = 10            # fixtures predicted per league
 
@@ -644,12 +647,24 @@ def _predict_mapping(fixture_names, strength_names):
 def _team_strengths(db, league):
     """Recency-weighted mean xG for/against per team, plus the league's mean
     xG per team per match and its home-advantage ratio."""
+    # main tables rather than the season-scoped views: the lookback window
+    # deliberately crosses the season boundary (validated by backtest.py)
+    cutoff = (date.today() - timedelta(days=PREDICT_LOOKBACK_DAYS)).isoformat()
     rows = db.execute(
         """SELECT team, match_date, home_away, xg, xga
-           FROM understat_team_matches
-           WHERE league = ? AND xg IS NOT NULL AND xga IS NOT NULL""",
-        (league,),
+           FROM main.understat_team_matches
+           WHERE league = ? AND xg IS NOT NULL AND xga IS NOT NULL
+             AND match_date >= ?""",
+        (league, cutoff),
     ).fetchall()
+    if fotmob_available(db):
+        rows += db.execute(
+            """SELECT team, match_date, home_away, xg, xga
+               FROM main.fotmob_team_matches
+               WHERE league = ? AND xg IS NOT NULL AND xga IS NOT NULL
+                 AND match_date >= ?""",
+            (league, cutoff),
+        ).fetchall()
     today = date.today()
     teams = {}
     venue = {"h": [0.0, 0.0], "a": [0.0, 0.0]}  # weighted xg sum, weight
@@ -766,9 +781,12 @@ def predictions_block(db, league):
         "probabilities come from a small Poisson model over each club's "
         "recency-weighted xG — nothing else. It has never heard of transfers, "
         "injuries, suspensions or new managers, and until the new season "
-        "produces matches it leans entirely on last season's form. Newly "
+        "produces matches it leans heavily on last season's form. Newly "
         "promoted clubs have no top-flight xG history, so their fixtures go "
-        "unpredicted. A conversation starter — never betting advice.</div>"
+        "unpredicted. Backtested over 21,700 matches back to 2014/15 it "
+        "calls the right result 53% of the time — clearly better than "
+        "always guessing home win (44%), nowhere near clairvoyant. A "
+        "conversation starter — never betting advice.</div>"
     )
     legend = (
         "<p class='meta'><span class='pdot' style='background:var(--accent)'></span>home win&ensp;"
@@ -796,7 +814,12 @@ def predictions_block(db, league):
         "expectations through independent Poisson distributions gives a "
         "probability for every scoreline, summed into the win/draw/win split "
         "shown in the bar. <em>Likely</em> is the single most probable exact "
-        "score; <em>xG f'cast</em> is each side's expected goals."
+        "score; <em>xG f'cast</em> is each side's expected goals. Strengths "
+        f"may look up to {PREDICT_LOOKBACK_DAYS} days back — across the "
+        "season boundary — because replaying every stored season "
+        "(backtest.py, 21,700 matches) scored that window best: Brier 0.586 "
+        "and 53% outcome accuracy, against 0.646 and 44% for guessing by "
+        "league base rates."
     )
     return block("Predictions (xG Poisson model)", caveat + legend + table, about=about)
 
