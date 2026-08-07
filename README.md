@@ -91,12 +91,14 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   transfers, injuries or managers — a conversation starter, not betting
   advice. The model is validated by `python backtest.py`, which replays
   every stored season (21,700 matches back to 2014/15) predicting each
-  match only from data available before it: Brier 0.586 and 53% outcome
-  accuracy, against 0.646 / 44% for guessing by league base rates —
-  approaching, not matching, bookmaker quality. The backtest also chose
-  the model's 400-day cross-season lookback over a same-season-only
-  window (better on every metric, and it keeps early-season rounds
-  predictable).
+  match only from data available before it: Brier 0.584 and 53% outcome
+  accuracy, against 0.647 / 44% for guessing by league base rates —
+  approaching, not matching, bookmaker quality. The backtest chose the
+  model's shape: a 400-day cross-season lookback beat a same-season-only
+  window on every metric (and keeps early-season rounds predictable),
+  and team strengths are a 70/30 blend of non-penalty xG and actual
+  goals — penalties are noise, finishing skill is real — which beat pure
+  xG, pure npxG and every other blend weight tried.
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw

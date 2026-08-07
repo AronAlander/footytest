@@ -1,24 +1,30 @@
 """Backtest the xG Poisson prediction model against played history.
 
 Replays every league season in the database: each match is predicted using
-only team-match xG rows dated BEFORE it (no leakage), exactly as
+only team-match rows dated BEFORE it (no leakage), exactly as
 build_report.py's predictions block would have done on the morning of the
-game. Predictions are scored against what actually happened.
+game, and the predictions are scored against what actually happened.
 
-Two model variants are compared:
+The team-strength definition is raced across variants (all using the
+production model's 400-day cross-season lookback and recency half-life):
 
-  same-season   strengths from the current season's prior matches only —
-                what the dashboard does today
-  cross-season  strengths from all prior matches within a 400-day window,
-                so early-season predictions lean on last season's form
+  xg            attack/defence = weighted mean xG for/against
+  npxg          non-penalty xG — penalties are mostly noise
+  xg+goals      0.7*xG + 0.3*actual goals — lets persistent finishing
+                skill into the strengths
+  npxg+goals    the blend on a non-penalty base — the best scorer, now
+                what production ships (the 0.3 goals weight is the
+                optimum of a 0.1-0.5 sweep)
 
-and two baselines:
-
-  uniform       1/3 home, 1/3 draw, 1/3 away
-  base rates    each league's overall home/draw/away frequencies
+plus two baselines: uniform (1/3 each) and each league's overall
+home/draw/away base rates.
 
 Scores: multiclass Brier (lower is better; uniform scores 0.667),
-log-loss (lower is better), and plain accuracy of the most likely outcome.
+log-loss (lower is better), accuracy of the most likely outcome.
+
+An earlier version of this script also raced the lookback window itself:
+the 400-day cross-season window beat same-season-only on every metric
+(and predicts early-season rounds), which is why production uses it.
 
 Usage:
     python backtest.py
@@ -32,35 +38,57 @@ from datetime import datetime
 from build_report import (
     DB_PATH,
     PREDICT_HALF_LIFE_DAYS,
+    PREDICT_LOOKBACK_DAYS,
     _outcome_probs,
 )
 
-CROSS_SEASON_WINDOW_DAYS = 400  # cross-season variant's lookback
 MIN_PRIOR_MATCHES = 6           # both teams need this much history
 XG_MIRROR_TOLERANCE = 0.005     # pairing home/away rows via mirrored xG
+GOALS_BLEND = 0.3               # weight of actual goals in the blend variants
+
+VARIANTS = {
+    "xg": (
+        lambda r: r["xg"],
+        lambda r: r["xga"],
+    ),
+    "npxg": (
+        lambda r: r["npxg"],
+        lambda r: r["npxga"],
+    ),
+    "xg+goals": (
+        lambda r: (1 - GOALS_BLEND) * r["xg"] + GOALS_BLEND * r["scored"],
+        lambda r: (1 - GOALS_BLEND) * r["xga"] + GOALS_BLEND * r["missed"],
+    ),
+    "npxg+goals": (
+        lambda r: (1 - GOALS_BLEND) * r["npxg"] + GOALS_BLEND * r["scored"],
+        lambda r: (1 - GOALS_BLEND) * r["npxga"] + GOALS_BLEND * r["missed"],
+    ),
+}
 
 
 def load_team_rows(db):
-    """All per-team match rows (both sources), every season."""
-    rows = db.execute(
-        """SELECT season, league, team, match_date, home_away, xg, xga,
-                  scored, missed
-           FROM understat_team_matches
-           WHERE xg IS NOT NULL AND xga IS NOT NULL AND match_date IS NOT NULL"""
-    ).fetchall()
+    """All per-team match rows (both sources), every season. npxG falls back
+    to xG where a source does not provide it."""
+    sql = """SELECT season, league, team, match_date, home_away, xg, xga,
+                    scored, missed, npxg, npxga
+             FROM {table}
+             WHERE xg IS NOT NULL AND xga IS NOT NULL AND match_date IS NOT NULL"""
+    raw = db.execute(sql.format(table="understat_team_matches")).fetchall()
     if db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='fotmob_team_matches'"
     ).fetchone():
-        rows += db.execute(
-            """SELECT season, league, team, match_date, home_away, xg, xga,
-                      scored, missed
-               FROM fotmob_team_matches
-               WHERE xg IS NOT NULL AND xga IS NOT NULL AND match_date IS NOT NULL"""
-        ).fetchall()
-    return [
-        (season, league, team, match_date[:10], home_away, xg, xga, scored, missed)
-        for season, league, team, match_date, home_away, xg, xga, scored, missed in rows
-    ]
+        raw += db.execute(sql.format(table="fotmob_team_matches")).fetchall()
+    rows = []
+    for season, league, team, day, ha, xg, xga, scored, missed, npxg, npxga in raw:
+        day = day[:10]
+        rows.append({
+            "season": season, "league": league, "team": team,
+            "day": day, "ord": _ordinal(day), "ha": ha, "xg": xg, "xga": xga,
+            "scored": scored, "missed": missed,
+            "npxg": npxg if npxg is not None else xg,
+            "npxga": npxga if npxga is not None else xga,
+        })
+    return rows
 
 
 def pair_matches(team_rows):
@@ -68,102 +96,96 @@ def pair_matches(team_rows):
     join them on that mirror. Ambiguous pairs (same league, day, score AND
     xG twice over) are dropped — they are practically nonexistent."""
     by_day = defaultdict(lambda: ([], []))
-    for row in team_rows:
-        season, league, team, day, home_away, xg, xga, scored, missed = row
-        by_day[(league, day)][0 if home_away == "h" else 1].append(row)
+    for r in team_rows:
+        by_day[(r["league"], r["day"])][0 if r["ha"] == "h" else 1].append(r)
     matches = []
     for (league, day), (homes, aways) in by_day.items():
         for h in homes:
             candidates = [
                 a for a in aways
-                if a[7] == h[8] and a[8] == h[7]
-                and abs(a[5] - h[6]) < XG_MIRROR_TOLERANCE
-                and abs(a[6] - h[5]) < XG_MIRROR_TOLERANCE
+                if a["scored"] == h["missed"] and a["missed"] == h["scored"]
+                and abs(a["xg"] - h["xga"]) < XG_MIRROR_TOLERANCE
+                and abs(a["xga"] - h["xg"]) < XG_MIRROR_TOLERANCE
             ]
             if len(candidates) == 1:
                 a = candidates[0]
                 matches.append({
-                    "league": league, "season": h[0], "date": day,
-                    "home": h[2], "away": a[2],
-                    "home_goals": h[7], "away_goals": h[8],
+                    "league": league, "season": h["season"], "date": day,
+                    "home": h["team"], "away": a["team"],
+                    "home_goals": h["scored"], "away_goals": h["missed"],
                 })
     matches.sort(key=lambda m: (m["league"], m["date"], m["home"]))
     return matches
 
 
 def index_histories(team_rows):
-    """(league, team) -> chronologically sorted [(date, xg, xga, home_away, season)]."""
     hist = defaultdict(list)
-    for season, league, team, day, home_away, xg, xga, _, _ in team_rows:
-        hist[(league, team)].append((day, xg, xga, home_away, season))
+    for r in team_rows:
+        hist[(r["league"], r["team"])].append(r)
     for rows in hist.values():
-        rows.sort()
+        rows.sort(key=lambda r: r["ord"])
     return hist
 
 
-def league_days(team_rows):
-    """(league) -> sorted per-day league rows for rolling mu / home-advantage."""
+def league_rows(team_rows):
     per_league = defaultdict(list)
-    for season, league, _, day, home_away, xg, _, _, _ in team_rows:
-        per_league[league].append((day, home_away, xg, season))
+    for r in team_rows:
+        per_league[r["league"]].append(r)
     for rows in per_league.values():
-        rows.sort()
+        rows.sort(key=lambda r: r["ord"])
     return per_league
 
 
-def _days_between(later, earlier):
-    return (datetime.strptime(later, "%Y-%m-%d") - datetime.strptime(earlier, "%Y-%m-%d")).days
+_ORDINAL_CACHE = {}
 
 
-def weighted_strength(history, as_of, season, cross_season):
-    """(attack, defence, n) from rows strictly before as_of, or None."""
-    xg_sum = xga_sum = w_sum = 0.0
+def _ordinal(day):
+    """date string -> proleptic ordinal int, cached (strptime is slow)."""
+    if day not in _ORDINAL_CACHE:
+        _ORDINAL_CACHE[day] = datetime.strptime(day, "%Y-%m-%d").date().toordinal()
+    return _ORDINAL_CACHE[day]
+
+
+def weighted_strength(history, as_of_ord, att, dfn):
+    """(attack, defence) from rows strictly inside the lookback window, or
+    None with fewer than MIN_PRIOR_MATCHES of them."""
+    att_sum = def_sum = w_sum = 0.0
     n = 0
-    for day, xg, xga, _, row_season in history:
-        if day >= as_of:
+    for r in history:
+        if r["ord"] >= as_of_ord:
             break
-        if cross_season:
-            age = _days_between(as_of, day)
-            if age > CROSS_SEASON_WINDOW_DAYS:
-                continue
-        else:
-            if row_season != season:
-                continue
-            age = _days_between(as_of, day)
+        age = as_of_ord - r["ord"]
+        if age > PREDICT_LOOKBACK_DAYS:
+            continue
         w = 0.5 ** (age / PREDICT_HALF_LIFE_DAYS)
-        xg_sum += w * xg
-        xga_sum += w * xga
+        att_sum += w * att(r)
+        def_sum += w * dfn(r)
         w_sum += w
         n += 1
     if n < MIN_PRIOR_MATCHES or w_sum <= 0:
         return None
-    return xg_sum / w_sum, xga_sum / w_sum, n
+    return att_sum / w_sum, def_sum / w_sum
 
 
-def league_context(rows, as_of, season, cross_season, cache={}):
-    """(mu, home_adv) from league rows strictly before as_of."""
-    key = (id(rows), as_of, season, cross_season)
+def league_context(rows, league, as_of_ord, variant, att, cache={}):
+    """(mu, home_adv) over league rows strictly before as_of."""
+    key = (league, as_of_ord, variant)
     if key in cache:
         return cache[key]
     sums = {"h": [0.0, 0.0], "a": [0.0, 0.0]}
-    for day, home_away, xg, row_season in rows:
-        if day >= as_of:
+    for r in rows:
+        if r["ord"] >= as_of_ord:
             break
-        if cross_season:
-            age = _days_between(as_of, day)
-            if age > CROSS_SEASON_WINDOW_DAYS:
-                continue
-        else:
-            if row_season != season:
-                continue
-            age = _days_between(as_of, day)
+        age = as_of_ord - r["ord"]
+        if age > PREDICT_LOOKBACK_DAYS:
+            continue
         w = 0.5 ** (age / PREDICT_HALF_LIFE_DAYS)
-        if home_away in sums:
-            sums[home_away][0] += w * xg
-            sums[home_away][1] += w
-    total_xg = sums["h"][0] + sums["a"][0]
+        if r["ha"] in sums:
+            sums[r["ha"]][0] += w * att(r)
+            sums[r["ha"]][1] += w
+    total_v = sums["h"][0] + sums["a"][0]
     total_w = sums["h"][1] + sums["a"][1]
-    mu = total_xg / total_w if total_w else 0.0
+    mu = total_v / total_w if total_w else 0.0
     home_adv = 1.0
     if sums["h"][1] and sums["a"][1] and sums["a"][0]:
         home_adv = (sums["h"][0] / sums["h"][1]) / (sums["a"][0] / sums["a"][1])
@@ -171,13 +193,14 @@ def league_context(rows, as_of, season, cross_season, cache={}):
     return mu, home_adv
 
 
-def predict(match, hist, lg_rows, cross_season):
-    as_of, season, league = match["date"], match["season"], match["league"]
-    home = weighted_strength(hist[(league, match["home"])], as_of, season, cross_season)
-    away = weighted_strength(hist[(league, match["away"])], as_of, season, cross_season)
+def predict(match, hist, per_league, variant):
+    att, dfn = VARIANTS[variant]
+    as_of_ord, league = _ordinal(match["date"]), match["league"]
+    home = weighted_strength(hist[(league, match["home"])], as_of_ord, att, dfn)
+    away = weighted_strength(hist[(league, match["away"])], as_of_ord, att, dfn)
     if not home or not away:
         return None
-    mu, home_adv = league_context(lg_rows[league], as_of, season, cross_season)
+    mu, home_adv = league_context(per_league[league], league, as_of_ord, variant, att)
     if mu <= 0:
         return None
     sqrt_ha = math.sqrt(home_adv)
@@ -215,7 +238,7 @@ def main():
     team_rows = load_team_rows(db)
     matches = pair_matches(team_rows)
     hist = index_histories(team_rows)
-    lg_rows = league_days(team_rows)
+    per_league = league_rows(team_rows)
     print(f"{len(team_rows)} team-match rows -> {len(matches)} paired matches\n")
 
     league_rates = defaultdict(lambda: [0, 0, 0])
@@ -223,32 +246,24 @@ def main():
         outcome = 0 if m["home_goals"] > m["away_goals"] else (1 if m["home_goals"] == m["away_goals"] else 2)
         league_rates[m["league"]][outcome] += 1
 
-    # Set A: both variants can predict (mid-season). Set B: only cross-season
-    # can (early rounds). Each variant/baseline is scored per set.
-    scorers = defaultdict(Scorer)
+    names = list(VARIANTS) + ["base rates", "uniform"]
+    scorers = {name: Scorer() for name in names}
     for m in matches:
         outcome = 0 if m["home_goals"] > m["away_goals"] else (1 if m["home_goals"] == m["away_goals"] else 2)
-        p_same = predict(m, hist, lg_rows, cross_season=False)
-        p_cross = predict(m, hist, lg_rows, cross_season=True)
+        preds = {v: predict(m, hist, per_league, v) for v in VARIANTS}
+        if not all(preds.values()):
+            continue  # same match set for every variant
         counts = league_rates[m["league"]]
         total = sum(counts)
-        base = [c / total for c in counts]
-        if p_same and p_cross:
-            scorers[("A", "same-season")].add(p_same, outcome)
-            scorers[("A", "cross-season")].add(p_cross, outcome)
-            scorers[("A", "base rates")].add(base, outcome)
-            scorers[("A", "uniform")].add([1 / 3] * 3, outcome)
-        elif p_cross:
-            scorers[("B", "cross-season")].add(p_cross, outcome)
-            scorers[("B", "base rates")].add(base, outcome)
-            scorers[("B", "uniform")].add([1 / 3] * 3, outcome)
+        for v, p in preds.items():
+            scorers[v].add(p, outcome)
+        scorers["base rates"].add([c / total for c in counts], outcome)
+        scorers["uniform"].add([1 / 3] * 3, outcome)
 
-    print("SET A - mid-season matches (both teams have 6+ matches this season):")
-    for name in ("same-season", "cross-season", "base rates", "uniform"):
-        print(f"  {name:14s}{scorers[('A', name)].row()}")
-    print("\nSET B - early-season matches (same-season model cannot predict):")
-    for name in ("cross-season", "base rates", "uniform"):
-        print(f"  {name:14s}{scorers[('B', name)].row()}")
+    print("All variants use the production lookback "
+          f"({PREDICT_LOOKBACK_DAYS}-day cross-season window):")
+    for name in names:
+        print(f"  {name:12s}{scorers[name].row()}")
 
     print("\nLeague base rates (home/draw/away):")
     for league, counts in sorted(league_rates.items()):

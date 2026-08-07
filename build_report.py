@@ -594,6 +594,9 @@ PREDICT_HALF_LIFE_DAYS = 240  # a match this old carries half the weight
 PREDICT_LOOKBACK_DAYS = 400   # strengths may reach into last season: backtest
                               # over 21,700 matches (backtest.py) scored the
                               # cross-season window better on every metric
+PREDICT_GOALS_BLEND = 0.3     # strengths = 70% non-penalty xG + 30% actual
+                              # goals; the backtest's best variant, and the
+                              # weight sweep's optimum (0.1-0.5 tried)
 PREDICT_MAX_GOALS = 10        # Poisson score grid per side
 PREDICT_SHOWN = 10            # fixtures predicted per league
 
@@ -645,42 +648,43 @@ def _predict_mapping(fixture_names, strength_names):
 
 
 def _team_strengths(db, league):
-    """Recency-weighted mean xG for/against per team, plus the league's mean
-    xG per team per match and its home-advantage ratio."""
+    """Recency-weighted attack/defence strength per team — a blend of
+    non-penalty xG and actual goals — plus the league's mean strength per
+    team per match and its home-advantage ratio."""
     # main tables rather than the season-scoped views: the lookback window
-    # deliberately crosses the season boundary (validated by backtest.py)
+    # deliberately crosses the season boundary (validated by backtest.py),
+    # and npxG+goals is the strength definition the backtest scored best
     cutoff = (date.today() - timedelta(days=PREDICT_LOOKBACK_DAYS)).isoformat()
+    sql = """SELECT team, match_date, home_away,
+                    COALESCE(npxg, xg), COALESCE(npxga, xga), scored, missed
+             FROM {table}
+             WHERE league = ? AND xg IS NOT NULL AND xga IS NOT NULL
+               AND match_date >= ?"""
     rows = db.execute(
-        """SELECT team, match_date, home_away, xg, xga
-           FROM main.understat_team_matches
-           WHERE league = ? AND xg IS NOT NULL AND xga IS NOT NULL
-             AND match_date >= ?""",
-        (league, cutoff),
+        sql.format(table="main.understat_team_matches"), (league, cutoff)
     ).fetchall()
     if fotmob_available(db):
         rows += db.execute(
-            """SELECT team, match_date, home_away, xg, xga
-               FROM main.fotmob_team_matches
-               WHERE league = ? AND xg IS NOT NULL AND xga IS NOT NULL
-                 AND match_date >= ?""",
-            (league, cutoff),
+            sql.format(table="main.fotmob_team_matches"), (league, cutoff)
         ).fetchall()
     today = date.today()
     teams = {}
-    venue = {"h": [0.0, 0.0], "a": [0.0, 0.0]}  # weighted xg sum, weight
-    for team, match_date, home_away, xg, xga in rows:
+    venue = {"h": [0.0, 0.0], "a": [0.0, 0.0]}  # weighted attack sum, weight
+    for team, match_date, home_away, npxg, npxga, scored, missed in rows:
         try:
             days = (today - datetime.strptime(match_date[:10], "%Y-%m-%d").date()).days
         except (TypeError, ValueError):
             continue
         w = 0.5 ** (max(days, 0) / PREDICT_HALF_LIFE_DAYS)
+        attack = (1 - PREDICT_GOALS_BLEND) * npxg + PREDICT_GOALS_BLEND * (scored or 0)
+        defence = (1 - PREDICT_GOALS_BLEND) * npxga + PREDICT_GOALS_BLEND * (missed or 0)
         rec = teams.setdefault(team, [0.0, 0.0, 0.0, 0])
-        rec[0] += w * xg
-        rec[1] += w * xga
+        rec[0] += w * attack
+        rec[1] += w * defence
         rec[2] += w
         rec[3] += 1
         if home_away in venue:
-            venue[home_away][0] += w * xg
+            venue[home_away][0] += w * attack
             venue[home_away][1] += w
     strengths = {
         t: (r[0] / r[2], r[1] / r[2], r[3]) for t, r in teams.items() if r[2] > 0
@@ -779,7 +783,8 @@ def predictions_block(db, league):
     caveat = (
         "<div class='caveat'><strong>A model, not a promise.</strong> These "
         "probabilities come from a small Poisson model over each club's "
-        "recency-weighted xG — nothing else. It has never heard of transfers, "
+        "recency-weighted chance quality (non-penalty xG, blended with a "
+        "dash of actual goals) — nothing else. It has never heard of transfers, "
         "injuries, suspensions or new managers, and until the new season "
         "produces matches it leans heavily on last season's form. Newly "
         "promoted clubs have no top-flight xG history, so their fixtures go "
@@ -805,8 +810,11 @@ def predictions_block(db, league):
     )
     about = (
         "Each club gets an <strong>attack</strong> and <strong>defence</strong> "
-        "strength: its recency-weighted average xG for and against (a match "
-        f"{PREDICT_HALF_LIFE_DAYS} days old counts half as much as one today). "
+        "strength: a recency-weighted blend of 70% non-penalty xG and 30% "
+        "actual goals, for and against (a match "
+        f"{PREDICT_HALF_LIFE_DAYS} days old counts half as much as one today "
+        "— penalties are mostly noise, while real goals carry a club's "
+        "persistent finishing skill). "
         "For a fixture, the home side's expected goals are its attack scaled by "
         "the opponent's defence relative to the league average, times a "
         "home-advantage factor measured from the league's own home/away xG "
@@ -817,9 +825,9 @@ def predictions_block(db, league):
         "score; <em>xG f'cast</em> is each side's expected goals. Strengths "
         f"may look up to {PREDICT_LOOKBACK_DAYS} days back — across the "
         "season boundary — because replaying every stored season "
-        "(backtest.py, 21,700 matches) scored that window best: Brier 0.586 "
-        "and 53% outcome accuracy, against 0.646 and 44% for guessing by "
-        "league base rates."
+        "(backtest.py, 21,700 matches) scored that window best — as it did "
+        "this exact strength recipe: Brier 0.584 and 53% outcome accuracy, "
+        "against 0.647 and 44% for guessing by league base rates."
     )
     return block("Predictions (xG Poisson model)", caveat + legend + table, about=about)
 
