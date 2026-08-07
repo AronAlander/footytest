@@ -132,7 +132,18 @@ The site also updates itself: `.github/workflows/update.yml` runs the whole
 pipeline on GitHub's servers every day at 03:15 UTC (after the evening matches),
 commits `docs/` and pushes, and Pages redeploys — no local machine needed.
 The database is kept in the Actions cache between runs; on a cold cache the
-Understat history is backfilled first so archive pages survive. The run uses
+run starts from `seed/football-seed.sqlite.gz`, a committed snapshot of the full
+local database. The seed matters because TheSportsDB is only fetched for the
+current season: a database started from nothing has no past-season matches, and
+in the early-August window before any ball is kicked the season scoping would
+then drop every big-five league from the dashboard (this happened once —
+the cloud runs briefly published an Allsvenskan-only site). A sanity check in
+the workflow now refuses to publish a dashboard missing any league. To refresh
+the snapshot after backfills or big local fetches:
+
+```
+python -c "import sqlite3,gzip,shutil; s=sqlite3.connect('football.sqlite'); d=sqlite3.connect('seed/_t.sqlite'); s.backup(d); d.close(); s.close(); fin=open('seed/_t.sqlite','rb'); fout=gzip.open('seed/football-seed.sqlite.gz','wb',compresslevel=9); shutil.copyfileobj(fin,fout); fout.close(); fin.close(); import os; os.unlink('seed/_t.sqlite')"
+``` The run uses
 `--strict`: if any fetcher fails (an API down, or FotMob blocking cloud IPs),
 nothing is rebuilt or published and the site simply stays on yesterday's data.
 It can also be triggered by hand from the repo's **Actions** tab ("Run
