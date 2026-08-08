@@ -84,7 +84,8 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   W/D/L form chips), home/away split table, recent results, upcoming fixtures,
   and a **predictions block**: a small Poisson model over each club's
   recency-weighted xG turns the next ten fixtures into win/draw/win
-  probability bars with the most likely score and an xG forecast. Home
+  probability bars with an xG forecast (no predicted scoreline — chance
+  quality says little about which exact score a match lands on). Home
   advantage is measured from the league's own home/away xG split; newly
   promoted clubs (no top-flight xG history) are honestly left unpredicted,
   and the block opens with a caveat that the model knows nothing about

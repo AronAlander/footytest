@@ -211,8 +211,7 @@ def predict(match, hist, per_league, variant):
     sqrt_ha = math.sqrt(home_adv)
     lam_home = max(0.1, min(6.0, home[0] * away[1] / mu * sqrt_ha))
     lam_away = max(0.1, min(6.0, away[0] * home[1] / mu / sqrt_ha))
-    p_home, p_draw, p_away, _ = _outcome_probs(lam_home, lam_away)
-    return p_home, p_draw, p_away
+    return _outcome_probs(lam_home, lam_away)
 
 
 class Scorer:

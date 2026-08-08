@@ -722,10 +722,9 @@ def _poisson_vec(lam):
 
 
 def _outcome_probs(lam_home, lam_away):
-    """P(home win), P(draw), P(away win) and the single most likely score."""
+    """P(home win), P(draw), P(away win)."""
     ph, pa = _poisson_vec(lam_home), _poisson_vec(lam_away)
     home = draw = away = 0.0
-    best, best_p = (0, 0), -1.0
     for i, pi in enumerate(ph):
         for j, pj in enumerate(pa):
             p = pi * pj
@@ -735,10 +734,8 @@ def _outcome_probs(lam_home, lam_away):
                 draw += p
             else:
                 away += p
-            if p > best_p:
-                best_p, best = p, (i, j)
     total = home + draw + away
-    return home / total, draw / total, away / total, best
+    return home / total, draw / total, away / total
 
 
 def predictions_block(db, league):
@@ -776,7 +773,7 @@ def predictions_block(db, league):
                 f"<tr><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
                 f"<td style='text-align:right'>{escape(home)}</td>"
                 f"<td class='dim' style='text-align:center'>no xG history for {escape(missing)}</td>"
-                f"<td>{escape(away)}</td><td class='num dim'>–</td><td class='num dim'>–</td></tr>"
+                f"<td>{escape(away)}</td><td class='num dim'>–</td></tr>"
             )
             continue
         att_h, def_h, n_h, deep_h = strengths[mapped_home]
@@ -788,7 +785,7 @@ def predictions_block(db, league):
             lam_away *= (deep_a / lg_deep) ** PREDICT_DEEP_POWER
         lam_home = max(0.1, min(6.0, lam_home))
         lam_away = max(0.1, min(6.0, lam_away))
-        p_home, p_draw, p_away, (best_h, best_a) = _outcome_probs(lam_home, lam_away)
+        p_home, p_draw, p_away = _outcome_probs(lam_home, lam_away)
         tip = (f"{home} {p_home * 100:.0f}% · draw {p_draw * 100:.0f}% · "
                f"{away} {p_away * 100:.0f}% (on {min(n_h, n_a)}+ matches each)")
         bar = (f"<div class='prob' title='{escape(tip)}'>"
@@ -798,7 +795,6 @@ def predictions_block(db, league):
             f"<td style='text-align:right'>{escape(home)}</td>"
             f"<td style='min-width:180px'>{bar}</td>"
             f"<td>{escape(away)}</td>"
-            f"<td class='num'>{best_h}–{best_a}</td>"
             f"<td class='num dim'>{lam_home:.1f}–{lam_away:.1f}</td></tr>"
         )
     caveat = (
@@ -824,8 +820,6 @@ def predictions_block(db, league):
         "<div class='card'><table><thead><tr>"
         "<th>Date</th><th></th><th style='text-align:right'>Home</th>"
         "<th>Probabilities</th><th>Away</th>"
-        "<th class='num' title='The single most likely exact score — even the "
-        "favourite scoreline rarely tops 15%'>Likely</th>"
         "<th class='num' title='The model&#39;s expected goals for each side'>xG f&#39;cast</th>"
         "</tr></thead><tbody>" + body + "</tbody></table></div>"
     )
@@ -842,8 +836,10 @@ def predictions_block(db, league):
         "split — and the same, mirrored, for the visitors. Feeding both "
         "expectations through independent Poisson distributions gives a "
         "probability for every scoreline, summed into the win/draw/win split "
-        "shown in the bar. <em>Likely</em> is the single most probable exact "
-        "score; <em>xG f'cast</em> is each side's expected goals. In the "
+        "shown in the bar. <em>xG f'cast</em> is each side's expected goals — "
+        "deliberately not turned into a predicted scoreline, because chance "
+        "quality says little about which exact score a match lands on and "
+        "even the favourite scoreline rarely tops 15%. In the "
         "Understat leagues a small territory term also scales each attack by "
         "the club's deep-completions rate relative to the league average — "
         "validated on held-out seasons, unlike pressing intensity (PPDA), "
