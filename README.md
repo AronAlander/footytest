@@ -92,12 +92,15 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   transfers, injuries or managers — a conversation starter, not betting
   advice. The model is validated by `python backtest.py`, which replays
   every stored season (21,700 matches back to 2014/15) predicting each
-  match only from data available before it: Brier 0.584 and 53% outcome
+  match only from data available before it: Brier 0.583 and 53% outcome
   accuracy, against 0.647 / 44% for guessing by league base rates —
   approaching, not matching, bookmaker quality. The backtest chose the
-  model's shape: a 400-day cross-season lookback beat a same-season-only
-  window on every metric (and keeps early-season rounds predictable),
-  and team strengths are a 70/30 blend of non-penalty xG and actual
+  model's shape: strengths reach back 1400 days (nearly four seasons)
+  with a 180-day half-life doing the forgetting, which beat every
+  shorter window on held-out seasons — an old match should fade, not
+  fall off a cliff — and as a bonus makes 393 more historical fixtures
+  predictable, promoted clubs included, at no loss of accuracy on them.
+  Team strengths are a 70/30 blend of non-penalty xG and actual
   goals — penalties are noise, finishing skill is real — which beat pure
   xG, pure npxG and every other blend weight tried. In the Understat
   leagues the attack is additionally scaled by a small deep-completions
@@ -109,12 +112,19 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   replay (train pre-2021, verify on 2021+, paired t-test against the
   shipped model): a Dixon-Coles low-score correction, jointly fitted
   attack/defence, an ordered logistic on expected-goal supremacy, Elo on
-  results, Elo on the xG margin, blends and calibration layers. Only one
-  beat production out of sample, and barely — 80/20 with Elo-on-xG,
-  -0.0010 Brier — so the site still ships plain Poisson. Full numbers and
-  the reason each alternative failed are in that file's docstring; the
-  short version is that the model family is not the bottleneck, the
-  inputs are.
+  results, Elo on the xG margin, head-to-head history in three forms,
+  blends and calibration layers. None of them is in the site: the two
+  that did help out of sample (a dash of Elo-on-xG, a dash of the pair's
+  head-to-head record) turned out to be saying the same thing — that a
+  club's level is better evidenced over years than over one season — and
+  once the memory sweep (`python model_lab.py memory`) lengthened the
+  window, two constants captured the whole gain with no new machinery.
+  Notably the "bogey team" effect does **not** survive its controls:
+  head-to-head history helps only in the raw form that restates the
+  quality gap, and collapses to noise once you feed back solely what the
+  model got wrong about those meetings. Full numbers and the reason each
+  alternative failed are in that file's docstring; the short version is
+  that the model family is not the bottleneck, the inputs are.
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw

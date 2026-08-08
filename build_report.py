@@ -590,10 +590,14 @@ def matches_table(db, league, finished, limit=10):
 
 # ------------------------------------------------------------- predictions
 
-PREDICT_HALF_LIFE_DAYS = 240  # a match this old carries half the weight
-PREDICT_LOOKBACK_DAYS = 400   # strengths may reach into last season: backtest
-                              # over 21,700 matches (backtest.py) scored the
-                              # cross-season window better on every metric
+PREDICT_HALF_LIFE_DAYS = 180  # a match this old carries half the weight
+PREDICT_LOOKBACK_DAYS = 1400  # nearly four seasons. A long window with a
+                              # SHORT half-life beat the old 400/240 pair on
+                              # held-out data (model_lab.py memory sweep):
+                              # a hard cutoff was doing the job of decay
+                              # badly, throwing away faint but real evidence
+                              # of how good a club is. The surface is flat
+                              # from ~730 days on, so this is not a knife edge
 PREDICT_GOALS_BLEND = 0.3     # strengths = 70% non-penalty xG + 30% actual
                               # goals; the backtest's best variant, and the
                               # weight sweep's optimum (0.1-0.5 tried)
@@ -803,8 +807,8 @@ def predictions_block(db, league):
         "recency-weighted chance quality (non-penalty xG, blended with a "
         "dash of actual goals) — nothing else. It has never heard of transfers, "
         "injuries, suspensions or new managers, and until the new season "
-        "produces matches it leans heavily on last season's form. Newly "
-        "promoted clubs have no top-flight xG history, so their fixtures go "
+        "produces matches it leans heavily on last season's form. Clubs with "
+        "no recent top-flight xG history at all have their fixtures left "
         "unpredicted. Backtested over 21,700 matches back to 2014/15 it "
         "calls the right result 53% of the time — clearly better than "
         "always guessing home win (44%), nowhere near clairvoyant. A "
@@ -845,12 +849,16 @@ def predictions_block(db, league):
         "validated on held-out seasons, unlike pressing intensity (PPDA), "
         "which was tried the same way, carried no extra signal, and stays "
         "out. Allsvenskan's feed has no deep-completions metric, so its "
-        "model simply omits the term. Strengths "
-        f"may look up to {PREDICT_LOOKBACK_DAYS} days back — across the "
-        "season boundary — because replaying every stored season "
-        "(backtest.py, 21,700 matches) scored that window best — as it did "
-        "this exact strength recipe: Brier 0.584 and 53% outcome accuracy, "
-        "against 0.647 and 44% for guessing by league base rates."
+        "model simply omits the term. Strengths reach back "
+        f"{PREDICT_LOOKBACK_DAYS} days — nearly four seasons — with that "
+        f"{PREDICT_HALF_LIFE_DAYS}-day half-life doing the forgetting, a "
+        "combination that beat a shorter hard-cutoff window on held-out "
+        "seasons: an old match should fade, not fall off a cliff, because "
+        "even faint evidence of how good a club is turns out to be worth "
+        "keeping. Replaying every stored season with this exact recipe "
+        "(backtest.py, 20,900 predictable matches) gives Brier 0.583 and "
+        "53% outcome accuracy, against 0.647 and 44% for guessing by league "
+        "base rates."
     )
     return block("Predictions (xG Poisson model)", caveat + legend + table, about=about)
 

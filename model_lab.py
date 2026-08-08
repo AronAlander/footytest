@@ -51,6 +51,20 @@ production — same fixtures, same outcomes, so |t| under about 2 is noise:
                          collapsing the two expected-goal numbers into
                          one supremacy figure throws away that 2.1-1.9
                          and 0.6-0.4 are different matches
+  h2h-outcome   0.5869   t=-3.0. Nudging the model 5% toward the pair's
+                         own historical result split genuinely helps
+  h2h-surprise  0.5873   t=-1.3 NOTHING, and this is the interesting one.
+                         It feeds back only the part of the pair's history
+                         the model failed to predict — and that part
+                         carries no signal. The xG-residual form agrees
+                         (t=-1.6). So there is no bogey-team effect here:
+                         the raw record works because it re-states how far
+                         apart the two clubs are, evidence a 400-day
+                         window under-weights, not because of anything
+                         chemical between them. The tuned config says the
+                         same thing — flat weighting, so a meeting from
+                         2015 counts as much as one from last season,
+                         which is not how a rivalry effect would behave
   elo           0.5975   t=+6.3 worse — results-only ratings are simply
                          a weaker signal than chance quality
   elo-xg        0.5921   t=+3.3 worse, but much closer: the xG margin
@@ -64,14 +78,39 @@ production — same fixtures, same outcomes, so |t| under about 2 is noise:
   shrunk        0.5871   t=-2.4. 5% toward league base rates — a hair of
                          over-confidence, worth almost nothing
   temperature   0.5874   T=1.00: production is already well calibrated
+  stacked       0.5859   t=-4.8 — the best model here: production, 20%
+                         Elo-on-xG, then a 5% pull toward the pair's
+                         record. Both ingredients say the same thing in
+                         different ways (this club is further ahead of
+                         that one than one season of xG suggests), and
+                         together they are worth -0.0015 Brier: a 0.25%
+                         improvement, and no better at picking winners
 
 So the model family is not the bottleneck; the inputs are. Anything that
 tells the model something xG cannot (lineups, rest days, congestion,
 motivation) is worth more than another way of arranging the same numbers.
 
+The one theme that did repeat: every ingredient that helped — Elo, the
+head-to-head record — worked by adding long-run evidence about the gap
+between two clubs, which pointed at the memory settings rather than at
+any of these models. `python model_lab.py memory` followed that up and
+ended the story: half-life 180 with a 1400-day lookback scores 0.5860
+against the old 240/400's 0.5874 on identical fixtures (t=-3.8) — the
+whole stacked gain, from two constants instead of two subsystems, so
+NOTHING in this file ships and build_report just remembers for longer.
+A hard 400-day cutoff had been doing the job of decay badly; with a
+proper half-life the tail costs nothing and carries a little signal.
+The train surface is flat from ~730 days on, so the setting is not a
+knife edge, and the territory term was re-swept underneath it (still
+0.15, `python model_lab.py deep`). Side effect: 393 more historical
+fixtures become predictable — clubs 400-1400 days out of the top flight
+— and they score Brier 0.586 against 0.648 for guessing, so they are
+worth publishing rather than leaving blank.
+
 Usage:
     python model_lab.py            # everything (a few minutes)
     python model_lab.py fast       # skip the fitted model (the slow one)
+    python model_lab.py memory     # only the half-life / lookback grid
 """
 
 import math
@@ -113,7 +152,9 @@ def defence_value(r):
 
 # ---------------------------------------------------------------- production
 
-def weighted_profile(history, as_of_ord):
+def weighted_profile(history, as_of_ord,
+                     half_life=PREDICT_HALF_LIFE_DAYS,
+                     lookback=PREDICT_LOOKBACK_DAYS):
     """(attack, defence, deep-or-None, n) from rows strictly before as_of."""
     att = dfn = w_sum = 0.0
     deep_sum = deep_w = 0.0
@@ -122,9 +163,9 @@ def weighted_profile(history, as_of_ord):
         if r["ord"] >= as_of_ord:
             break
         age = as_of_ord - r["ord"]
-        if age > PREDICT_LOOKBACK_DAYS:
+        if age > lookback:
             continue
-        w = 0.5 ** (age / PREDICT_HALF_LIFE_DAYS)
+        w = 0.5 ** (age / half_life)
         att += w * attack_value(r)
         dfn += w * defence_value(r)
         w_sum += w
@@ -137,9 +178,11 @@ def weighted_profile(history, as_of_ord):
     return att / w_sum, dfn / w_sum, (deep_sum / deep_w if deep_w else None), n
 
 
-def league_context(rows, as_of_ord, cache={}):
+def league_context(rows, as_of_ord,
+                   half_life=PREDICT_HALF_LIFE_DAYS,
+                   lookback=PREDICT_LOOKBACK_DAYS, cache={}):
     """(mu, home_adv, league mean deep) over league rows before as_of."""
-    key = (id(rows), as_of_ord)
+    key = (id(rows), as_of_ord, half_life, lookback)
     if key in cache:
         return cache[key]
     sums = {"h": [0.0, 0.0], "a": [0.0, 0.0]}
@@ -148,9 +191,9 @@ def league_context(rows, as_of_ord, cache={}):
         if r["ord"] >= as_of_ord:
             break
         age = as_of_ord - r["ord"]
-        if age > PREDICT_LOOKBACK_DAYS:
+        if age > lookback:
             continue
-        w = 0.5 ** (age / PREDICT_HALF_LIFE_DAYS)
+        w = 0.5 ** (age / half_life)
         if r["ha"] in sums:
             sums[r["ha"]][0] += w * attack_value(r)
             sums[r["ha"]][1] += w
@@ -168,22 +211,28 @@ def league_context(rows, as_of_ord, cache={}):
     return out
 
 
-def production_lambdas(match, hist, per_league):
+def production_lambdas(match, hist, per_league,
+                       half_life=PREDICT_HALF_LIFE_DAYS,
+                       lookback=PREDICT_LOOKBACK_DAYS,
+                       deep_power=PREDICT_DEEP_POWER):
     """Exactly what build_report.predictions_block computes, replayed."""
     league, as_of = match["league"], match["ord"]
-    home = weighted_profile(hist[(league, match["home"])], as_of)
-    away = weighted_profile(hist[(league, match["away"])], as_of)
+    home = weighted_profile(hist[(league, match["home"])], as_of,
+                            half_life, lookback)
+    away = weighted_profile(hist[(league, match["away"])], as_of,
+                            half_life, lookback)
     if not home or not away:
         return None
-    mu, home_adv, lg_deep = league_context(per_league[league], as_of)
+    mu, home_adv, lg_deep = league_context(per_league[league], as_of,
+                                           half_life, lookback)
     if mu <= 0:
         return None
     sqrt_ha = math.sqrt(home_adv)
     lam_h = home[0] * away[1] / mu * sqrt_ha
     lam_a = away[0] * home[1] / mu / sqrt_ha
-    if lg_deep and home[2] is not None and away[2] is not None:
-        lam_h *= (home[2] / lg_deep) ** PREDICT_DEEP_POWER
-        lam_a *= (away[2] / lg_deep) ** PREDICT_DEEP_POWER
+    if lg_deep and deep_power and home[2] is not None and away[2] is not None:
+        lam_h *= (home[2] / lg_deep) ** deep_power
+        lam_a *= (away[2] / lg_deep) ** deep_power
     return max(0.1, min(6.0, lam_h)), max(0.1, min(6.0, lam_a))
 
 
@@ -215,6 +264,111 @@ def poisson_probs(lam_h, lam_a, rho=0.0):
                 away += p
     total = home + draw + away
     return home / total, draw / total, away / total
+
+
+# ------------------------------------------------------------ head-to-head
+
+def h2h_residuals(evals, base_lams, half_life, venue_only, min_meetings):
+    """Per-match summary of how the two clubs have historically performed
+    against *each other*, relative to what the model expected of them.
+
+    For every earlier meeting of the same pair, each club's residual is
+    log(what it actually produced / what the model predicted it would).
+    A club that reliably beats the model against this one opponent — the
+    "bogey team" effect, if it exists — carries a positive mean residual.
+    Only meetings strictly before the match are ever used.
+    """
+    chronological = sorted(range(len(evals)), key=lambda i: evals[i]["ord"])
+    history = defaultdict(list)
+    out = [None] * len(evals)
+    for i in chronological:
+        e = evals[i]
+        m = e["match"]
+        lam_h, lam_a = base_lams[i]
+        key = (m["league"], tuple(sorted((m["home"], m["away"]))))
+        rh = ra = w_sum = 0.0
+        n = 0
+        for past_ord, past_home, resid in history[key]:
+            if venue_only and past_home != m["home"]:
+                continue
+            w = 0.5 ** ((e["ord"] - past_ord) / half_life) if half_life else 1.0
+            rh += w * resid[m["home"]]
+            ra += w * resid[m["away"]]
+            w_sum += w
+            n += 1
+        out[i] = ((rh / w_sum, ra / w_sum)
+                  if n >= min_meetings and w_sum > 0 else (0.0, 0.0))
+        history[key].append((e["ord"], m["home"], {
+            m["home"]: math.log(max(attack_value(m["hrow"]), 0.05) / lam_h),
+            m["away"]: math.log(max(attack_value(m["arow"]), 0.05) / lam_a),
+        }))
+    return out
+
+
+def h2h_surprise(evals, probs, half_life, min_meetings):
+    """The confound-free version of the outcome form.
+
+    A pair's raw head-to-head record mostly encodes how far apart the two
+    clubs are — which the model already knows. This instead accumulates
+    what the model got WRONG about their earlier meetings (actual result
+    minus predicted probability), so only the part of the pair's history
+    the model failed to anticipate can feed back in. If the bogey-team
+    effect is real, this carries it; if the raw form only works because
+    it re-states the quality gap, this collapses to nothing.
+    """
+    chronological = sorted(range(len(evals)), key=lambda i: evals[i]["ord"])
+    history = defaultdict(list)
+    out = [None] * len(evals)
+    for i in chronological:
+        e = evals[i]
+        m = e["match"]
+        key = (m["league"], tuple(sorted((m["home"], m["away"]))))
+        acc = [0.0, 0.0, 0.0]
+        w_sum = 0.0
+        n = 0
+        for past_ord, past_home, surprise in history[key]:
+            w = 0.5 ** ((e["ord"] - past_ord) / half_life) if half_life else 1.0
+            s = surprise if past_home == m["home"] else surprise[::-1]
+            for j in range(3):
+                acc[j] += w * s[j]
+            w_sum += w
+            n += 1
+        out[i] = ([a / w_sum for a in acc]
+                  if n >= min_meetings and w_sum > 0 else None)
+        p = probs[i]
+        history[key].append((e["ord"], m["home"],
+                             [(1.0 if j == e["outcome"] else 0.0) - p[j]
+                              for j in range(3)]))
+    return out
+
+
+def h2h_outcomes(evals, half_life, venue_only, min_meetings):
+    """The other way to use head-to-head: the plain historical outcome
+    split of the pair's earlier meetings (home win / draw / away win from
+    this fixture's perspective), to be blended into the model's own."""
+    chronological = sorted(range(len(evals)), key=lambda i: evals[i]["ord"])
+    history = defaultdict(list)
+    out = [None] * len(evals)
+    for i in chronological:
+        e = evals[i]
+        m = e["match"]
+        key = (m["league"], tuple(sorted((m["home"], m["away"]))))
+        counts = [0.0, 0.0, 0.0]
+        w_sum = 0.0
+        n = 0
+        for past_ord, past_home, outcome in history[key]:
+            if venue_only and past_home != m["home"]:
+                continue
+            w = 0.5 ** ((e["ord"] - past_ord) / half_life) if half_life else 1.0
+            # flip the result when the earlier meeting was the other way round
+            idx = outcome if past_home == m["home"] else (2 - outcome)
+            counts[idx] += w
+            w_sum += w
+            n += 1
+        out[i] = ([c / w_sum for c in counts]
+                  if n >= min_meetings and w_sum > 0 else None)
+        history[key].append((e["ord"], m["home"], e["outcome"]))
+    return out
 
 
 # -------------------------------------------------- jointly fitted strengths
@@ -428,8 +582,115 @@ def report(name, evals, probs, base_probs=None):
 
 # ------------------------------------------------------------------ main run
 
+def memory_sweep(matches, hist, per_league):
+    """How long should the model remember? Both knobs at once — how far
+    back rows are allowed to come from, and how fast they fade.
+
+    Every other experiment that helped worked by adding long-run evidence
+    about a club's level, so the honest first question is whether the
+    shipped window is simply too short. Same era discipline: the grid is
+    read on the train era, the winner is confirmed on the test era.
+    """
+    print("Memory sweep — train-era Brier (production is 240 / 400):\n")
+    header = "  half-life |" + "".join(f"{lb:>10}" for lb in MEMORY_LOOKBACKS)
+    print(header)
+    print("  " + "-" * (len(header) - 2))
+    scored = {}
+    for half_life in MEMORY_HALF_LIVES:
+        cells = []
+        for lookback in MEMORY_LOOKBACKS:
+            if lookback < half_life:          # a window shorter than the
+                cells.append("        –")     # half-life is not a real config
+                continue
+            evals, probs = [], []
+            for m in matches:
+                lam = production_lambdas(m, hist, per_league, half_life, lookback)
+                if not lam:
+                    continue
+                evals.append({
+                    "league": m["league"], "ord": m["ord"],
+                    "era": "train" if m["ord"] < TRAIN_END else "test",
+                    "outcome": (0 if m["home_goals"] > m["away_goals"]
+                                else 1 if m["home_goals"] == m["away_goals"] else 2),
+                })
+                probs.append(poisson_probs(*lam))
+            train = score(evals, probs, "train")
+            test = score(evals, probs, "test")
+            scored[(half_life, lookback)] = (train, test, len(evals))
+            cells.append(f"{train[1]:10.4f}")
+        print(f"  {half_life:9d} |" + "".join(cells))
+    print("\n  (match counts differ between configs — a longer lookback makes "
+          "more\n   early-season fixtures predictable, so these Brier scores "
+          "are not\n   strictly like-for-like; the shortlist below fixes that)")
+
+    shortlist = sorted(scored, key=lambda key: scored[key][0][1])[:3]
+    shipped_key = (PREDICT_HALF_LIFE_DAYS, PREDICT_LOOKBACK_DAYS)
+    if shipped_key not in shortlist:
+        shortlist.append(shipped_key)
+    print("\n  Like-for-like on the held-out era — only the matches EVERY "
+          "config\n  on the shortlist could predict, paired against shipped "
+          "240/400:\n")
+    detail = {key: config_probs(matches, hist, per_league, *key)
+              for key in shortlist}
+    common = set.intersection(*(set(d) for d in detail.values()))
+    common = [mid for mid in detail[shipped_key] if mid in common]
+    base = [detail[shipped_key][mid][0] for mid in common]
+    outcomes = [detail[shipped_key][mid][1] for mid in common]
+    eras = [detail[shipped_key][mid][2] for mid in common]
+    evals = [{"era": e, "outcome": o} for e, o in zip(eras, outcomes)]
+    for key in shortlist:
+        probs = [detail[key][mid][0] for mid in common]
+        tag = f"{key[0]}/{key[1]}" + (" (shipped)" if key == shipped_key else "")
+        report(tag, evals, probs, base)
+
+
+MEMORY_HALF_LIVES = (120, 150, 180, 240, 320, 450, 650)
+MEMORY_LOOKBACKS = (400, 730, 1000, 1400, 1800, 2400)
+
+
+def deep_recheck(matches, hist, per_league, half_life, lookback):
+    """The territory term's exponent was chosen under the old 240/400
+    memory. A longer memory changes what the strengths already capture,
+    so the coefficient has to re-earn its place under the new one."""
+    print(f"\nRe-checking the deep-completions term under {half_life}/{lookback}:")
+    base = None
+    for power in (0.0, 0.05, 0.10, 0.15, 0.20, 0.30):
+        detail = config_probs(matches, hist, per_league, half_life, lookback,
+                              deep_power=power)
+        keys = list(detail)
+        evals = [{"era": detail[k][2], "outcome": detail[k][1]} for k in keys]
+        probs = [detail[k][0] for k in keys]
+        if base is None:
+            base = (keys, evals, probs)
+        train = score(evals, probs, "train")
+        test = score(evals, probs, "test")
+        mark = "  <- shipped" if abs(power - PREDICT_DEEP_POWER) < 1e-9 else ""
+        print(f"    power {power:.2f}  train Brier {train[1]:.4f}   "
+              f"test Brier {test[1]:.4f}{mark}")
+
+
+def config_probs(matches, hist, per_league, half_life, lookback,
+                 deep_power=PREDICT_DEEP_POWER):
+    """match id -> (probs, outcome, era) for one memory setting."""
+    out = {}
+    for m in matches:
+        lam = production_lambdas(m, hist, per_league, half_life, lookback,
+                                 deep_power)
+        if not lam:
+            continue
+        out[id(m)] = (
+            poisson_probs(*lam),
+            (0 if m["home_goals"] > m["away_goals"]
+             else 1 if m["home_goals"] == m["away_goals"] else 2),
+            "train" if m["ord"] < TRAIN_END else "test",
+        )
+    return out
+
+
 def main():
     fast = "fast" in sys.argv[1:]
+    memory = "memory" in sys.argv[1:]
+    deep = "deep" in sys.argv[1:]
     db = sqlite3.connect(DB_PATH)
     team_rows = load_team_rows(db)
     matches = pair_matches(team_rows)
@@ -442,6 +703,12 @@ def main():
     ords_by_league = {lg: [m["ord"] for m in ms] for lg, ms in by_league.items()}
 
     print(f"{len(team_rows)} team-match rows -> {len(matches)} paired matches")
+    if memory:
+        memory_sweep(matches, hist, per_league)
+        return
+    if deep:
+        deep_recheck(matches, hist, per_league, 180, 1400)
+        return
     print("Building the production baseline...")
     evals, base_lams = [], []
     for m in matches:
@@ -551,6 +818,75 @@ def main():
         elo_best[name] = probs
     print()
 
+    # --- head-to-head: does a pair's own history add anything to the
+    # strengths? Both the residual form ("this club over-performs against
+    # that one") and the folk form (the raw historical outcome split).
+    print("Head-to-head factor (strength swept on train era):")
+    h2h_best = None
+    for half_life, hl_label in ((None, "flat"), (1100, "hl 3y"), (550, "hl 18m")):
+        for venue_only in (False, True):
+            for min_meetings in (2, 4):
+                resid = h2h_residuals(evals, base_lams, half_life,
+                                      venue_only, min_meetings)
+                used = sum(1 for r in resid if r != (0.0, 0.0))
+                for k in (0.05, 0.1, 0.2, 0.35, 0.5):
+                    probs = []
+                    for (lh, la), (rh, ra) in zip(base_lams, resid):
+                        probs.append(poisson_probs(
+                            max(0.1, min(6.0, lh * math.exp(k * rh))),
+                            max(0.1, min(6.0, la * math.exp(k * ra)))))
+                    b = brier_on(evals, probs, "train")
+                    if h2h_best is None or b < h2h_best[0]:
+                        h2h_best = (b, hl_label, venue_only, min_meetings, k,
+                                    used, probs)
+    b, hl_label, venue_only, min_meetings, k, used, probs = h2h_best
+    print(f"    residual form: {hl_label}, "
+          f"{'same venue only' if venue_only else 'either venue'}, "
+          f"min {min_meetings} meetings, strength {k} -> train Brier {b:.4f} "
+          f"({used}/{len(evals)} matches had enough history)")
+    results["h2h-resid"] = probs
+
+    out_best = None
+    for half_life, hl_label in ((None, "flat"), (1100, "hl 3y")):
+        for min_meetings in (2, 4, 6):
+            rates_h2h = h2h_outcomes(evals, half_life, False, min_meetings)
+            for w in (0.05, 0.1, 0.2, 0.3):
+                probs = []
+                for pr, hr in zip(results["production"], rates_h2h):
+                    if hr is None:
+                        probs.append(pr)
+                    else:
+                        probs.append([(1 - w) * p + w * q for p, q in zip(pr, hr)])
+                b = brier_on(evals, probs, "train")
+                if out_best is None or b < out_best[0]:
+                    out_best = (b, hl_label, min_meetings, w, probs, rates_h2h)
+    b, hl_label, min_meetings, w, probs, h2h_rates = out_best
+    print(f"    outcome form:  {hl_label}, min {min_meetings} meetings, "
+          f"weight {w} -> train Brier {b:.4f}")
+    results["h2h-outcome"] = probs
+
+    sur_best = None
+    for half_life, hl_label in ((None, "flat"), (1100, "hl 3y")):
+        for min_meetings in (2, 4, 6):
+            surprise = h2h_surprise(evals, results["production"],
+                                    half_life, min_meetings)
+            for w in (0.05, 0.1, 0.2, 0.3, 0.5):
+                probs = []
+                for pr, s in zip(results["production"], surprise):
+                    if s is None:
+                        probs.append(pr)
+                        continue
+                    q = [max(p + w * d, 1e-4) for p, d in zip(pr, s)]
+                    total = sum(q)
+                    probs.append([x / total for x in q])
+                b = brier_on(evals, probs, "train")
+                if sur_best is None or b < sur_best[0]:
+                    sur_best = (b, hl_label, min_meetings, w, probs)
+    b, hl_label, min_meetings, w, probs = sur_best
+    print(f"    surprise form: {hl_label}, min {min_meetings} meetings, "
+          f"weight {w} -> train Brier {b:.4f}\n")
+    results["h2h-surprise"] = probs
+
     # --- same expected goals, ordered-logistic link instead of Poisson
     print("Ordered logistic on expected-goal supremacy (swept on train era):")
     best = None
@@ -598,11 +934,28 @@ def main():
         br = brier_on(evals, probs, "train")
         if best is None or br < best[0]:
             best = (br, t, probs)
-    print(f"    temperature T={best[1]:.2f} -> train Brier {best[0]:.4f}\n")
+    print(f"    temperature T={best[1]:.2f} -> train Brier {best[0]:.4f}")
     results["temperature"] = best[2]
 
-    order = ["production", "dixon-coles", "fitted", "supremacy", "elo", "elo-xg",
-             "blend/elo", "blend/elo-xg", "shrunk", "temperature", "base rates"]
+    # everything that helped at once: production, a dash of Elo-on-xG, a
+    # dash of the pair's own record
+    best = None
+    for w in (0.03, 0.05, 0.1, 0.2):
+        probs = []
+        for pr, hr in zip(results["blend/elo-xg"], h2h_rates):
+            probs.append(pr if hr is None
+                         else [(1 - w) * p + w * q for p, q in zip(pr, hr)])
+        br = brier_on(evals, probs, "train")
+        if best is None or br < best[0]:
+            best = (br, w, probs)
+    print(f"    stacked (elo-xg blend + h2h weight {best[1]:.2f}) "
+          f"-> train Brier {best[0]:.4f}\n")
+    results["stacked"] = best[2]
+
+    order = ["production", "dixon-coles", "fitted", "supremacy",
+             "h2h-resid", "h2h-outcome", "h2h-surprise", "elo", "elo-xg",
+             "blend/elo", "blend/elo-xg", "shrunk", "temperature",
+             "stacked", "base rates"]
     print(f"Held-out comparison (test era = 2021-07-01 onwards, never tuned "
           f"on; n={sum(1 for e in evals if e['era'] == 'test')}):")
     for name in order:
