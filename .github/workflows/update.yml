@@ -65,7 +65,10 @@ jobs:
           grep -q "data-lg='Allsvenskan'" docs/index.html
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs
+          # predictions/log.csv is the model's record of what it called before
+          # kickoff — it MUST be committed or the nightly run's calls vanish
+          # with the cache and the report card can never be trusted
+          git add docs predictions
           if git diff --cached --quiet; then
             echo "No changes to publish."
           else

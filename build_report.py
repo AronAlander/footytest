@@ -14,9 +14,12 @@ import math
 import re
 import sqlite3
 import unicodedata
+
 from datetime import date, datetime, timedelta
 from html import escape, unescape
 from pathlib import Path
+
+import prediction_log
 
 PROJECT_DIR = Path(__file__).parent
 DB_PATH = PROJECT_DIR / "football.sqlite"
@@ -86,6 +89,8 @@ h1 {
 h2 { font-size: 20px; letter-spacing: -0.01em; margin: 26px 0 4px; }
 h3 { font-size: 13px; margin: 0; color: var(--text-primary);
      text-transform: uppercase; letter-spacing: 0.06em; }
+h4 { font-size: 13px; margin: 18px 0 7px; color: var(--text-secondary);
+     font-weight: 600; }
 .meta { color: var(--text-secondary); font-size: 13px; margin: 6px 0 8px; }
 nav.tabs {
   display: inline-flex; gap: 2px; margin: 20px 0 4px; padding: 4px;
@@ -744,7 +749,7 @@ def _outcome_probs(lam_home, lam_away):
 
 def predictions_block(db, league):
     fixtures = db.execute(
-        """SELECT match_date, round, home_team, away_team
+        """SELECT match_date, round, home_team, away_team, event_id, season
            FROM matches WHERE league = ? AND home_score IS NULL AND match_date >= ?
            ORDER BY match_date, event_id LIMIT ?""",
         (league, date.today().isoformat(), PREDICT_SHOWN),
@@ -754,7 +759,7 @@ def predictions_block(db, league):
     strengths, mu, home_adv, lg_deep = _team_strengths(db, league)
     if not strengths or mu <= 0:
         return ""
-    names = sorted({n for _, _, h, a in fixtures for n in (h, a)})
+    names = sorted({n for _, _, h, a, _, _ in fixtures for n in (h, a)})
     mapping = _predict_mapping(names, list(strengths))
     unmatched = sorted(n for n in names if mapping.get(n) is None)
     if unmatched:
@@ -767,8 +772,13 @@ def predictions_block(db, league):
         label = pct if share >= 0.15 else ""
         return (f"<i class='{cls}' style='width:{share * 100:.1f}%'>{label}</i>")
 
+    # the published calls are written down as they are made, so the report
+    # card below can grade the site on what it actually said in advance
+    logged = prediction_log.load()
+    today = date.today().isoformat()
+
     body = ""
-    for match_date, rnd, home, away in fixtures:
+    for match_date, rnd, home, away, event_id, season in fixtures:
         rnd_label = f"R{rnd}" if rnd else ""
         mapped_home, mapped_away = mapping.get(home), mapping.get(away)
         if not mapped_home or not mapped_away:
@@ -790,6 +800,9 @@ def predictions_block(db, league):
         lam_home = max(0.1, min(6.0, lam_home))
         lam_away = max(0.1, min(6.0, lam_away))
         p_home, p_draw, p_away = _outcome_probs(lam_home, lam_away)
+        prediction_log.record(logged, today, event_id, league, season,
+                              match_date, home, away,
+                              (p_home, p_draw, p_away), (lam_home, lam_away))
         tip = (f"{home} {p_home * 100:.0f}% · draw {p_draw * 100:.0f}% · "
                f"{away} {p_away * 100:.0f}% (on {min(n_h, n_a)}+ matches each)")
         bar = (f"<div class='prob' title='{escape(tip)}'>"
@@ -801,6 +814,7 @@ def predictions_block(db, league):
             f"<td>{escape(away)}</td>"
             f"<td class='num dim'>{lam_home:.1f}–{lam_away:.1f}</td></tr>"
         )
+    prediction_log.save(logged)
     caveat = (
         "<div class='caveat'><strong>A model, not a promise.</strong> These "
         "probabilities come from a small Poisson model over each club's "
@@ -861,6 +875,156 @@ def predictions_block(db, league):
         "base rates."
     )
     return block("Predictions (xG Poisson model)", caveat + legend + table, about=about)
+
+
+REPORT_CARD_MIN = 30        # below this the record is pure noise, so say so
+REPORT_CARD_RECENT = 8      # individual calls shown
+CALIBRATION_BUCKETS = [     # (low, high, label) on the top pick's probability
+    (0.00, 0.40, "under 40%"),
+    (0.40, 0.50, "40–50%"),
+    (0.50, 0.60, "50–60%"),
+    (0.60, 0.70, "60–70%"),
+    (0.70, 1.01, "over 70%"),
+]
+
+
+def report_card_block(db, league):
+    """How the published predictions have actually fared.
+
+    Everything here is scored against predictions_log entries, i.e. calls
+    written down before kickoff — never a replay of history with today's
+    model. That makes the numbers small and slow to accumulate, which is
+    the price of them meaning anything.
+    """
+    logged = prediction_log.load()
+    graded = prediction_log.graded(db, logged, league)
+    if not graded:
+        return ""
+
+    n = len(graded)
+    hits = brier = 0.0
+    early_brier = 0.0
+    revised = 0
+    buckets = {label: [0, 0.0, 0] for _, _, label in CALIBRATION_BUCKETS}
+    for row, _, _, outcome in graded:
+        revised += int(row["first_seen"] != row["last_seen"])
+        probs = prediction_log.probabilities(row)
+        pick = max(range(3), key=lambda i: probs[i])
+        hits += int(pick == outcome)
+        brier += sum((p - (1.0 if i == outcome else 0.0)) ** 2
+                     for i, p in enumerate(probs))
+        early = prediction_log.probabilities(row, first=True)
+        early_brier += sum((p - (1.0 if i == outcome else 0.0)) ** 2
+                           for i, p in enumerate(early))
+        for low, high, label in CALIBRATION_BUCKETS:
+            if low <= probs[pick] < high:
+                buckets[label][0] += 1
+                buckets[label][1] += probs[pick]
+                buckets[label][2] += int(pick == outcome)
+                break
+
+    accuracy = hits / n * 100
+    brier /= n
+    early_brier /= n
+
+    # only worth a row once some calls were actually revised before kickoff;
+    # early on every first call is still its last and the number just repeats
+    early_row = (
+        f"<tr><td>Same calls, as first published <span class='dim'>"
+        f"(up to two weeks earlier; {revised} of {n} were later revised)</span></td>"
+        f"<td class='num'>{early_brier:.3f}</td></tr>"
+    ) if revised else ""
+    headline = (
+        "<div class='card'><table><tbody>"
+        f"<tr><td>Predictions graded</td><td class='num'>{n}</td></tr>"
+        f"<tr><td>Top pick correct</td><td class='num'>{accuracy:.0f}%</td></tr>"
+        f"<tr><td>Brier score <span class='dim'>(lower is better; "
+        f"0.647 is guessing by league base rates)</span></td>"
+        f"<td class='num'>{brier:.3f}</td></tr>"
+        + early_row +
+        "</tbody></table></div>"
+    )
+
+    if n < REPORT_CARD_MIN:
+        note = (
+            f"<div class='caveat'><strong>Far too early to mean anything.</strong> "
+            f"{n} graded {'call' if n == 1 else 'calls'} is noise — a coin can "
+            "look like a genius over ten matches. This table is here to fill up "
+            "honestly over the season, not to be read yet.</div>"
+        )
+    else:
+        note = (
+            "<div class='caveat'><strong>A live scorecard, not the backtest.</strong> "
+            "Every row here was published before kickoff and never edited, so "
+            "unlike the backtest it cannot flatter the model with hindsight. "
+            "Expect it to wander well above and below the backtested 53% for "
+            "most of a season — a few hundred matches is still a small sample.</div>"
+        )
+
+    rows = ""
+    for low, high, label in CALIBRATION_BUCKETS:
+        count, prob_sum, correct = buckets[label]
+        if not count:
+            continue
+        said = prob_sum / count * 100
+        actual = correct / count * 100
+        rows += (
+            f"<tr><td>{label}</td><td class='num'>{count}</td>"
+            f"<td class='num'>{said:.0f}%</td>"
+            f"<td class='num'>{actual:.0f}%</td></tr>"
+        )
+    calibration = (
+        "<h4>Calibration — when it says 60%, does it happen 60% of the time?</h4>"
+        "<div class='card'><table><thead><tr><th>Confidence in the top pick</th>"
+        "<th class='num'>Calls</th><th class='num'>Model said</th>"
+        "<th class='num'>Actually happened</th></tr></thead><tbody>"
+        + (rows or "<tr><td colspan='4' class='dim'>nothing graded yet</td></tr>")
+        + "</tbody></table></div>"
+    ) if rows else ""
+
+    recent = ""
+    for row, home_score, away_score, outcome in graded[:REPORT_CARD_RECENT]:
+        probs = prediction_log.probabilities(row)
+        pick = max(range(3), key=lambda i: probs[i])
+        names = [row["home"], "Draw", row["away"]]
+        mark = ("<span title='top pick was right'>✓</span>" if pick == outcome
+                else "<span class='dim' title='top pick missed'>✗</span>")
+        recent += (
+            f"<tr><td class='dim'>{escape(row['match_date'])}</td>"
+            f"<td style='text-align:right'>{escape(row['home'])}</td>"
+            f"<td class='num'>{home_score}–{away_score}</td>"
+            f"<td>{escape(row['away'])}</td>"
+            f"<td class='dim'>said {escape(names[pick])} "
+            f"{probs[pick] * 100:.0f}%</td>"
+            f"<td class='num'>{mark}</td></tr>"
+        )
+    recent_table = (
+        "<h4>Recent calls</h4><div class='card'><table><thead><tr>"
+        "<th>Date</th><th style='text-align:right'>Home</th><th class='num'>Score</th>"
+        "<th>Away</th><th>Model's top pick</th><th class='num'></th>"
+        "</tr></thead><tbody>" + recent + "</tbody></table></div>"
+    )
+
+    about = (
+        "Every prediction the site publishes is written to a committed log "
+        "the moment it is made, and frozen the instant a result exists — so "
+        "this table grades calls that were on record before kickoff. That "
+        "is a stricter test than the backtest, where the model's own "
+        "settings were chosen by looking at the matches it is scored on. "
+        "The <em>Brier score</em> is the squared error of the whole "
+        "probability split, not just the top pick: 0 is perfect, 0.647 is "
+        "what guessing each league's home/draw/away base rates gets you, "
+        "and the backtest average is 0.583. Calibration is the more "
+        "revealing half of the table — a model can pick winners at a "
+        "mediocre rate and still be well calibrated, which is what makes "
+        "its probabilities usable. Once some calls have been revised "
+        "between publication and kickoff, a further row re-scores the same "
+        "fixtures using the first call the site ever published for them; if "
+        "that number is close to the main one, the extra fortnight of data "
+        "adds less than you would think."
+    )
+    return block("Model report card", note + headline + calibration + recent_table,
+                 about=about)
 
 
 # ------------------------------------------------------- understat sections
@@ -2547,6 +2711,7 @@ def league_section(db, league):
         + block("Recent results", matches_table(db, league, finished=True))
         + block("Upcoming fixtures", matches_table(db, league, finished=False))
         + predictions_block(db, league)
+        + report_card_block(db, league)
     )
 
 

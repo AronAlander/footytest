@@ -108,6 +108,17 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   pre-2021 data, gain confirmed on 2021+); PPDA was screened the same
   way, showed zero extra signal beyond xG, and was left out. Allsvenskan
   has no deep-completions data, so its model simply omits the term.
+  Underneath the predictions sits a **model report card**, which grades
+  the site on calls it actually published rather than on a replay. Every
+  prediction is written to `predictions/log.csv` when it is made and
+  frozen the moment a result exists, so the card can show hit rate, Brier
+  score, a calibration table (when it says 60%, does it happen 60% of the
+  time?) and the most recent calls with their outcomes. The log is a
+  committed CSV rather than a database table on purpose: `football.sqlite`
+  is gitignored and lives in the Actions cache, which has been lost
+  before, and a prediction record that can evaporate proves nothing. The
+  card hides itself until matches have been graded and says plainly that
+  anything under 30 calls is noise.
   `python model_lab.py` races alternative *model families* on the same
   replay (train pre-2021, verify on 2021+, paired t-test against the
   shipped model): a Dixon-Coles low-score correction, jointly fitted
