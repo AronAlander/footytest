@@ -75,21 +75,26 @@ def load_team_rows(db):
     """All per-team match rows (both sources), every season. npxG falls back
     to xG where a source does not provide it."""
     sql = """SELECT season, league, team, match_date, home_away, xg, xga,
-                    scored, missed, npxg, npxga
+                    scored, missed, npxg, npxga, {deep}
              FROM {table}
              WHERE xg IS NOT NULL AND xga IS NOT NULL AND match_date IS NOT NULL"""
-    raw = db.execute(sql.format(table="understat_team_matches")).fetchall()
+    raw = db.execute(
+        sql.format(table="understat_team_matches", deep="deep")
+    ).fetchall()
     if db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='fotmob_team_matches'"
     ).fetchone():
-        raw += db.execute(sql.format(table="fotmob_team_matches")).fetchall()
+        # FotMob carries no deep-completions metric — same as production
+        raw += db.execute(
+            sql.format(table="fotmob_team_matches", deep="NULL")
+        ).fetchall()
     rows = []
-    for season, league, team, day, ha, xg, xga, scored, missed, npxg, npxga in raw:
+    for season, league, team, day, ha, xg, xga, scored, missed, npxg, npxga, deep in raw:
         day = day[:10]
         rows.append({
             "season": season, "league": league, "team": team,
             "day": day, "ord": _ordinal(day), "ha": ha, "xg": xg, "xga": xga,
-            "scored": scored, "missed": missed,
+            "scored": scored, "missed": missed, "deep": deep,
             "npxg": npxg if npxg is not None else xg,
             "npxga": npxga if npxga is not None else xga,
         })
@@ -116,8 +121,11 @@ def pair_matches(team_rows):
                 a = candidates[0]
                 matches.append({
                     "league": league, "season": h["season"], "date": day,
+                    "ord": h["ord"],
                     "home": h["team"], "away": a["team"],
                     "home_goals": h["scored"], "away_goals": h["missed"],
+                    # the two source rows, for models that need per-side xG
+                    "hrow": h, "arow": a,
                 })
     matches.sort(key=lambda m: (m["league"], m["date"], m["home"]))
     return matches

@@ -105,6 +105,16 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   pre-2021 data, gain confirmed on 2021+); PPDA was screened the same
   way, showed zero extra signal beyond xG, and was left out. Allsvenskan
   has no deep-completions data, so its model simply omits the term.
+  `python model_lab.py` races alternative *model families* on the same
+  replay (train pre-2021, verify on 2021+, paired t-test against the
+  shipped model): a Dixon-Coles low-score correction, jointly fitted
+  attack/defence, an ordered logistic on expected-goal supremacy, Elo on
+  results, Elo on the xG margin, blends and calibration layers. Only one
+  beat production out of sample, and barely — 80/20 with Elo-on-xG,
+  -0.0010 Brier — so the site still ships plain Poisson. Full numbers and
+  the reason each alternative failed are in that file's docstring; the
+  short version is that the model family is not the bottleneck, the
+  inputs are.
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw
