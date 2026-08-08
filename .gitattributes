@@ -1,0 +1,4 @@
+# The prediction log is appended to by both a Windows machine and a Linux
+# Actions runner. Pin it to LF so the two never fight over line endings and
+# produce whole-file diffs that hide the one row that actually changed.
+predictions/log.csv text eol=lf
