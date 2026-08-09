@@ -440,6 +440,71 @@ def completed_matches(db, league):
     ).fetchall()
 
 
+def pretty_date(iso):
+    """2026-08-21 -> 21 August 2026; passes anything unparseable straight back."""
+    try:
+        d = datetime.strptime(iso[:10], "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return iso or ""
+    return f"{d.day} {d.strftime('%B')} {d.year}"
+
+
+def league_season_state(db, league):
+    """Which season each half of the League tab is actually describing.
+
+    Out of season these are two different things. The table, the results and
+    the home/away splits come from the last season that has completed
+    matches; the fixtures, predictions and projection have already moved on
+    to the next one. That is the right behaviour — a finished table is still
+    the most useful thing to show in August — but presented without a word of
+    explanation it reads as though the league is live and the model is
+    predicting matches that contradict the table above it.
+
+    Returns (table_season, next_season, next_start) where next_season is None
+    unless the table's season is genuinely over and another one is scheduled.
+    Once the new season plays its first match it becomes the anchor, and this
+    collapses back to (season, None, None) on its own.
+    """
+    table_season = db.execute(
+        "SELECT MAX(season) FROM matches WHERE league = ? AND home_score IS NOT NULL",
+        (league,),
+    ).fetchone()[0]
+    if not table_season:
+        return None, None, None
+    still_to_play = db.execute(
+        "SELECT COUNT(*) FROM matches WHERE league = ? AND season = ? "
+        "AND home_score IS NULL",
+        (league, table_season),
+    ).fetchone()[0]
+    if still_to_play:
+        return table_season, None, None   # season in progress, nothing to explain
+    nxt = db.execute(
+        """SELECT season, MIN(match_date) FROM matches
+           WHERE league = ? AND home_score IS NULL AND season > ?
+           GROUP BY season ORDER BY season LIMIT 1""",
+        (league, table_season),
+    ).fetchone()
+    if not nxt or not nxt[0]:
+        return table_season, None, None
+    return table_season, nxt[0], nxt[1]
+
+
+def between_seasons_note(table_season, next_season, next_start):
+    """Says out loud that the tab is straddling two seasons."""
+    if not next_season:
+        return ""
+    when = pretty_date(next_start)
+    starts = f" It starts on {escape(when)}." if when else ""
+    return (
+        "<div class='caveat'><strong>Between seasons.</strong> "
+        f"{escape(str(table_season))} is over, so the table, results and "
+        "home/away splits below are how that season <em>finished</em> — not a "
+        "live table. The fixtures, predictions and season projection are "
+        f"already for {escape(str(next_season))}.{starts} Everything realigns "
+        "by itself once the new season plays its first match.</div>"
+    )
+
+
 def compute_table(matches, upto_round=None):
     """Standings computed from raw results; each entry also carries
     home/away sub-records. Returns rows sorted by pts, gd, gf."""
@@ -503,7 +568,7 @@ def trend_arrow(change):
     return "<span class='dim'>=</span>"
 
 
-def standings_table(db, league):
+def standings_table(db, league, title_suffix=""):
     matches = completed_matches(db, league)
     if not matches:
         return "<p class='dim'>No completed matches in the database yet.</p>"
@@ -547,10 +612,10 @@ def standings_table(db, league):
         "A blue stripe marks the top four (Champions League places), a red stripe the "
         "bottom three (relegation).</p>"
     )
-    return block("Standings", card, about)
+    return block("Standings" + title_suffix, card, about)
 
 
-def home_away_table(db, league):
+def home_away_table(db, league, title_suffix=""):
     matches = completed_matches(db, league)
     if not matches:
         return ""
@@ -580,7 +645,7 @@ def home_away_table(db, league):
         "actually travels better than it defends home turf. Note each half is only ~19 "
         "matches, so a swing of a few points can be noise.</p>"
     )
-    return block("Home / away split", card, about)
+    return block("Home / away split" + title_suffix, card, about)
 
 
 # ------------------------------------------------------------ matches lists
@@ -3004,12 +3069,19 @@ EXPLORER_JS = """
 # ------------------------------------------------------------------- report
 
 def league_section(db, league):
+    table_season, next_season, next_start = league_season_state(db, league)
+    # out of season every backward-looking block gets stamped with the season
+    # it belongs to, so none of them can be mistaken for a live table
+    # block() escapes the title itself, so these stay raw
+    past = f" ({table_season} final)" if next_season else ""
+    ahead = f" ({next_season})" if next_season else ""
     return (
         f"<h2>{escape(league)}</h2>"
-        + standings_table(db, league)
-        + home_away_table(db, league)
-        + block("Recent results", matches_table(db, league, finished=True))
-        + block("Upcoming fixtures", matches_table(db, league, finished=False))
+        + between_seasons_note(table_season, next_season, next_start)
+        + standings_table(db, league, past)
+        + home_away_table(db, league, past)
+        + block("Recent results" + past, matches_table(db, league, finished=True))
+        + block("Upcoming fixtures" + ahead, matches_table(db, league, finished=False))
         + predictions_block(db, league)
         + season_projection_block(db, league)
         + report_card_block(db, league)
