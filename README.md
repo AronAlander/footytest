@@ -136,6 +136,30 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   model got wrong about those meetings. Full numbers and the reason each
   alternative failed are in that file's docstring; the short version is
   that the model family is not the bottleneck, the inputs are.
+- **Season projection** — a rolling forecast of the final table. Points
+  already banked are carried over untouched; every fixture still to be
+  played is simulated 5,000 times through the same Poisson model, and the
+  final tables are counted into projected points plus title, top-four and
+  bottom-three probabilities. Because the strengths behind it are mostly
+  non-penalty xG, it disagrees with the table on purpose: a club third on
+  a thin xG record keeps its points and is still projected to fade, and a
+  good side stuck in mid-table is projected to climb. Before a season
+  kicks off the block runs on prior seasons alone and says so. Newly
+  promoted clubs with no top-flight history start from the measured
+  average of promoted sides (0.79× league attack, 1.19× defence over the
+  80 such arrivals in the data) rather than from nothing.
+  `python season_lab.py` is the referee: it replays 58 finished seasons,
+  projects the final table at ten points in each, and scores mean absolute
+  error in points against extrapolating the table, extrapolating Understat
+  xPts, never updating the preseason view, and a flat league-average
+  baseline. The projection wins at every checkpoint (held-out paired t
+  −17.9 to −3.9); after a tenth of a season it is 7.7 points out against
+  18.8 for reading the table and multiplying, which at that stage is worse
+  than assuming every club finishes on the league average. Two ideas were
+  tested and rejected: shrinking the projection back toward the table
+  (worse at every weight), and discounting a returning club's stale
+  top-flight record toward the promoted prior (both eras preferred it, but
+  the optima disagreed and the best held-out t was −1.8, so it stays out).
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw

@@ -281,6 +281,25 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
   display: inline-block; width: 10px; height: 10px; border-radius: 50%;
   vertical-align: -1px; margin-right: 4px;
 }
+/* season projection: the percentage sits on top of its own bar, so a column
+   of them reads as a shape before it reads as numbers */
+td.pcell {
+  position: relative; text-align: right;
+  /* the number is nudged clear of the cell edge so the bar always has room
+     to show a sliver behind it, even at 1% */
+  padding-right: 14px;
+}
+td.pcell i {
+  /* Anchored right, growing out from under its own number. Kept faint on
+     purpose: at full strength the bar's edge slicing between two digits of
+     a number like 31% is the first thing the eye lands on. */
+  position: absolute; right: 4px; top: 5px; bottom: 5px; border-radius: 2px;
+  min-width: 3px;
+}
+td.pcell i.win { background: color-mix(in srgb, var(--accent-2) 22%, transparent); }
+td.pcell i.cl { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+td.pcell i.rel { background: color-mix(in srgb, var(--loss) 20%, transparent); }
+td.pcell span { position: relative; }
 .h2h-bar i.b { background: var(--win); margin-left: auto; }
 .h2h-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
 @media (max-width: 760px) { .h2h-cols { grid-template-columns: 1fr; } }

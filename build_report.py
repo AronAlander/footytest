@@ -11,10 +11,12 @@ JavaScript for tabs and the player explorer (works offline from file://).
 
 import json
 import math
+import random
 import re
 import sqlite3
 import unicodedata
 
+from bisect import bisect
 from datetime import date, datetime, timedelta
 from html import escape, unescape
 from pathlib import Path
@@ -324,6 +326,25 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
   display: inline-block; width: 10px; height: 10px; border-radius: 50%;
   vertical-align: -1px; margin-right: 4px;
 }
+/* season projection: the percentage sits on top of its own bar, so a column
+   of them reads as a shape before it reads as numbers */
+td.pcell {
+  position: relative; text-align: right;
+  /* the number is nudged clear of the cell edge so the bar always has room
+     to show a sliver behind it, even at 1% */
+  padding-right: 14px;
+}
+td.pcell i {
+  /* Anchored right, growing out from under its own number. Kept faint on
+     purpose: at full strength the bar's edge slicing between two digits of
+     a number like 31% is the first thing the eye lands on. */
+  position: absolute; right: 4px; top: 5px; bottom: 5px; border-radius: 2px;
+  min-width: 3px;
+}
+td.pcell i.win { background: color-mix(in srgb, var(--accent-2) 22%, transparent); }
+td.pcell i.cl { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+td.pcell i.rel { background: color-mix(in srgb, var(--loss) 20%, transparent); }
+td.pcell span { position: relative; }
 .h2h-bar i.b { background: var(--win); margin-left: auto; }
 .h2h-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
 @media (max-width: 760px) { .h2h-cols { grid-template-columns: 1fr; } }
@@ -1025,6 +1046,285 @@ def report_card_block(db, league):
     )
     return block("Model report card", note + headline + calibration + recent_table,
                  about=about)
+
+
+# --------------------------------------------------- rolling season forecast
+
+PROJECT_SIMS = 5000         # Monte Carlo seasons. Sampling error on a shown
+                            # percentage peaks near 0.7pp, well inside the
+                            # model's own error, and 20k was not visibly better
+PROJECT_SEED = 20260809     # fixed, so a rebuild with unchanged data produces
+                            # unchanged percentages — a number that jitters
+                            # every night teaches the reader to distrust it
+PROJECT_EUROPE = 4          # top-N highlighted, matching the standings stripe
+PROJECT_RELEGATED = 3       # bottom-N ditto
+PROJECT_MIN_TEAMS = 6
+# A club with no usable top-flight history is not "roughly average": measured
+# over the 80 such arrivals in the database (season_lab.py promoted), they
+# attack at 0.79x and concede at 1.19x the league average. Treating them as
+# average would put a promoted side mid-table every August.
+PROJECT_PROMOTED_ATTACK = 0.787
+PROJECT_PROMOTED_DEFENCE = 1.187
+
+
+def _margin_sampler(lam_home, lam_away):
+    """Cumulative distribution over (home goals − away goals) for one fixture.
+
+    Only the margin is needed — it fixes both the points and the goal
+    difference contribution — so one sample per fixture does the work of two
+    and the simulation runs about twice as fast.
+    """
+    ph, pa = _poisson_vec(lam_home), _poisson_vec(lam_away)
+    sh, sa = sum(ph), sum(pa)
+    ph = [p / sh for p in ph]
+    pa = [p / sa for p in pa]
+    margins, cum, running = [], [], 0.0
+    for d in range(-PREDICT_MAX_GOALS, PREDICT_MAX_GOALS + 1):
+        p = sum(ph[i] * pa[i - d] for i in range(max(0, d), min(len(ph), len(pa) + d)))
+        if p <= 0:
+            continue
+        running += p
+        margins.append(d)
+        cum.append(running)
+    cum[-1] = 1.0  # absorb the truncated tail into the last bucket
+    return cum, margins
+
+
+def _projection_fixtures(db, league):
+    """(season, played rows, remaining rows) for the season now in progress."""
+    row = db.execute(
+        """SELECT season FROM matches
+           WHERE league = ? AND home_score IS NULL
+           ORDER BY match_date, event_id LIMIT 1""",
+        (league,),
+    ).fetchone()
+    if not row:
+        return None
+    season = row[0]
+    rows = db.execute(
+        """SELECT home_team, away_team, home_score, away_score FROM matches
+           WHERE league = ? AND season = ? ORDER BY match_date, event_id""",
+        (league, season),
+    ).fetchall()
+    played = [r for r in rows if r[2] is not None and r[3] is not None]
+    remaining = [r for r in rows if r[2] is None or r[3] is None]
+    return season, played, remaining
+
+
+def season_projection_block(db, league):
+    """Where the season is heading, re-read from scratch every night.
+
+    The projection is deliberately NOT an extrapolation of the table. Points
+    already banked are kept exactly as they are — they are real and cannot be
+    taken away — but every fixture still to be played is simulated from the
+    same recency-weighted xG strengths the match predictions use. So a club
+    riding a hot finishing streak keeps its points and is still projected on
+    the chances it actually creates, and a good side sitting eleventh is
+    projected to climb.
+
+    Validated in season_lab.py by replaying 58 completed seasons and
+    projecting the final table at nine points in each: mean absolute error
+    7.7 points after a tenth of the season against 18.8 for extrapolating
+    the table, and it wins at every checkpoint through to the last
+    (paired t across held-out seasons −17.9 to −3.9).
+    """
+    found = _projection_fixtures(db, league)
+    if not found:
+        return ""
+    season, played, remaining = found
+    if not remaining:
+        return ""
+
+    teams = sorted({t for h, a, _, _ in played + remaining for t in (h, a)})
+    if len(teams) < PROJECT_MIN_TEAMS:
+        return ""
+    idx = {t: i for i, t in enumerate(teams)}
+    n = len(teams)
+
+    base_pts, base_gd, base_played = [0] * n, [0] * n, [0] * n
+    for home, away, hs, as_ in played:
+        h, a = idx[home], idx[away]
+        base_played[h] += 1
+        base_played[a] += 1
+        base_gd[h] += hs - as_
+        base_gd[a] += as_ - hs
+        if hs > as_:
+            base_pts[h] += 3
+        elif hs == as_:
+            base_pts[h] += 1
+            base_pts[a] += 1
+        else:
+            base_pts[a] += 3
+
+    strengths, mu, home_adv, lg_deep = _team_strengths(db, league)
+    if not strengths or mu <= 0:
+        return ""
+    mapping = _predict_mapping(teams, list(strengths))
+    sqrt_ha = math.sqrt(home_adv)
+    promoted = (PROJECT_PROMOTED_ATTACK * mu, PROJECT_PROMOTED_DEFENCE * mu,
+                0, None)
+    n_promoted = sum(1 for t in teams if mapping.get(t) is None)
+
+    prepared = []
+    for home, away, _, _ in remaining:
+        att_h, def_h, _, deep_h = strengths.get(mapping.get(home)) or promoted
+        att_a, def_a, _, deep_a = strengths.get(mapping.get(away)) or promoted
+        lam_home = att_h * def_a / mu * sqrt_ha
+        lam_away = att_a * def_h / mu / sqrt_ha
+        if lg_deep and deep_h is not None and deep_a is not None:
+            lam_home *= (deep_h / lg_deep) ** PREDICT_DEEP_POWER
+            lam_away *= (deep_a / lg_deep) ** PREDICT_DEEP_POWER
+        lam_home = max(0.1, min(6.0, lam_home))
+        lam_away = max(0.1, min(6.0, lam_away))
+        cum, margins = _margin_sampler(lam_home, lam_away)
+        prepared.append((cum, margins, idx[home], idx[away]))
+
+    rng = random.Random(PROJECT_SEED)
+    rand = rng.random
+    pts_total = [0] * n
+    title = [0] * n
+    europe = [0] * n
+    drop = [0] * n
+    rel_cut = n - PROJECT_RELEGATED
+    for _ in range(PROJECT_SIMS):
+        pts, gd = base_pts[:], base_gd[:]
+        for cum, margins, h, a in prepared:
+            d = margins[bisect(cum, rand())]
+            gd[h] += d
+            gd[a] -= d
+            if d > 0:
+                pts[h] += 3
+            elif d == 0:
+                pts[h] += 1
+                pts[a] += 1
+            else:
+                pts[a] += 3
+        # ties on points and goal difference are broken at random rather than
+        # by goals scored: the sim never generates a scoreline, only a margin
+        order = sorted(range(n), key=lambda i: (pts[i], gd[i], rand()),
+                       reverse=True)
+        for rank, i in enumerate(order):
+            pts_total[i] += pts[i]
+            if rank == 0:
+                title[i] += 1
+            if rank < PROJECT_EUROPE:
+                europe[i] += 1
+            if rank >= rel_cut:
+                drop[i] += 1
+
+    proj = [pts_total[i] / PROJECT_SIMS for i in range(n)]
+    started = any(base_played)
+    now_rank = {}
+    if started:
+        standing = sorted(range(n), key=lambda i: (base_pts[i], base_gd[i]),
+                          reverse=True)
+        now_rank = {i: r for r, i in enumerate(standing, 1)}
+    order = sorted(range(n), key=lambda i: (proj[i], base_gd[i]), reverse=True)
+
+    def pcell(count, cls):
+        share = count / PROJECT_SIMS
+        if share < 0.005:
+            return "<td class='num dim'>–</td>"
+        return (f"<td class='num pcell'><i class='{cls}' "
+                f"style='width:{share * 100:.0f}%'></i>"
+                f"<span>{share * 100:.0f}%</span></td>")
+
+    body = ""
+    for rank, i in enumerate(order, 1):
+        zone = (" class='zone-cl'" if rank <= PROJECT_EUROPE
+                else " class='zone-rel'" if rank > rel_cut else "")
+        if started:
+            # positive = projected to finish above where the club sits today
+            now = (f"<td class='num dim'>{now_rank[i]}</td>"
+                   f"<td class='num'>{trend_arrow(now_rank[i] - rank)}</td>"
+                   f"<td class='num'>{base_played[i]}</td>"
+                   f"<td class='num score'>{base_pts[i]}</td>")
+        else:
+            now = ""
+        body += (
+            f"<tr{zone}><td class='num'>{rank}</td><td>{escape(teams[i])}</td>"
+            + now
+            + f"<td class='num score'>{proj[i]:.0f}</td>"
+            + pcell(title[i], "win") + pcell(europe[i], "cl")
+            + pcell(drop[i], "rel") + "</tr>"
+        )
+
+    head_now = ("<th class='num'>Now</th><th></th><th class='num'>P</th>"
+                "<th class='num'>Pts</th>") if started else ""
+    table = (
+        "<div class='card'><table><thead><tr>"
+        "<th class='num'>#</th><th>Team</th>" + head_now
+        + "<th class='num' title='Mean final points over "
+        f"{PROJECT_SIMS:,} simulated seasons'>Proj</th>"
+        "<th class='num'>Title</th>"
+        f"<th class='num'>Top {PROJECT_EUROPE}</th>"
+        f"<th class='num'>Bottom {PROJECT_RELEGATED}</th>"
+        f"</tr></thead><tbody>{body}</tbody></table></div>"
+    )
+
+    if started:
+        lead = (f"{len(remaining)} of {len(played) + len(remaining)} matches "
+                "left to play. Points already won are kept as they are; every "
+                "remaining fixture is simulated from current xG form.")
+    else:
+        lead = ("The season has not kicked off, so this is last season's "
+                "evidence and nothing else — it will start moving with the "
+                "first results.")
+    note = f"<p class='meta'>{escape(lead)}</p>"
+
+    caveat = (
+        "<div class='caveat'><strong>Form, not news.</strong> The simulation "
+        "knows only what clubs have done on the pitch. It has never heard of "
+        "a transfer window, a sacking or an injury — when those things "
+        "matter, they reach the projection the slow way, through results. "
+        "It also assumes each club's current level holds for the rest of the "
+        "season, which is exactly the assumption a January collapse breaks."
+        + (f" {n_promoted} newly promoted club"
+           f"{'s have' if n_promoted != 1 else ' has'} no top-flight history "
+           "at all here, and start from the average record of promoted sides "
+           "rather than from anything about this particular squad."
+           if n_promoted else "")
+        + " A club returning after a year in the division below is projected "
+        "on the last top-flight football it played, which may be a squad ago."
+        + "</div>"
+    )
+    about = (
+        "<p><strong>What it does.</strong> Every fixture left in the season is "
+        f"played out {PROJECT_SIMS:,} times using the same Poisson model as "
+        "the predictions above, and the resulting final tables are counted "
+        "up. <em>Proj</em> is the average final points total; the three "
+        "percentages are how often a club finished first, in the top "
+        f"{PROJECT_EUROPE}, and in the bottom {PROJECT_RELEGATED}.</p>"
+        "<p><strong>Why it disagrees with the table.</strong> Points already "
+        "banked are carried over untouched — they are real. Everything still "
+        "to come is projected from recency-weighted non-penalty xG, which is "
+        "mostly deaf to a hot finishing run. So a club sitting third on a "
+        "thin xG record gets to keep its points and is still projected to "
+        "fade, while a good side stuck in mid-table is projected to climb. "
+        "The gap between the <em>Now</em> and <em>#</em> columns is that "
+        "disagreement, in places.</p>"
+        "<p><strong>Does it work?</strong> season_lab.py replays 58 finished "
+        "seasons and projects the final table at ten points in each. Before "
+        "a ball is kicked it lands 8.2 points per club from the final total; "
+        "after a tenth of a season, 7.7 — against 18.8 for reading the table "
+        "and multiplying, which at that stage is worse than simply assuming "
+        "every club finishes on the league average. The model is ahead at "
+        "every checkpoint right through to the final tenth, on held-out "
+        "seasons its settings were never tuned on. Shrinking it back toward "
+        "the table was tried and made it worse at every weight. Worth "
+        "knowing: the preseason projection is already most of the way there. "
+        "Updating it as results arrive is worth about 0.2 points per club "
+        "after a tenth of the season, peaks near 0.7 at halfway, and is back "
+        "under 0.2 by the run-in — most of what this table knows, it knew "
+        "in August.</p>"
+        "<p><strong>Reading the percentages.</strong> They are simulation "
+        "frequencies, not certainties, and the top-four and bottom-three "
+        "cuts are the site's own convention — real European and relegation "
+        "places vary by league and by season. Anything under 0.5% shows as "
+        "a dash.</p>"
+    )
+    return block(f"Season projection ({escape(str(season))})",
+                 caveat + note + table, about=about)
 
 
 # ------------------------------------------------------- understat sections
@@ -2711,6 +3011,7 @@ def league_section(db, league):
         + block("Recent results", matches_table(db, league, finished=True))
         + block("Upcoming fixtures", matches_table(db, league, finished=False))
         + predictions_block(db, league)
+        + season_projection_block(db, league)
         + report_card_block(db, league)
     )
 
