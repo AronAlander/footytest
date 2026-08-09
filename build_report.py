@@ -3169,6 +3169,25 @@ def preseason_panel(db, leagues):
     )
 
 
+def coverage_label(db, leagues):
+    """Header badge naming the seasons on show — plural, deliberately.
+
+    The big five run autumn to spring and Allsvenskan runs inside a single
+    calendar year, so no one season label covers both, and for most of the
+    year they genuinely disagree. Folding them into one ("Big five +
+    Allsvenskan 2026/27") attaches a season to Allsvenskan that it does not
+    have.
+    """
+    parts = [f"Big five {season_label(db)}".strip()]
+    if "Allsvenskan" in leagues and fotmob_available(db):
+        season = db.execute(
+            "SELECT MAX(season) FROM main.fotmob_team_matches"
+        ).fetchone()[0]
+        if season:
+            parts.append(f"Allsvenskan {season}")
+    return " · ".join(parts)
+
+
 def sources_label(db, leagues):
     """Header suffix: which source covers what, e.g.
     '2025/26, Understat · Allsvenskan 2026, FotMob'."""
@@ -3570,7 +3589,7 @@ def build_page(db, nav, generated, archive_label=None):
         footer = ("Season archive — final Understat data for a finished campaign. "
                   "Rebuilt whenever the report generator changes.")
     else:
-        badge_texts = [f"Big five + Allsvenskan {season_label(db)}".strip(),
+        badge_texts = [coverage_label(db, leagues),
                        "TheSportsDB + Understat + FotMob", f"Generated {generated}"]
         title = "Football dashboard"
         tagline = ("The big five European leagues — plus Allsvenskan — under the hood: "
