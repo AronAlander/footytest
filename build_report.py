@@ -1340,13 +1340,19 @@ def _compute_projection(db, league, as_of=None, season=None, sims=PROJECT_SIMS):
     }
 
 
-def _history_depth_days(db, league, as_of=None):
-    """Days between as_of and the oldest match feeding this league's
-    strengths — how much of the model's intended 1400-day window it's
-    actually getting. Every big-five league has several seasons on file and
-    is nowhere near this limit; a league whose feed only starts with its
-    current season (Allsvenskan, until FotMob is backfilled further) is
-    running the same model on a fraction of the data it was tuned with."""
+def _history_depth(db, league, season, as_of=None):
+    """(days, season_only) describing how much history feeds this league's
+    strengths. days is the gap between as_of and the oldest match on
+    record — how much of the model's intended 1400-day window it's
+    actually getting. season_only is True when that oldest match falls
+    inside the season being projected, i.e. there is no PRIOR season on
+    file at all, not just a thin one — the plainer, more useful thing to
+    say when it's true, since "the model's history goes back 128 days" asks
+    a reader to do arithmetic that "built from this season alone" doesn't.
+
+    Every big-five league has several seasons on file and is nowhere near
+    either condition; a league whose feed only starts with its current
+    season (Allsvenskan, until FotMob is backfilled further) trips both."""
     now = as_of or date.today()
     oldest = db.execute(
         "SELECT MIN(match_date) FROM main.understat_team_matches WHERE league = ?",
@@ -1360,12 +1366,17 @@ def _history_depth_days(db, league, as_of=None):
         if alt and (not oldest or alt < oldest):
             oldest = alt
     if not oldest:
-        return None
+        return None, False
     try:
         d = datetime.strptime(oldest[:10], "%Y-%m-%d").date()
     except ValueError:
-        return None
-    return (now - d).days
+        return None, False
+    season_start = db.execute(
+        "SELECT MIN(match_date) FROM main.matches WHERE league = ? AND season = ?",
+        (league, season),
+    ).fetchone()[0]
+    season_only = bool(season_start and oldest >= season_start)
+    return (now - d).days, season_only
 
 
 def season_projection_block(db, league):
@@ -1394,7 +1405,7 @@ def season_projection_block(db, league):
     now_rank, order, started = r["now_rank"], r["order"], r["started"]
     n_promoted = r["n_promoted"]
     rel_cut = n - PROJECT_RELEGATED
-    history_days = _history_depth_days(db, league)
+    history_days, season_only = _history_depth(db, league, season)
     thin_history = history_days is not None and history_days < PREDICT_LOOKBACK_DAYS * 0.5
 
     # every build logs today's numbers, so the trend chart below has
@@ -1476,7 +1487,12 @@ def season_projection_block(db, league):
         "evaporates, but the extreme cases (Sirius-scale runs included) "
         "regressed to roughly half their gap rather than to zero, and the "
         "model's discount was never tuned specifically for that tail."
-        + (f" And this league's own history only goes back {history_days} "
+        + (" And these strengths are built from this season's matches "
+           "alone — no earlier season is in the database for this league "
+           "yet — where the big five get up to four seasons of recency-"
+           "weighted history behind the same model."
+           if season_only else
+           f" And this league's own history only goes back {history_days} "
            "days, well short of the model's intended four seasons — its "
            "strengths are working with less than the model was built for."
            if thin_history else "")
