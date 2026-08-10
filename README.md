@@ -160,6 +160,20 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   (worse at every weight), and discounting a returning club's stale
   top-flight record toward the promoted prior (both eras preferred it, but
   the optima disagreed and the best held-out t was −1.8, so it stays out).
+  Every build also appends a snapshot — projected points and the three
+  probabilities, per team — to a committed log (`projection_log.py`,
+  `predictions/projection_log.csv`, same reasoning as the prediction log:
+  a database table would live in the Actions cache, which has already been
+  lost once). A **projection over time** chart reads that log back: one
+  small panel per team, its own line scaled to its own range so a
+  mid-table club's real swings are as visible as a title contender's,
+  colored green/red for whether the projection has risen or fallen since
+  its first snapshot. `_compute_projection()` — the shared core behind both
+  the live table and the log — takes an `as_of` date that excludes
+  everything on or after it, including matches played since, which is what
+  let `backfill_projection_log.py` reconstruct history for the season
+  already in progress (Allsvenskan) the day this shipped, instead of
+  starting the chart from a blank page.
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw

@@ -22,6 +22,7 @@ from html import escape, unescape
 from pathlib import Path
 
 import prediction_log
+import projection_log
 
 PROJECT_DIR = Path(__file__).parent
 DB_PATH = PROJECT_DIR / "football.sqlite"
@@ -747,30 +748,41 @@ def _predict_mapping(fixture_names, strength_names):
     return mapping
 
 
-def _team_strengths(db, league):
+def _team_strengths(db, league, as_of=None):
     """Recency-weighted attack/defence strength per team — a blend of
     non-penalty xG and actual goals — plus the league's mean strength per
-    team per match and its home-advantage ratio."""
+    team per match and its home-advantage ratio.
+
+    as_of=None (the live default) is deliberately unchanged from before this
+    parameter existed: no upper bound on match_date, so a match played
+    earlier today is already counted. Passing an explicit past date is for
+    the season-projection backfill, which must not leak — everything on or
+    after as_of is excluded, not just down-weighted, matching the strict
+    "< as_of" convention season_lab.py and backtest.py already use.
+    """
+    now = as_of or date.today()
     # main tables rather than the season-scoped views: the lookback window
     # deliberately crosses the season boundary (validated by backtest.py),
     # and npxG+goals is the strength definition the backtest scored best
-    cutoff = (date.today() - timedelta(days=PREDICT_LOOKBACK_DAYS)).isoformat()
-    sql = """SELECT team, match_date, home_away,
+    cutoff = (now - timedelta(days=PREDICT_LOOKBACK_DAYS)).isoformat()
+    upper = " AND match_date < ?" if as_of is not None else ""
+    sql = ("""SELECT team, match_date, home_away,
                     COALESCE(npxg, xg), COALESCE(npxga, xga), scored, missed, {deep}
              FROM {table}
              WHERE league = ? AND xg IS NOT NULL AND xga IS NOT NULL
-               AND match_date >= ?"""
+               AND match_date >= ?""" + upper)
+    extra = (now.isoformat(),) if as_of is not None else ()
     rows = db.execute(
         sql.format(table="main.understat_team_matches", deep="deep"),
-        (league, cutoff),
+        (league, cutoff) + extra,
     ).fetchall()
     if fotmob_available(db):
         # FotMob has no deep-completions metric — the territory term skips
         rows += db.execute(
             sql.format(table="main.fotmob_team_matches", deep="NULL"),
-            (league, cutoff),
+            (league, cutoff) + extra,
         ).fetchall()
-    today = date.today()
+    today = now
     teams = {}
     venue = {"h": [0.0, 0.0], "a": [0.0, 0.0]}  # weighted attack sum, weight
     lg_deep_sum, lg_deep_w = 0.0, 0.0
@@ -1155,59 +1167,70 @@ def _margin_sampler(lam_home, lam_away):
     return cum, margins
 
 
-def _projection_fixtures(db, league):
-    """(season, played rows, remaining rows) for the season now in progress."""
-    row = db.execute(
-        """SELECT season FROM matches
-           WHERE league = ? AND home_score IS NULL
-           ORDER BY match_date, event_id LIMIT 1""",
-        (league,),
-    ).fetchone()
-    if not row:
-        return None
-    season = row[0]
+def _projection_fixtures(db, league, season=None):
+    """(season, all match rows) for one league-season. season=None finds
+    the season currently in progress (the one with an unplayed fixture)."""
+    if season is None:
+        row = db.execute(
+            """SELECT season FROM matches
+               WHERE league = ? AND home_score IS NULL
+               ORDER BY match_date, event_id LIMIT 1""",
+            (league,),
+        ).fetchone()
+        if not row:
+            return None
+        season = row[0]
     rows = db.execute(
-        """SELECT home_team, away_team, home_score, away_score FROM matches
-           WHERE league = ? AND season = ? ORDER BY match_date, event_id""",
+        """SELECT home_team, away_team, home_score, away_score, match_date
+           FROM matches WHERE league = ? AND season = ?
+           ORDER BY match_date, event_id""",
         (league, season),
     ).fetchall()
-    played = [r for r in rows if r[2] is not None and r[3] is not None]
-    remaining = [r for r in rows if r[2] is None or r[3] is None]
-    return season, played, remaining
+    if not rows:
+        return None
+    return season, rows
 
 
-def season_projection_block(db, league):
-    """Where the season is heading, re-read from scratch every night.
+def _compute_projection(db, league, as_of=None, season=None, sims=PROJECT_SIMS):
+    """The season-projection Monte Carlo, decoupled from "as of right now".
 
-    The projection is deliberately NOT an extrapolation of the table. Points
-    already banked are kept exactly as they are — they are real and cannot be
-    taken away — but every fixture still to be played is simulated from the
-    same recency-weighted xG strengths the match predictions use. So a club
-    riding a hot finishing streak keeps its points and is still projected on
-    the chances it actually creates, and a good side sitting eleventh is
-    projected to climb.
+    as_of=None (the live default) means exactly what it always did: played
+    = matches with a stored result, full stop. Passing a date means "pretend
+    today is that day" — played = matches strictly before it, using their
+    real scores (safe, since they are the past relative to that day), and
+    everything from that day on is discarded and simulated fresh from
+    strengths measured only on data before it — even matches that have,
+    for real, been played since. That is what makes a backfilled snapshot
+    honest: it can only see what the live build would have seen that night.
 
-    Validated in season_lab.py by replaying 58 completed seasons and
-    projecting the final table at nine points in each: mean absolute error
-    7.7 points after a tenth of the season against 18.8 for extrapolating
-    the table, and it wins at every checkpoint through to the last
-    (paired t across held-out seasons −17.9 to −3.9).
+    Returns None when there is nothing to project, otherwise a dict with
+    everything both the live HTML table and a logged snapshot need.
     """
-    found = _projection_fixtures(db, league)
+    found = _projection_fixtures(db, league, season)
     if not found:
-        return ""
-    season, played, remaining = found
+        return None
+    season, rows = found
+    if as_of is None:
+        played = [r for r in rows if r[2] is not None and r[3] is not None]
+        remaining = [r for r in rows if r[2] is None or r[3] is None]
+        strength_as_of = None
+    else:
+        as_of_iso = as_of.isoformat()
+        played = [r for r in rows if r[2] is not None and r[3] is not None
+                  and (r[4] or "9999") < as_of_iso]
+        remaining = [r for r in rows if (r[4] or "9999") >= as_of_iso]
+        strength_as_of = as_of
     if not remaining:
-        return ""
+        return None
 
-    teams = sorted({t for h, a, _, _ in played + remaining for t in (h, a)})
+    teams = sorted({t for h, a, _, _, _ in played + remaining for t in (h, a)})
     if len(teams) < PROJECT_MIN_TEAMS:
-        return ""
+        return None
     idx = {t: i for i, t in enumerate(teams)}
     n = len(teams)
 
     base_pts, base_gd, base_played = [0] * n, [0] * n, [0] * n
-    for home, away, hs, as_ in played:
+    for home, away, hs, as_, _ in played:
         h, a = idx[home], idx[away]
         base_played[h] += 1
         base_played[a] += 1
@@ -1221,9 +1244,9 @@ def season_projection_block(db, league):
         else:
             base_pts[a] += 3
 
-    strengths, mu, home_adv, lg_deep = _team_strengths(db, league)
+    strengths, mu, home_adv, lg_deep = _team_strengths(db, league, as_of=strength_as_of)
     if not strengths or mu <= 0:
-        return ""
+        return None
     mapping = _predict_mapping(teams, list(strengths))
     sqrt_ha = math.sqrt(home_adv)
     promoted = (PROJECT_PROMOTED_ATTACK * mu, PROJECT_PROMOTED_DEFENCE * mu,
@@ -1231,7 +1254,7 @@ def season_projection_block(db, league):
     n_promoted = sum(1 for t in teams if mapping.get(t) is None)
 
     prepared = []
-    for home, away, _, _ in remaining:
+    for home, away, _, _, _ in remaining:
         att_h, def_h, _, deep_h = strengths.get(mapping.get(home)) or promoted
         att_a, def_a, _, deep_a = strengths.get(mapping.get(away)) or promoted
         lam_home = att_h * def_a / mu * sqrt_ha
@@ -1251,7 +1274,7 @@ def season_projection_block(db, league):
     europe = [0] * n
     drop = [0] * n
     rel_cut = n - PROJECT_RELEGATED
-    for _ in range(PROJECT_SIMS):
+    for _ in range(sims):
         pts, gd = base_pts[:], base_gd[:]
         for cum, margins, h, a in prepared:
             d = margins[bisect(cum, rand())]
@@ -1277,7 +1300,7 @@ def season_projection_block(db, league):
             if rank >= rel_cut:
                 drop[i] += 1
 
-    proj = [pts_total[i] / PROJECT_SIMS for i in range(n)]
+    proj = [pts_total[i] / sims for i in range(n)]
     started = any(base_played)
     now_rank = {}
     if started:
@@ -1286,8 +1309,52 @@ def season_projection_block(db, league):
         now_rank = {i: r for r, i in enumerate(standing, 1)}
     order = sorted(range(n), key=lambda i: (proj[i], base_gd[i]), reverse=True)
 
+    return {
+        "season": season, "teams": teams, "n": n, "sims": sims,
+        "n_played": len(played), "n_remaining": len(remaining),
+        "n_promoted": n_promoted, "base_pts": base_pts, "base_gd": base_gd,
+        "base_played": base_played, "proj": proj, "title": title,
+        "europe": europe, "drop": drop, "started": started,
+        "now_rank": now_rank, "order": order,
+    }
+
+
+def season_projection_block(db, league):
+    """Where the season is heading, re-read from scratch every night.
+
+    The projection is deliberately NOT an extrapolation of the table. Points
+    already banked are kept exactly as they are — they are real and cannot be
+    taken away — but every fixture still to be played is simulated from the
+    same recency-weighted xG strengths the match predictions use. So a club
+    riding a hot finishing streak keeps its points and is still projected on
+    the chances it actually creates, and a good side sitting eleventh is
+    projected to climb.
+
+    Validated in season_lab.py by replaying 58 completed seasons and
+    projecting the final table at nine points in each: mean absolute error
+    7.7 points after a tenth of the season against 18.8 for extrapolating
+    the table, and it wins at every checkpoint through to the last
+    (paired t across held-out seasons −17.9 to −3.9).
+    """
+    r = _compute_projection(db, league)
+    if not r:
+        return ""
+    season, teams, n, sims = r["season"], r["teams"], r["n"], r["sims"]
+    proj, title, europe, drop = r["proj"], r["title"], r["europe"], r["drop"]
+    base_pts, base_played = r["base_pts"], r["base_played"]
+    now_rank, order, started = r["now_rank"], r["order"], r["started"]
+    n_promoted = r["n_promoted"]
+    rel_cut = n - PROJECT_RELEGATED
+
+    # every build logs today's numbers, so the trend chart below has
+    # tomorrow's history to draw from; a same-day rerun just overwrites
+    logged = projection_log.load()
+    projection_log.record_snapshot(logged, date.today().isoformat(), league,
+                                   season, teams, proj, title, europe, drop, sims)
+    projection_log.save(logged)
+
     def pcell(count, cls):
-        share = count / PROJECT_SIMS
+        share = count / sims
         if share < 0.005:
             return "<td class='num dim'>–</td>"
         return (f"<td class='num pcell'><i class='{cls}' "
@@ -1320,7 +1387,7 @@ def season_projection_block(db, league):
         "<div class='card'><table><thead><tr>"
         "<th class='num'>#</th><th>Team</th>" + head_now
         + "<th class='num' title='Mean final points over "
-        f"{PROJECT_SIMS:,} simulated seasons'>Proj</th>"
+        f"{sims:,} simulated seasons'>Proj</th>"
         "<th class='num'>Title</th>"
         f"<th class='num'>Top {PROJECT_EUROPE}</th>"
         f"<th class='num'>Bottom {PROJECT_RELEGATED}</th>"
@@ -1328,9 +1395,10 @@ def season_projection_block(db, league):
     )
 
     if started:
-        lead = (f"{len(remaining)} of {len(played) + len(remaining)} matches "
-                "left to play. Points already won are kept as they are; every "
-                "remaining fixture is simulated from current xG form.")
+        lead = (f"{r['n_remaining']} of {r['n_played'] + r['n_remaining']} "
+                "matches left to play. Points already won are kept as they "
+                "are; every remaining fixture is simulated from current xG "
+                "form.")
     else:
         lead = ("The season has not kicked off, so this is last season's "
                 "evidence and nothing else — it will start moving with the "
@@ -1390,6 +1458,116 @@ def season_projection_block(db, league):
     )
     return block(f"Season projection ({escape(str(season))})",
                  caveat + note + table, about=about)
+
+
+PROJECT_TREND_MIN_DATES = 3   # fewer and it is two dots joined by a straight
+                              # line, not a trend — wait for a real one
+
+
+def season_projection_trend(db, league):
+    """The projection over time — the payoff of logging a snapshot nightly.
+
+    A single night's table is a snapshot; this is the film behind it, built
+    from projection_log.py's committed history. Same house style as the
+    rolling xG sparklines below (one small panel per team, a shared scale):
+    color here marks direction, not identity — whether a club's own
+    projection has risen or fallen since its first logged snapshot, never a
+    comparison between two different teams' lines — so no categorical
+    palette or legend key is needed, only the green/red already used
+    everywhere else on the site for a plain up/down.
+    """
+    live = _compute_projection(db, league)
+    if not live:
+        return ""
+    season = live["season"]
+    logged = projection_log.load()
+    series = projection_log.series(logged, league, season)
+    n_dates = len({r["date"] for r in logged.values()
+                  if r["league"] == league and r["season"] == season})
+    if n_dates < PROJECT_TREND_MIN_DATES:
+        return ""
+
+    order = [live["teams"][i] for i in live["order"] if live["teams"][i] in series]
+    w, h = 220, 64
+
+    # each panel scaled to its OWN range, not a shared one: unlike the xG
+    # sparklines below, points has no natural shared reference point (no
+    # zero line separating good from bad), so a common scale would just
+    # flatten every mid-table club into a visually dead line while Sirius
+    # dominates the vertical space — exactly backwards, since the delta
+    # badge already carries the cross-team comparison and this chart's job
+    # is showing THIS club's own swings, however small
+    cells = []
+    for idx, team in enumerate(order):
+        values = series[team]
+        if len(values) < 2:
+            continue
+        own = [v[1] for v in values]
+        lo, hi = min(own), max(own)
+        pad = (hi - lo) * 0.15 or 1
+
+        def y_of(v, lo=lo - pad, hi=hi + pad):
+            return h - 6 - (v - lo) / (hi - lo) * (h - 12)
+
+        step = w / (len(values) - 1)
+        pts = [(i * step, y_of(v[1])) for i, v in enumerate(values)]
+        points = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+        delta = values[-1][1] - values[0][1]
+        sign = "up" if delta >= 0 else "down"
+        val_cls = "pos" if delta > 0 else "neg" if delta < 0 else "dim"
+        dots = "".join(
+            f"<circle class='spark-dot {sign}' cx='{x:.1f}' cy='{y:.1f}' r='1.7'>"
+            f"<title>{escape(v[0])}: {v[1]:.0f} proj pts · title {v[2] * 100:.0f}% "
+            f"· top {PROJECT_EUROPE} {v[3] * 100:.0f}% · bottom "
+            f"{PROJECT_RELEGATED} {v[4] * 100:.0f}%</title></circle>"
+            for (x, y), v in zip(pts, values)
+        )
+        cells.append(
+            f"<div class='spark'><p class='name'><span class='rank'>{idx + 1}</span> "
+            f"{escape(team)}<span class='val {val_cls}'>{fmt_delta(delta, 0)} pts</span></p>"
+            f"<svg viewBox='0 0 {w} {h}' width='100%' role='img' "
+            f"aria-label='{escape(team)} projected final points over the season'>"
+            f"<title>{escape(team)}: projected final points, {values[0][1]:.0f} on "
+            f"{escape(values[0][0])} to {values[-1][1]:.0f} on {escape(values[-1][0])}</title>"
+            f"<polyline class='spark-line {sign}' points='{points}'/>"
+            f"{dots}"
+            f"<circle class='spark-dot {sign}' cx='{pts[-1][0]:.1f}' cy='{pts[-1][1]:.1f}' r='3'/>"
+            "</svg></div>"
+        )
+    if not cells:
+        return ""
+
+    legend = (
+        f"<p class='spark-legend'>One panel per team, today's projected order · "
+        f"{n_dates} nightly snapshots logged so far · each panel is scaled to "
+        f"its own range, so a small club's swings are as visible as a title "
+        f"contender's — read the badge, not the height, for the size of the "
+        f"move · <span class='pos'>green</span> = projection has risen since "
+        f"its first snapshot, <span class='neg'>red</span> = fallen · hover "
+        f"a dot for that night's title / European / relegation odds</p>"
+    )
+    chart = f"<div class='chart-card'>{legend}<div class='spark-grid'>{''.join(cells)}</div></div>"
+    about = (
+        "<p><strong>What it shows.</strong> The season projection above is "
+        "recomputed from scratch on every build, so on its own the page can "
+        "only ever show tonight's opinion. This is every previous night's "
+        "opinion too — one point added per team per night the projection "
+        "ran, going back to the first snapshot logged this season.</p>"
+        "<p><strong>Reading it.</strong> The number is projected final "
+        "points, not the live table — it moves for two different reasons "
+        "that look identical on the curve: a result banking real points, or "
+        "the model simply revising its opinion of a club's remaining "
+        "fixtures without a ball being kicked. Hover any dot for that "
+        "night's title, European and relegation odds, which move for the "
+        "same two reasons.</p>"
+        "<p><strong>Why not just show probabilities.</strong> Title, "
+        "European and relegation odds are usually a flat 0% or 100% for "
+        "most of a season for most clubs — a true story for a handful of "
+        "teams and a flat line for everyone else. Projected points moves "
+        "for every club, contending or not, which is why it is the line "
+        "and the odds are the hover.</p>"
+    )
+    return block("Projection over time", chart, about=about)
 
 
 # ------------------------------------------------------- understat sections
@@ -3084,6 +3262,7 @@ def league_section(db, league):
         + block("Upcoming fixtures" + ahead, matches_table(db, league, finished=False))
         + predictions_block(db, league)
         + season_projection_block(db, league)
+        + season_projection_trend(db, league)
         + report_card_block(db, league)
     )
 
