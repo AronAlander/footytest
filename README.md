@@ -174,6 +174,30 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   let `backfill_projection_log.py` reconstruct history for the season
   already in progress (Allsvenskan) the day this shipped, instead of
   starting the chart from a blank page.
+  Two things came out of watching Allsvenskan's numbers for a day. First,
+  a genuine bug: production's `_team_strengths` had no equivalent of
+  `backtest.py`'s and `season_lab.py`'s `MIN_PRIOR_MATCHES` gate, so a
+  team's very first match of a season could set its strength off a sample
+  of one — caught when Hammarby's opening-day projection read 76 points,
+  a number gone within a night. `PREDICT_MIN_MATCHES` now shrinks a thin
+  sample toward the league average in proportion to how thin it is,
+  restoring the lab's own minimum rather than introducing a new
+  coefficient. Second, a real modeling question, checked rather than
+  assumed: is heavy goals-over-npxG overperformance (Sirius sat at +14.2
+  through half a season) mostly noise, as the model's 30%-goals blend
+  implies? `python season_lab.py finishing` splits 1,170 Understat
+  team-seasons in half and correlates first-half against second-half
+  overperformance — weak overall (r=0.18), which is why discounting a hot
+  streak is usually right, but the 18 team-seasons at Sirius's scale
+  (Real Madrid, Bayern Munich twice, Juventus, Barcelona, Lazio three
+  times) averaged +7.68 in their second half against a +1.92 population
+  mean — regressing to about half the gap, not to zero. The 30% weight
+  was tuned on aggregate Brier score, never specifically on this tail, so
+  it may be under-crediting a club running this hot. Not shipped as a
+  coefficient change — that would need the same train/test sweep as every
+  other number here — but the finding is now a caveat on the page, and a
+  thin-history caveat appears too whenever a league's own data falls well
+  short of the model's intended four seasons (currently just Allsvenskan).
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw

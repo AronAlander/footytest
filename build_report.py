@@ -700,6 +700,20 @@ PREDICT_DEEP_POWER = 0.15     # territory term: attack scaled by (team deep
                               # Leagues without the metric (Allsvenskan) skip it.
 PREDICT_MAX_GOALS = 10        # Poisson score grid per side
 PREDICT_SHOWN = 10            # fixtures predicted per league
+PREDICT_MIN_MATCHES = 6       # matches backtest.py's and season_lab.py's
+                              # MIN_PRIOR_MATCHES — both refuse a strength
+                              # estimate below this many games outright. A
+                              # live fixture still needs SOME number even on
+                              # a season's first matchday, so _team_strengths
+                              # shrinks a thin sample toward the league
+                              # average instead of refusing it, in proportion
+                              # to how thin it is. Found because Allsvenskan's
+                              # very first 2026 matchday — one game of data
+                              # per team — produced a preseason-implausible
+                              # 76-point projection for Hammarby off a single
+                              # result; a validated coefficient never let that
+                              # sample size through in the lab code it was
+                              # tuned against, only in production
 
 # TheSportsDB fixture names -> xG-source (Understat/FotMob) names, for the
 # pairs that normalisation alone cannot bridge; extended when the build
@@ -807,10 +821,6 @@ def _team_strengths(db, league, as_of=None):
         if home_away in venue:
             venue[home_away][0] += w * attack
             venue[home_away][1] += w
-    strengths = {
-        t: (r[0] / r[2], r[1] / r[2], r[3], (r[4] / r[5]) if r[5] else None)
-        for t, r in teams.items() if r[2] > 0
-    }
     total_xg = venue["h"][0] + venue["a"][0]
     total_w = venue["h"][1] + venue["a"][1]
     mu = total_xg / total_w if total_w else 0.0
@@ -818,6 +828,17 @@ def _team_strengths(db, league, as_of=None):
     if venue["h"][1] and venue["a"][1] and venue["a"][0]:
         home_adv = (venue["h"][0] / venue["h"][1]) / (venue["a"][0] / venue["a"][1])
     lg_deep = lg_deep_sum / lg_deep_w if lg_deep_w else None
+
+    strengths = {}
+    for t, r in teams.items():
+        if r[2] <= 0:
+            continue
+        att, dfn, n = r[0] / r[2], r[1] / r[2], r[3]
+        if n < PREDICT_MIN_MATCHES and mu > 0:
+            shrink = n / PREDICT_MIN_MATCHES
+            att = shrink * att + (1 - shrink) * mu
+            dfn = shrink * dfn + (1 - shrink) * mu
+        strengths[t] = (att, dfn, n, (r[4] / r[5]) if r[5] else None)
     return strengths, mu, home_adv, lg_deep
 
 
@@ -1319,6 +1340,34 @@ def _compute_projection(db, league, as_of=None, season=None, sims=PROJECT_SIMS):
     }
 
 
+def _history_depth_days(db, league, as_of=None):
+    """Days between as_of and the oldest match feeding this league's
+    strengths — how much of the model's intended 1400-day window it's
+    actually getting. Every big-five league has several seasons on file and
+    is nowhere near this limit; a league whose feed only starts with its
+    current season (Allsvenskan, until FotMob is backfilled further) is
+    running the same model on a fraction of the data it was tuned with."""
+    now = as_of or date.today()
+    oldest = db.execute(
+        "SELECT MIN(match_date) FROM main.understat_team_matches WHERE league = ?",
+        (league,),
+    ).fetchone()[0]
+    if fotmob_available(db):
+        alt = db.execute(
+            "SELECT MIN(match_date) FROM main.fotmob_team_matches WHERE league = ?",
+            (league,),
+        ).fetchone()[0]
+        if alt and (not oldest or alt < oldest):
+            oldest = alt
+    if not oldest:
+        return None
+    try:
+        d = datetime.strptime(oldest[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    return (now - d).days
+
+
 def season_projection_block(db, league):
     """Where the season is heading, re-read from scratch every night.
 
@@ -1345,6 +1394,8 @@ def season_projection_block(db, league):
     now_rank, order, started = r["now_rank"], r["order"], r["started"]
     n_promoted = r["n_promoted"]
     rel_cut = n - PROJECT_RELEGATED
+    history_days = _history_depth_days(db, league)
+    thin_history = history_days is not None and history_days < PREDICT_LOOKBACK_DAYS * 0.5
 
     # every build logs today's numbers, so the trend chart below has
     # tomorrow's history to draw from; a same-day rerun just overwrites
@@ -1418,7 +1469,17 @@ def season_projection_block(db, league):
            "rather than from anything about this particular squad."
            if n_promoted else "")
         + " A club returning after a year in the division below is projected "
-        "on the last top-flight football it played, which may be a squad ago."
+        "on the last top-flight football it played, which may be a squad ago. "
+        "A club scoring far more than its chances suggest is only partly "
+        "credited for it — usually the right call, since across 1,170 "
+        "historical team-seasons that kind of overperformance mostly "
+        "evaporates, but the extreme cases (Sirius-scale runs included) "
+        "regressed to roughly half their gap rather than to zero, and the "
+        "model's discount was never tuned specifically for that tail."
+        + (f" And this league's own history only goes back {history_days} "
+           "days, well short of the model's intended four seasons — its "
+           "strengths are working with less than the model was built for."
+           if thin_history else "")
         + "</div>"
     )
     about = (

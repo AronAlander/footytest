@@ -82,11 +82,40 @@ REJECTED, having been tested properly
     a returning club is still projected on the last top-flight football
     it actually played. `python season_lab.py stale` reproduces it.
 
+  * Also fixed the same day, a genuine bug rather than a tested-and-kept
+    decision: production's _team_strengths had NO equivalent of this
+    file's own MIN_PRIOR_MATCHES gate, so a team's very first match of a
+    season could hand it a full-confidence strength estimate off n=1 — a
+    sample size backtest.py and this file both refuse to trust at all.
+    Caught because Allsvenskan's opening 2026 matchday projected Hammarby
+    for 76 points, a number that survived exactly one night. Production
+    now shrinks a thin sample toward the league average in proportion to
+    how thin it is (full weight at MIN_PRIOR_MATCHES, none at zero), which
+    is a bug fix restoring the lab's own minimum, not a new coefficient —
+    it was never itself swept, and doesn't need to be to be clearly better
+    than "no gate at all."
+
+  * `python season_lab.py finishing`: is a big goals-minus-npxG gap over
+    half a season a signal or noise? Across 1,170 Understat team-seasons,
+    weak overall (r=0.181, r²=0.033 second-half variance explained) —
+    which is why discounting a hot scoring streak is usually right. But
+    the 18 team-seasons at Sirius's scale (first-half gap +14 or more —
+    Real Madrid 2014, Bayern Munich twice, Juventus, Barcelona, Lazio
+    three times) averaged +7.68 in their SECOND half, against a +1.92
+    population mean — regressing toward roughly half of the gap, not to
+    zero. PREDICT_GOALS_BLEND=0.3 was tuned on Brier score across every
+    match, not on how this specific tail behaves, so a club running this
+    hot may be getting less credit than the tail-specific evidence
+    supports. Not shipped as a coefficient change — it would need its own
+    train/test sweep exactly like every other number in this project —
+    but the caveat this finding earned is on the season projection page.
+
 Usage:
     python season_lab.py            # the full race, all checkpoints
     python season_lab.py promoted   # measure the newly-promoted prior
     python season_lab.py blend      # sweep the shrink toward the table
     python season_lab.py stale      # sweep the returning-club shrink
+    python season_lab.py finishing  # does extreme G-npxG persist?
 """
 
 import math
@@ -576,8 +605,83 @@ def sweep_stale(seasons, hist, per_league):
         print(f"  stale_w={w:4.2f}  MAE {sum(pooled) / len(pooled):.3f}")
 
 
+def finishing_persistence():
+    """Does a team's goals-minus-npxG overperformance in one half of a
+    season predict more of it in the other half, or does it regress toward
+    zero?
+
+    Motivated by a real case: Allsvenskan's Sirius sit at +14.2 goals above
+    npxG through 15 of 30 matches in 2026 — an enormous gap for a half
+    season — while the projection (30% credit to actual goals, per
+    PREDICT_GOALS_BLEND) treats most of it as unlikely to repeat. Whether
+    that's the right amount of skepticism is exactly this question, and it
+    had never been checked at this scale before — the 0.3 weight was tuned
+    on Brier score across ALL matches, not specifically on how the extreme
+    tail behaves.
+
+    Splits every Understat team-season with 20+ matches into first and
+    second half (chronological, size n//2 each), correlates first-half
+    goals-npxG against second-half goals-npxG, and separately reports the
+    mean second-half number for team-seasons whose first half was +14 or
+    more — Sirius's scale, regardless of era or league.
+    """
+    db = sqlite3.connect(DB_PATH)
+    rows = db.execute(
+        """SELECT league, season, team, match_date, scored,
+                  COALESCE(npxg, xg) npxg
+           FROM understat_team_matches
+           WHERE npxg IS NOT NULL OR xg IS NOT NULL
+           ORDER BY league, season, team, match_date"""
+    ).fetchall()
+    by_ts = defaultdict(list)
+    for league, season, team, day, sc, npxg in rows:
+        by_ts[(league, season, team)].append((sc, npxg))
+
+    pairs, extreme = [], []
+    for key, ms in by_ts.items():
+        if len(ms) < 20:
+            continue
+        half = len(ms) // 2
+        f = sum(sc - npxg for sc, npxg in ms[:half])
+        s = sum(sc - npxg for sc, npxg in ms[half:])
+        pairs.append((f, s))
+        if f >= 14:
+            extreme.append((key, f, s, half))
+
+    n = len(pairs)
+    mf = sum(p[0] for p in pairs) / n
+    ms_ = sum(p[1] for p in pairs) / n
+    cov = sum((f - mf) * (s - ms_) for f, s in pairs) / n
+    vf = sum((f - mf) ** 2 for f, s in pairs) / n
+    vs = sum((s - ms_) ** 2 for f, s in pairs) / n
+    r = cov / (vf * vs) ** 0.5
+    b = cov / vf
+    a = ms_ - b * mf
+
+    print(f"team-seasons with 20+ matches, split in half: {n}")
+    print(f"population mean: first half {mf:+.2f}  second half {ms_:+.2f}")
+    print(f"correlation r = {r:.3f}  (r^2 = {r * r:.3f})")
+    print(f"regression: second half = {a:+.2f} + {b:.3f} * first half")
+    print(f"predicted second half for a +14.2 first half: {a + b * 14.2:+.2f}")
+
+    print(f"\nfirst-half >= +14 (Sirius-scale): {len(extreme)} team-seasons")
+    if extreme:
+        mean_x = sum(e[2] for e in extreme) / len(extreme)
+        print(f"their mean SECOND-half goals-npxG: {mean_x:+.2f}")
+        print("(population mean is "
+              f"{ms_:+.2f} — this is what 'regresses to about half, not to "
+              "zero' looks like in the raw cases)")
+        for key, f, s, half in sorted(extreme, key=lambda e: -e[1])[:10]:
+            league, season, team = key
+            print(f"  {league:14s} {season}  {team:20s} "
+                  f"1st(n={half}) {f:+6.1f}  2nd {s:+6.1f}")
+
+
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "race"
+    if mode == "finishing":
+        finishing_persistence()
+        return
     db = sqlite3.connect(DB_PATH)
     team_rows = load_team_rows(db)
     # xpts rides along for the extrapolation baseline; load_team_rows drops it
