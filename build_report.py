@@ -1590,8 +1590,15 @@ def season_projection_trend(db, league):
         pts = [(i * step, y_of(v[1])) for i, v in enumerate(values)]
         points = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
         delta = values[-1][1] - values[0][1]
-        sign = "up" if delta >= 0 else "down"
-        val_cls = "pos" if delta > 0 else "neg" if delta < 0 else "dim"
+        # round before classifying: raw Monte Carlo noise can put an
+        # unstarted season's delta a hair below zero, and Python's "+.0f"
+        # keeps the minus sign on a negative float even when it rounds to
+        # 0 (f"{-0.3:+.0f}" == "-0") — round() on a float drops it, so
+        # rounding first keeps a team that's displayed as "+0 pts" from
+        # also getting a red "down" line for the same non-move
+        delta_r = round(delta)
+        sign = "up" if delta_r >= 0 else "down"
+        val_cls = "pos" if delta_r > 0 else "neg" if delta_r < 0 else "dim"
         dots = "".join(
             f"<circle class='spark-dot {sign}' cx='{x:.1f}' cy='{y:.1f}' r='1.7'>"
             f"<title>{escape(v[0])}: {v[1]:.0f} proj pts · title {v[2] * 100:.0f}% "
@@ -1601,7 +1608,7 @@ def season_projection_trend(db, league):
         )
         cells.append(
             f"<div class='spark'><p class='name'><span class='rank'>{idx + 1}</span> "
-            f"{escape(team)}<span class='val {val_cls}'>{fmt_delta(delta, 0)} pts</span></p>"
+            f"{escape(team)}<span class='val {val_cls}'>{fmt_delta(delta_r, 0)} pts</span></p>"
             f"<svg viewBox='0 0 {w} {h}' width='100%' role='img' "
             f"aria-label='{escape(team)} projected final points over the season'>"
             f"<title>{escape(team)}: projected final points, {values[0][1]:.0f} on "
