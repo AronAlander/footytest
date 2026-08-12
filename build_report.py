@@ -1587,6 +1587,9 @@ def season_projection_block(db, league):
 
 PROJECT_TREND_MIN_DATES = 3   # fewer and it is two dots joined by a straight
                               # line, not a trend — wait for a real one
+PROJECT_TREND_MIN_SPAN = 2    # points; a panel's own range is floored here so
+                              # sub-point noise doesn't get stretched into a
+                              # shape that looks like real movement
 
 
 def season_projection_trend(db, league):
@@ -1629,7 +1632,18 @@ def season_projection_trend(db, league):
             continue
         own = [v[1] for v in values]
         lo, hi = min(own), max(own)
-        pad = (hi - lo) * 0.15 or 1
+        # a floor under the displayed range, not just under an exactly-zero
+        # one: Sassuolo's real span here is 0.1 points (Monte Carlo re-seed
+        # noise between nightly builds, nothing having actually happened),
+        # and stretching a 0.1-point wobble to fill the panel drew a
+        # dramatic-looking dive out of noise smaller than a single sim's
+        # margin of error — every real Allsvenskan club's smallest span
+        # once its season is underway is 10+ points, so 2 comfortably
+        # separates "hasn't moved" from "has"
+        if hi - lo < PROJECT_TREND_MIN_SPAN:
+            mid = (lo + hi) / 2
+            lo, hi = mid - PROJECT_TREND_MIN_SPAN / 2, mid + PROJECT_TREND_MIN_SPAN / 2
+        pad = (hi - lo) * 0.15
 
         def y_of(v, lo=lo - pad, hi=hi + pad):
             return h - 6 - (v - lo) / (hi - lo) * (h - 12)
