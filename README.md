@@ -198,6 +198,30 @@ whole dashboard between the five leagues (deep-linkable by prefixing any link wi
   other number here — but the finding is now a caveat on the page, and a
   thin-history caveat appears too whenever a league's own data falls well
   short of the model's intended four seasons (currently just Allsvenskan).
+  The projection-over-time chart had its own small bug: an unstarted
+  season's delta is Monte Carlo noise around zero, and Python's `"+.0f"`
+  keeps the minus sign on a negative float that rounds to `0`
+  (`f"{-0.3:+.0f}"` is `"-0"`), so one team could show `-0 pts` and a red
+  line while every other team at the same effective zero showed `+0` —
+  fixed by rounding the delta to an int before classifying sign and color,
+  not after.
+  Two more views read the same simulations without adding a new model.
+  **How wide is that projection?** turns the Proj column's single number
+  per team back into the distribution it was averaged from — a box (middle
+  50% of simulated finishes) and whisker (middle 90%) per team, against
+  the same top-1/top-4/bottom-3 zone shading as the table, so two clubs
+  sharing a Proj of 55 stop looking identical when one of them is nailed
+  on for mid-table and the other's finish is still anywhere from 7th to
+  the drop. **Simulate one season** runs exactly one of the 5,000 draws
+  instead of averaging them: every remaining fixture gets a real Poisson
+  scoreline (client-side, from the same `lam_home`/`lam_away` numbers
+  computed server-side and embedded as JSON — no second model, just one
+  draw shown instead of summarized), built into a full P/W/D/L/GF/GA/GD/Pts
+  table with a "Simulate again" button for a different draw. Both reuse
+  `_compute_projection()`'s existing, already-validated simulation loop —
+  the first by keeping a full rank histogram per team instead of only the
+  three cutoff counters, the second by keeping the per-fixture expected
+  goals that used to be discarded after building the margin sampler.
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw

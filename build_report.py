@@ -230,6 +230,34 @@ svg .spark-line.up { stroke: var(--win); }
 svg .spark-line.down { stroke: var(--loss); }
 svg .spark-dot.up { fill: var(--win); }
 svg .spark-dot.down { fill: var(--loss); }
+.range-grid { display: flex; flex-direction: column; gap: 3px; }
+.range-row { display: flex; align-items: center; gap: 10px; }
+.range-name {
+  flex: 0 0 150px; font-size: 12.5px; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.range-name b { color: var(--text-secondary); font-weight: 600; margin-right: 4px; }
+.range-track { position: relative; flex: 1; height: 22px; }
+.range-track i.rz { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+.range-track i.rz.win { background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
+.range-track i.rz.cl { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.range-track i.rz.rel { background: color-mix(in srgb, var(--loss) 10%, transparent); }
+.range-whisker {
+  position: absolute; top: 50%; height: 2px; border-radius: 1px;
+  background: var(--text-secondary); opacity: .55; transform: translateY(-50%);
+}
+.range-box {
+  position: absolute; top: 4px; bottom: 4px; border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.range-median {
+  position: absolute; top: 1px; bottom: 1px; width: 2px;
+  background: var(--text-primary); transform: translateX(-1px);
+}
+.sim-card .controls { margin: 4px 4px 14px; }
+.sim-fixtures { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 24px; }
+@media (max-width: 640px) { .sim-fixtures { columns: 1; } }
+.sim-fixtures li { font-size: 13px; padding: 3px 0; white-space: nowrap; }
 .controls {
   display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0;
 }
@@ -1251,19 +1279,31 @@ def _compute_projection(db, league, as_of=None, season=None, sims=PROJECT_SIMS):
     n = len(teams)
 
     base_pts, base_gd, base_played = [0] * n, [0] * n, [0] * n
+    base_gf, base_ga = [0] * n, [0] * n
+    base_w, base_d, base_l = [0] * n, [0] * n, [0] * n
     for home, away, hs, as_, _ in played:
         h, a = idx[home], idx[away]
         base_played[h] += 1
         base_played[a] += 1
         base_gd[h] += hs - as_
         base_gd[a] += as_ - hs
+        base_gf[h] += hs
+        base_ga[h] += as_
+        base_gf[a] += as_
+        base_ga[a] += hs
         if hs > as_:
             base_pts[h] += 3
+            base_w[h] += 1
+            base_l[a] += 1
         elif hs == as_:
             base_pts[h] += 1
             base_pts[a] += 1
+            base_d[h] += 1
+            base_d[a] += 1
         else:
             base_pts[a] += 3
+            base_w[a] += 1
+            base_l[h] += 1
 
     strengths, mu, home_adv, lg_deep = _team_strengths(db, league, as_of=strength_as_of)
     if not strengths or mu <= 0:
@@ -1275,7 +1315,8 @@ def _compute_projection(db, league, as_of=None, season=None, sims=PROJECT_SIMS):
     n_promoted = sum(1 for t in teams if mapping.get(t) is None)
 
     prepared = []
-    for home, away, _, _, _ in remaining:
+    fixture_lambdas = []
+    for home, away, _, _, match_date in remaining:
         att_h, def_h, _, deep_h = strengths.get(mapping.get(home)) or promoted
         att_a, def_a, _, deep_a = strengths.get(mapping.get(away)) or promoted
         lam_home = att_h * def_a / mu * sqrt_ha
@@ -1287,6 +1328,8 @@ def _compute_projection(db, league, as_of=None, season=None, sims=PROJECT_SIMS):
         lam_away = max(0.1, min(6.0, lam_away))
         cum, margins = _margin_sampler(lam_home, lam_away)
         prepared.append((cum, margins, idx[home], idx[away]))
+        fixture_lambdas.append((idx[home], idx[away], round(lam_home, 3),
+                                round(lam_away, 3), match_date))
 
     rng = random.Random(PROJECT_SEED)
     rand = rng.random
@@ -1294,6 +1337,7 @@ def _compute_projection(db, league, as_of=None, season=None, sims=PROJECT_SIMS):
     title = [0] * n
     europe = [0] * n
     drop = [0] * n
+    rank_counts = [[0] * n for _ in range(n)]
     rel_cut = n - PROJECT_RELEGATED
     for _ in range(sims):
         pts, gd = base_pts[:], base_gd[:]
@@ -1314,6 +1358,7 @@ def _compute_projection(db, league, as_of=None, season=None, sims=PROJECT_SIMS):
                        reverse=True)
         for rank, i in enumerate(order):
             pts_total[i] += pts[i]
+            rank_counts[i][rank] += 1
             if rank == 0:
                 title[i] += 1
             if rank < PROJECT_EUROPE:
@@ -1334,9 +1379,12 @@ def _compute_projection(db, league, as_of=None, season=None, sims=PROJECT_SIMS):
         "season": season, "teams": teams, "n": n, "sims": sims,
         "n_played": len(played), "n_remaining": len(remaining),
         "n_promoted": n_promoted, "base_pts": base_pts, "base_gd": base_gd,
-        "base_played": base_played, "proj": proj, "title": title,
+        "base_played": base_played, "base_gf": base_gf, "base_ga": base_ga,
+        "base_w": base_w, "base_d": base_d, "base_l": base_l,
+        "proj": proj, "title": title,
         "europe": europe, "drop": drop, "started": started,
-        "now_rank": now_rank, "order": order,
+        "now_rank": now_rank, "order": order, "rank_counts": rank_counts,
+        "fixture_lambdas": fixture_lambdas,
     }
 
 
@@ -1652,6 +1700,251 @@ def season_projection_trend(db, league):
         "and the odds are the hover.</p>"
     )
     return block("Projection over time", chart, about=about)
+
+
+ORDINAL_SUFFIX = {1: "st", 2: "nd", 3: "rd"}
+
+
+def ordinal(n):
+    if 11 <= n % 100 <= 13:
+        return f"{n}th"
+    return f"{n}{ORDINAL_SUFFIX.get(n % 10, 'th')}"
+
+
+def _rank_percentile(counts, sims, q):
+    """The rank at which the qth fraction of simulated seasons has finished
+    at-or-above — i.e. counts (indexed by 0-based rank) turned into a
+    1-based rank boundary. Walks the histogram rather than sorting sims
+    individually since sims are already collapsed into per-rank counts."""
+    target = q * sims
+    c = 0
+    for r, cnt in enumerate(counts):
+        c += cnt
+        if c >= target:
+            return r + 1
+    return len(counts)
+
+
+def season_projection_distribution(db, league):
+    """The spread hiding behind each club's single Proj number.
+
+    Two clubs can share a Proj of 55 for very different reasons — one of
+    them nailed on for exactly there, the other anywhere from 7th to
+    relegation depending how a handful of close matches go. This reads
+    that spread straight off the same simulations the table above already
+    ran, so it costs nothing new to validate: it is the existing,
+    already-checked projection, just not collapsed to a single number.
+    """
+    r = _compute_projection(db, league)
+    if not r:
+        return ""
+    teams, n, sims = r["teams"], r["n"], r["sims"]
+    rank_counts, order = r["rank_counts"], r["order"]
+    if n < 3:
+        return ""
+    rel_cut = n - PROJECT_RELEGATED
+    step = 100 / (n - 1)
+
+    def x(rank):
+        return (rank - 1) * step
+
+    def zone(lo, hi):
+        left = max(0.0, x(lo) - step / 2)
+        right = min(100.0, x(hi) + step / 2)
+        return left, right - left
+
+    title_l, title_w = zone(1, 1)
+    cl_l, cl_w = zone(1, PROJECT_EUROPE)
+    rel_l, rel_w = zone(rel_cut + 1, n)
+
+    rows = []
+    for pos, i in enumerate(order, 1):
+        p05, p25, p50, p75, p95 = (
+            _rank_percentile(rank_counts[i], sims, q)
+            for q in (0.05, 0.25, 0.5, 0.75, 0.95)
+        )
+        tip = (f"{teams[i]}: median finish {ordinal(p50)} · half of all "
+               f"simulations finish {ordinal(p25)}–{ordinal(p75)} · 90% "
+               f"finish {ordinal(p05)}–{ordinal(p95)}")
+        wl, ww = x(p05), x(p95) - x(p05)
+        bl, bw = x(p25), x(p75) - x(p25)
+        rows.append(
+            "<div class='range-row'>"
+            f"<span class='range-name'><b>{pos}</b> {escape(teams[i])}</span>"
+            f"<div class='range-track' title='{escape(tip)}'>"
+            f"<i class='rz win' style='left:{title_l:.2f}%;width:{title_w:.2f}%'></i>"
+            f"<i class='rz cl' style='left:{cl_l:.2f}%;width:{cl_w:.2f}%'></i>"
+            f"<i class='rz rel' style='left:{rel_l:.2f}%;width:{rel_w:.2f}%'></i>"
+            f"<i class='range-whisker' style='left:{wl:.2f}%;width:{ww:.2f}%'></i>"
+            f"<i class='range-box' style='left:{bl:.2f}%;width:{max(bw, 0.6):.2f}%'></i>"
+            f"<i class='range-median' style='left:{x(p50):.2f}%'></i>"
+            "</div></div>"
+        )
+
+    legend = (
+        "<p class='spark-legend'>One row per team, today's projected order · "
+        "faint band = top 1 / top "
+        f"{PROJECT_EUROPE} / bottom {PROJECT_RELEGATED} finish zones · thick "
+        "bar = the middle 50% of simulated finishes, thin line = the middle "
+        "90%, tick = median · hover a row for the exact numbers</p>"
+    )
+    chart = f"<div class='chart-card'>{legend}<div class='range-grid'>{''.join(rows)}</div></div>"
+    about = (
+        "<p><strong>What it shows.</strong> The same "
+        f"{sims:,} simulated seasons behind the Proj column above, but kept "
+        "as a distribution of finishing positions instead of averaged down "
+        "to one number. A short bar means the simulations agree; a long "
+        "one means the run-in is still wide open for that club.</p>"
+        "<p><strong>Reading it.</strong> The thick bar covers the middle "
+        "half of simulated outcomes, the thin line the middle 90% — so a "
+        "club whose thick bar sits entirely inside the shaded relegation "
+        "band is in real trouble, while one whose bar straddles the line "
+        "is still fighting it. The tick is the median finish, which is "
+        "usually close to but not identical to the rounded Proj points "
+        "figure above (points and rank are different simulation outputs).</p>"
+    )
+    return block("How wide is that projection?", chart, about=about)
+
+
+def _poisson_js():
+    """Client-side Poisson sampler + single-season roll, shared by every
+    league's simulate button — kept as one script tag rather than one per
+    league since the logic is identical, only the embedded fixture data
+    differs."""
+    return """
+(function () {
+  function poissonSample(lam) {
+    var L = Math.exp(-lam), k = 0, p = 1;
+    do { k++; p *= Math.random(); } while (p > L);
+    return k - 1;
+  }
+  function simulate(data) {
+    var n = data.teams.length;
+    var pts = data.basePts.slice(), gd = data.baseGd.slice();
+    var gf = data.baseGf.slice(), ga = data.baseGa.slice();
+    var w = data.baseW.slice(), d = data.baseD.slice(), l = data.baseL.slice();
+    var played = data.basePlayed.slice();
+    var results = [];
+    data.fixtures.forEach(function (fx) {
+      var h = fx[0], a = fx[1], hg = poissonSample(fx[2]), ag = poissonSample(fx[3]);
+      played[h]++; played[a]++;
+      gf[h] += hg; ga[h] += ag; gf[a] += ag; ga[a] += hg;
+      gd[h] += hg - ag; gd[a] += ag - hg;
+      if (hg > ag) { pts[h] += 3; w[h]++; l[a]++; }
+      else if (hg === ag) { pts[h]++; pts[a]++; d[h]++; d[a]++; }
+      else { pts[a] += 3; w[a]++; l[h]++; }
+      results.push({ h: h, a: a, hg: hg, ag: ag, date: fx[4] });
+    });
+    var order = Array.from({ length: n }, function (_, i) { return i; });
+    order.sort(function (x, y) {
+      return pts[y] - pts[x] || gd[y] - gd[x] || gf[y] - gf[x] ||
+        data.teams[x].localeCompare(data.teams[y]);
+    });
+    return { pts: pts, gd: gd, gf: gf, ga: ga, w: w, d: d, l: l, played: played,
+              order: order, results: results };
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+    });
+  }
+  function render(card, data) {
+    var sim = simulate(data);
+    var n = data.teams.length, relCut = n - data.relegated;
+    var rows = sim.order.map(function (i, pos) {
+      var rank = pos + 1;
+      var zone = rank <= data.europe ? " class='zone-cl'" :
+        rank > relCut ? " class='zone-rel'" : "";
+      return "<tr" + zone + "><td class='num'>" + rank + "</td><td>" + esc(data.teams[i]) +
+        "</td><td class='num'>" + sim.played[i] + "</td><td class='num'>" + sim.w[i] +
+        "</td><td class='num'>" + sim.d[i] + "</td><td class='num'>" + sim.l[i] +
+        "</td><td class='num dim'>" + sim.gf[i] + "–" + sim.ga[i] +
+        "</td><td class='num'>" + (sim.gd[i] >= 0 ? "+" : "") + sim.gd[i] +
+        "</td><td class='num score'>" + sim.pts[i] + "</td></tr>";
+    }).join("");
+    var table = "<div class='card'><table><thead><tr><th class='num'>#</th><th>Team</th>" +
+      "<th class='num'>P</th><th class='num'>W</th><th class='num'>D</th><th class='num'>L</th>" +
+      "<th class='num'>GF–GA</th><th class='num'>GD</th><th class='num'>Pts</th></tr></thead>" +
+      "<tbody>" + rows + "</tbody></table></div>";
+    var byDate = sim.results.slice().sort(function (a, b) {
+      return (a.date || "").localeCompare(b.date || "");
+    });
+    var fixtures = byDate.map(function (m) {
+      return "<li>" + (m.date ? "<span class='dim'>" + esc(m.date) + "</span> " : "") +
+        esc(data.teams[m.h]) + " <b>" + m.hg + "–" + m.ag + "</b> " +
+        esc(data.teams[m.a]) + "</li>";
+    }).join("");
+    var out = card.querySelector(".sim-output");
+    out.innerHTML = table +
+      "<details class='about'><summary>" + sim.results.length +
+      " simulated results</summary><div class='about-body'><ul class='sim-fixtures'>" +
+      fixtures + "</ul></div></details>";
+  }
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest(".sim-btn");
+    if (!btn) return;
+    var card = btn.closest(".sim-card");
+    if (!card) return;
+    var dataEl = card.querySelector(".sim-data");
+    var data = JSON.parse(dataEl.textContent);
+    render(card, data);
+    btn.textContent = "Simulate again";
+  });
+})();
+"""
+
+
+def season_projection_simulator(db, league):
+    """One random full season, played out once instead of averaged.
+
+    The table and distribution above summarize thousands of simulations;
+    this runs exactly one, all client-side, from the same per-fixture
+    expected-goals numbers the Monte Carlo already computed server-side —
+    no new model, just a single draw from it shown as an actual scoreline
+    per match instead of a probability. Not a prediction on its own (any
+    one draw is just as likely to be wrong in either direction as the
+    average is to be right); it exists to make the shape of the season's
+    remaining uncertainty concrete rather than statistical.
+    """
+    r = _compute_projection(db, league)
+    if not r or not r["fixture_lambdas"]:
+        return ""
+    payload = {
+        "teams": r["teams"], "basePts": r["base_pts"], "baseGd": r["base_gd"],
+        "baseGf": r["base_gf"], "baseGa": r["base_ga"], "baseW": r["base_w"],
+        "baseD": r["base_d"], "baseL": r["base_l"], "basePlayed": r["base_played"],
+        "fixtures": r["fixture_lambdas"], "europe": PROJECT_EUROPE,
+        "relegated": PROJECT_RELEGATED,
+    }
+    payload_json = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
+    body = (
+        "<div class='card sim-card'>"
+        "<div class='controls'><button class='sim-btn' type='button'>"
+        "Simulate one season</button>"
+        "<span class='count dim'>Plays every remaining fixture once, using "
+        "the same expected-goals numbers as the projection above.</span></div>"
+        "<div class='sim-output'></div>"
+        f"<script type='application/json' class='sim-data'>{payload_json}</script>"
+        "</div>"
+    )
+    about = (
+        "<p><strong>What it does.</strong> Click the button and every "
+        "fixture still to be played gets one simulated scoreline — each "
+        "team's goals drawn from a Poisson distribution around the same "
+        "expected-goals number (<code>lam_home</code>/<code>lam_away</code>) "
+        "used everywhere else on this page — then the final table is built "
+        "from real goals this time, not just win/draw/loss margins, so "
+        "goal difference and the goals column are genuine tiebreakers "
+        "rather than a coin flip. Click again for a different one.</p>"
+        "<p><strong>Why it won't match the projection above.</strong> The "
+        "Proj table is the average of thousands of these; any single run "
+        "can and will put a mid-table side in the title race or drop a "
+        "contender to mid-table, the same way any one real season can. "
+        "That's the point of running it once instead of a thousand times — "
+        "it shows what a plausible individual outcome actually looks like, "
+        "not just the odds of it.</p>"
+    )
+    return block("Simulate one season", body, about=about)
 
 
 # ------------------------------------------------------- understat sections
@@ -3346,6 +3639,8 @@ def league_section(db, league):
         + block("Upcoming fixtures" + ahead, matches_table(db, league, finished=False))
         + predictions_block(db, league)
         + season_projection_block(db, league)
+        + season_projection_distribution(db, league)
+        + season_projection_simulator(db, league)
         + season_projection_trend(db, league)
         + report_card_block(db, league)
     )
@@ -3872,7 +4167,7 @@ def build_page(db, nav, generated, archive_label=None):
         f"<div class='badges'>{badges}</div></header>"
         + nav + lg_bar + tab_bar + panel_html
         + f"<footer>{footer}</footer></div>"
-        f"<script>{EXPLORER_JS}</script></body></html>"
+        f"<script>{EXPLORER_JS}{_poisson_js()}</script></body></html>"
     )
 
 

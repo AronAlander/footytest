@@ -184,6 +184,34 @@ svg .spark-line.up { stroke: var(--win); }
 svg .spark-line.down { stroke: var(--loss); }
 svg .spark-dot.up { fill: var(--win); }
 svg .spark-dot.down { fill: var(--loss); }
+.range-grid { display: flex; flex-direction: column; gap: 3px; }
+.range-row { display: flex; align-items: center; gap: 10px; }
+.range-name {
+  flex: 0 0 150px; font-size: 12.5px; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.range-name b { color: var(--text-secondary); font-weight: 600; margin-right: 4px; }
+.range-track { position: relative; flex: 1; height: 22px; }
+.range-track i.rz { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+.range-track i.rz.win { background: color-mix(in srgb, var(--accent-2) 14%, transparent); }
+.range-track i.rz.cl { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.range-track i.rz.rel { background: color-mix(in srgb, var(--loss) 10%, transparent); }
+.range-whisker {
+  position: absolute; top: 50%; height: 2px; border-radius: 1px;
+  background: var(--text-secondary); opacity: .55; transform: translateY(-50%);
+}
+.range-box {
+  position: absolute; top: 4px; bottom: 4px; border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.range-median {
+  position: absolute; top: 1px; bottom: 1px; width: 2px;
+  background: var(--text-primary); transform: translateX(-1px);
+}
+.sim-card .controls { margin: 4px 4px 14px; }
+.sim-fixtures { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 24px; }
+@media (max-width: 640px) { .sim-fixtures { columns: 1; } }
+.sim-fixtures li { font-size: 13px; padding: 3px 0; white-space: nowrap; }
 .controls {
   display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0;
 }
@@ -1049,5 +1077,85 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2024-08-17","h",2,2,2.1,0.88,1.22,1],
   window.addEventListener('scroll', () => {
     btn.classList.toggle('show', window.scrollY > 500);
   }, { passive: true });
+})();
+
+(function () {
+  function poissonSample(lam) {
+    var L = Math.exp(-lam), k = 0, p = 1;
+    do { k++; p *= Math.random(); } while (p > L);
+    return k - 1;
+  }
+  function simulate(data) {
+    var n = data.teams.length;
+    var pts = data.basePts.slice(), gd = data.baseGd.slice();
+    var gf = data.baseGf.slice(), ga = data.baseGa.slice();
+    var w = data.baseW.slice(), d = data.baseD.slice(), l = data.baseL.slice();
+    var played = data.basePlayed.slice();
+    var results = [];
+    data.fixtures.forEach(function (fx) {
+      var h = fx[0], a = fx[1], hg = poissonSample(fx[2]), ag = poissonSample(fx[3]);
+      played[h]++; played[a]++;
+      gf[h] += hg; ga[h] += ag; gf[a] += ag; ga[a] += hg;
+      gd[h] += hg - ag; gd[a] += ag - hg;
+      if (hg > ag) { pts[h] += 3; w[h]++; l[a]++; }
+      else if (hg === ag) { pts[h]++; pts[a]++; d[h]++; d[a]++; }
+      else { pts[a] += 3; w[a]++; l[h]++; }
+      results.push({ h: h, a: a, hg: hg, ag: ag, date: fx[4] });
+    });
+    var order = Array.from({ length: n }, function (_, i) { return i; });
+    order.sort(function (x, y) {
+      return pts[y] - pts[x] || gd[y] - gd[x] || gf[y] - gf[x] ||
+        data.teams[x].localeCompare(data.teams[y]);
+    });
+    return { pts: pts, gd: gd, gf: gf, ga: ga, w: w, d: d, l: l, played: played,
+              order: order, results: results };
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+    });
+  }
+  function render(card, data) {
+    var sim = simulate(data);
+    var n = data.teams.length, relCut = n - data.relegated;
+    var rows = sim.order.map(function (i, pos) {
+      var rank = pos + 1;
+      var zone = rank <= data.europe ? " class='zone-cl'" :
+        rank > relCut ? " class='zone-rel'" : "";
+      return "<tr" + zone + "><td class='num'>" + rank + "</td><td>" + esc(data.teams[i]) +
+        "</td><td class='num'>" + sim.played[i] + "</td><td class='num'>" + sim.w[i] +
+        "</td><td class='num'>" + sim.d[i] + "</td><td class='num'>" + sim.l[i] +
+        "</td><td class='num dim'>" + sim.gf[i] + "–" + sim.ga[i] +
+        "</td><td class='num'>" + (sim.gd[i] >= 0 ? "+" : "") + sim.gd[i] +
+        "</td><td class='num score'>" + sim.pts[i] + "</td></tr>";
+    }).join("");
+    var table = "<div class='card'><table><thead><tr><th class='num'>#</th><th>Team</th>" +
+      "<th class='num'>P</th><th class='num'>W</th><th class='num'>D</th><th class='num'>L</th>" +
+      "<th class='num'>GF–GA</th><th class='num'>GD</th><th class='num'>Pts</th></tr></thead>" +
+      "<tbody>" + rows + "</tbody></table></div>";
+    var byDate = sim.results.slice().sort(function (a, b) {
+      return (a.date || "").localeCompare(b.date || "");
+    });
+    var fixtures = byDate.map(function (m) {
+      return "<li>" + (m.date ? "<span class='dim'>" + esc(m.date) + "</span> " : "") +
+        esc(data.teams[m.h]) + " <b>" + m.hg + "–" + m.ag + "</b> " +
+        esc(data.teams[m.a]) + "</li>";
+    }).join("");
+    var out = card.querySelector(".sim-output");
+    out.innerHTML = table +
+      "<details class='about'><summary>" + sim.results.length +
+      " simulated results</summary><div class='about-body'><ul class='sim-fixtures'>" +
+      fixtures + "</ul></div></details>";
+  }
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest(".sim-btn");
+    if (!btn) return;
+    var card = btn.closest(".sim-card");
+    if (!card) return;
+    var dataEl = card.querySelector(".sim-data");
+    var data = JSON.parse(dataEl.textContent);
+    render(card, data);
+    btn.textContent = "Simulate again";
+  });
 })();
 </script></body></html>
