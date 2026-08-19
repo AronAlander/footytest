@@ -2399,6 +2399,10 @@ def venue_split_table(db, league, limit=8):
            FROM understat_team_matches WHERE league = ? GROUP BY team""",
         (league,),
     ).fetchall()
+    # early in a season some teams have only played home or only away
+    # fixtures so far -- AVG() over the empty side returns NULL, and the
+    # venue-edge comparison needs both sides sampled anyway
+    rows = [r for r in rows if r[1] is not None and r[2] is not None]
     if not rows:
         return ""
     ranked = sorted(rows, key=lambda r: r[1] - r[2], reverse=True)
