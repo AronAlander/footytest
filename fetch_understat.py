@@ -148,13 +148,23 @@ def fetch_league(db, league, slug, season, fetched_at):
         )
 
     match_count = 0
+    skipped = 0
     for team in (data.get("teams") or {}).values():
+        title = team.get("title")
+        if title is None:
+            # Understat occasionally serves a team's history before its
+            # name/id metadata has populated (seen right after a promoted
+            # club's season opener) -- without a name there's nothing to
+            # key these rows on, so drop them rather than fail the whole
+            # league's fetch; a later run re-fetches and fills them in.
+            skipped += len(team.get("history") or [])
+            continue
         for match in team.get("history") or []:
             db.execute(
                 "INSERT OR REPLACE INTO understat_team_matches VALUES "
                 "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
-                    season, league, team["title"], match.get("date"), match.get("h_a"),
+                    season, league, title, match.get("date"), match.get("h_a"),
                     float(match.get("xG") or 0), float(match.get("xGA") or 0),
                     float(match.get("npxG") or 0), float(match.get("npxGA") or 0),
                     ppda_ratio(match.get("ppda")), ppda_ratio(match.get("ppda_allowed")),
@@ -166,7 +176,8 @@ def fetch_league(db, league, slug, season, fetched_at):
                 ),
             )
             match_count += 1
-    print(f"  {league}: {len(players)} players, {match_count} team-match rows")
+    skip_note = f", {skipped} skipped (no team name yet)" if skipped else ""
+    print(f"  {league}: {len(players)} players, {match_count} team-match rows{skip_note}")
 
 
 def seasons_from_args(argv):
