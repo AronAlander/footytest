@@ -28,6 +28,11 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          # the What's new panel is built from Changelog: trailers in commit
+          # messages, and the default shallow checkout has no history to read
+          # them from -- the build would quietly render an empty panel
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:

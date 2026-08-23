@@ -14,6 +14,8 @@ import math
 import random
 import re
 import sqlite3
+import subprocess
+import sys
 import unicodedata
 
 from bisect import bisect
@@ -4805,14 +4807,11 @@ def _inline_md(text):
     return out
 
 
-def parse_changelog(path=CHANGELOG_PATH):
-    """[(heading, [bullet, ...]), ...] newest first, straight from the file.
+CHANGELOG_COMMITS = 400   # how far back to read trailers
 
-    Hand-written rather than generated from git history: the log is full of
-    reasoning aimed at whoever edits this code next, which is not what a
-    reader of the site wants, and the Actions checkout is shallow anyway so
-    the history is not reliably there to read.
-    """
+
+def parse_changelog(path=CHANGELOG_PATH):
+    """[(heading, [bullet, ...]), ...] newest first, from the file only."""
     if not path.exists():
         return []
     entries, current = [], None
@@ -4824,6 +4823,66 @@ def parse_changelog(path=CHANGELOG_PATH):
         elif line.startswith("- ") and current is not None:
             current[1].append(line[2:].strip())
     return [e for e in entries if e[1]]
+
+
+def git_changelog(limit=CHANGELOG_COMMITS):
+    """Entries from `Changelog:` trailers in commit messages, newest first.
+
+    A commit opts in by ending its message with a line like
+
+        Changelog: **Match reports.** What happened, and what we predicted.
+
+    which keeps the site's news out of the commit subjects — those are
+    written for whoever edits this code next, and read badly as release
+    notes. Nightly data commits carry no trailer and so never appear.
+
+    Returns [] rather than raising when git is unavailable or the checkout
+    is too shallow to have the history, so a build from a tarball still
+    works off the file alone.
+    """
+    fmt = "%ad\t%(trailers:key=Changelog,valueonly,separator=%x1f)"
+    try:
+        out = subprocess.run(
+            ["git", "log", f"-{limit}", "--date=short", f"--pretty=format:{fmt}"],
+            cwd=PROJECT_DIR, capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if out.returncode != 0:
+        return []
+    by_date = {}
+    order = []
+    for line in out.stdout.splitlines():
+        if "\t" not in line:
+            continue          # a trailer that wrapped onto its own line
+        day, _, rest = line.partition("\t")
+        texts = [t.strip() for t in rest.split("\x1f") if t.strip()]
+        if not texts:
+            continue
+        if day not in by_date:
+            by_date[day] = []
+            order.append(day)
+        by_date[day].extend(texts)
+    return [(day, by_date[day]) for day in order]
+
+
+def changelog_entries():
+    """Commit trailers, with CHANGELOG.md overriding whole dates.
+
+    A date present in the file replaces anything the commits said for that
+    day, which is what makes an entry adjustable after the fact: a trailer
+    is frozen in history and cannot be edited, so the file is the place to
+    correct, reword or drop one. Dates only in the file are added as-is,
+    so it also works standalone for anything no commit announced.
+    """
+    manual = parse_changelog()
+    manual_by_date = {heading: bullets for heading, bullets in manual}
+    merged = list(manual)
+    for day, texts in git_changelog():
+        if day not in manual_by_date:
+            merged.append((day, texts))
+    merged.sort(key=lambda e: e[0], reverse=True)
+    return merged
 
 
 def changelog_block(entries):
@@ -5176,7 +5235,7 @@ def build_page(db, nav, generated, archive_label=None):
     badges = "".join(f"<span class='badge'>{escape(t)}</span>" for t in badge_texts)
     # the archive pages are frozen snapshots of a finished season; a running
     # list of what changed this week belongs on the live dashboard only
-    whats_new = "" if archive else changelog_block(parse_changelog())
+    whats_new = "" if archive else changelog_block(changelog_entries())
 
     return (
         f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
@@ -5257,7 +5316,32 @@ def warn_if_stale(db):
           "older than it. Run `python update.py` first.")
 
 
+def show_changelog() -> None:
+    """`python build_report.py --changelog` — what the What's new panel will
+    say, and where each date came from, so an entry can be corrected in
+    CHANGELOG.md before it is published."""
+    manual = {h for h, _ in parse_changelog()}
+    entries = changelog_entries()
+    if not entries:
+        print("No changelog entries: no CHANGELOG.md dates and no Changelog: "
+              "trailers found in the last "
+              f"{CHANGELOG_COMMITS} commits.")
+        return
+    for heading, bullets in entries:
+        src = "CHANGELOG.md" if heading in manual else "commit trailers"
+        star = " (shown)" if entries.index((heading, bullets)) < CHANGELOG_SHOWN else ""
+        print(f"\n## {heading}   [{src}]{star}")
+        for b in bullets:
+            print(f"  - {b}")
+    print(f"\n{len(entries)} dated entries, newest {CHANGELOG_SHOWN} rendered on "
+          "the page.\nTo change a date the commits produced, add that same date "
+          "to CHANGELOG.md:\nthe file replaces whatever the trailers said for "
+          "that day.")
+
+
 def main() -> None:
+    if "--changelog" in sys.argv:
+        return show_changelog()
     if not DB_PATH.exists():
         raise SystemExit("No football.sqlite found - run `python fetch_data.py` first.")
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
