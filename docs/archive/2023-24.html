@@ -475,9 +475,24 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
     if (b.dataset.lg === window.CUR_LG) return;
     window.CUR_LG = b.dataset.lg;
     apply();
-    if (window.syncHash) window.syncHash();
+    // push before the event, not after: the panels resettle while handling it
+    // and replace the hash as they go, which would leave nothing for the push
+    // to record and no history entry to come back to. Their replacements then
+    // land inside the entry this just created, which is where they belong
+    if (window.syncHash) window.syncHash(true);
     document.dispatchEvent(new CustomEvent('leaguechange'));
   }));
+  // Back/Forward needs to change league without recording another step
+  window.applyLeague = function (lg) {
+    if (!lg || lg === window.CUR_LG) return false;
+    let known = false;
+    btns.forEach((b) => { if (b.dataset.lg === lg) known = true; });
+    if (!known) return false;
+    window.CUR_LG = lg;
+    apply();
+    document.dispatchEvent(new CustomEvent('leaguechange'));
+    return true;
+  };
   apply();
 })();
 
@@ -630,7 +645,11 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
   }
   // keep the hash mirroring the current league + tab so a season switch
   // (the dropdown carries location.hash across) can restore both
-  window.syncHash = function () {
+  // push=true records a step the reader took, so Back returns to it. Anything
+  // the page does to itself -- normalising on load, resettling after a league
+  // change -- replaces instead, or Back would walk through states nobody chose
+  window.syncHash = function (push) {
+    if (window.__navRestoring) return;   // mid-popstate: the hash is the target
     const parts = [];
     if (window.CUR_LG && document.querySelector('nav.lgswitch button'))
       parts.push('lg=' + window.CUR_LG.replace(/ /g, '_'));
@@ -643,17 +662,27 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
       const id = window.currentMatch();
       if (id) parts.push('m=' + id);
     }
-    history.replaceState(null, '', '#' + parts.join('&'));
+    const url = '#' + parts.join('&');
+    if (url === decodeURIComponent(location.hash)) return;  // no history churn
+    try {
+      if (push) history.pushState(null, '', url);
+      else history.replaceState(null, '', url);
+    } catch (e) {
+      // some browsers refuse pushState on a file:// document; this page is
+      // meant to work opened straight off disk, so fall back to writing the
+      // hash. Back then still works, one entry per move, same as before
+      location.hash = url.slice(1);
+    }
   };
   tabs.forEach((b) => b.addEventListener('click', () => {
     activate(b.dataset.panel);
-    window.syncHash();
+    window.syncHash(true);
   }));
   // so a fixture row on the League tab can send the reader to the explorer
-  window.showPanel = function (name) {
+  window.showPanel = function (name, silent) {
     if (!document.getElementById('panel-' + name)) return false;
     activate(name);
-    window.syncHash();
+    if (!silent) window.syncHash(true);
     return true;
   };
   const initial = decodeURIComponent(location.hash.slice(1)).split('&')
@@ -1454,7 +1483,17 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
     remember();
   }
   window.currentMatch = () => (ENTRIES[idx] || {}).id || null;
-  const remember = () => { if (window.syncHash) window.syncHash(); };
+  const remember = (push) => { if (window.syncHash) window.syncHash(push); };
+
+  // Back/Forward selects without recording another step
+  window.selectMatch = function (id) {
+    const i = ENTRIES.findIndex((e) => String(e.id) === String(id));
+    if (i < 0) return false;
+    idx = i;
+    pick.value = i;
+    render();
+    return true;
+  };
 
   function step(by) {
     const list = ENTRIES;
@@ -1462,12 +1501,12 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
     idx = (idx + by + list.length) % list.length;
     pick.value = idx;
     render();
-    remember();
+    remember(true);
   }
   pick.addEventListener('change', () => {
     idx = Number(pick.value) || 0;
     render();
-    remember();
+    remember(true);
   });
   $('fx-prev').addEventListener('click', () => step(-1));
   $('fx-next').addEventListener('click', () => step(1));
@@ -1498,7 +1537,7 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
     // panel first would sync the hash before idx moved, writing the match
     // that was open a moment ago
     if (window.showPanel) window.showPanel('fixtures');
-    remember();
+    remember(true);
     card.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return true;
   };
@@ -1571,6 +1610,28 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
   });
   document.addEventListener('leaguechange', mark);
   mark();
+})();
+
+(function () {  // browser Back / Forward
+  // Every in-page move pushes a history entry, so Back has somewhere to go.
+  // Restoring one has to be silent from start to finish: applyLeague makes
+  // the panels resettle, and each of them would otherwise sync the hash
+  // mid-restore and overwrite the very state being restored.
+  function restore() {
+    const hash = decodeURIComponent(location.hash.slice(1));
+    window.__navRestoring = true;
+    try {
+      const lg = (/(?:^|&)lg=([^&]+)/.exec(hash) || [])[1];
+      if (lg && window.applyLeague) window.applyLeague(lg.replace(/_/g, ' '));
+      const panel = hash.split('&').filter((s) => s && !s.includes('='))[0];
+      if (panel && window.showPanel) window.showPanel(panel, true);
+      const m = (/(?:^|&)m=([^&]+)/.exec(hash) || [])[1];
+      if (m && window.selectMatch) window.selectMatch(m);
+    } finally {
+      window.__navRestoring = false;
+    }
+  }
+  window.addEventListener('popstate', restore);
 })();
 
 (function () {  // back-to-top button

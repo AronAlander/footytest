@@ -31,5 +31,6 @@ are rendered on the page; the rest stay here.
 - **Overall record beside the venue split.** A club's home (or away) record now has its record across all matches underneath — a side that is excellent at home and ordinary overall is exactly what the venue row alone would hide.
 - **Neutral head-to-head.** Past meetings are no longer coloured by whether the club that happens to be at home this time won them.
 - **The open match survives a refresh.** The address bar now names it, so a reload comes back to the same match and the link can be shared.
+- **Back goes back.** The browser's Back button (and Alt+Left) now steps through the tabs, leagues and matches you moved through, instead of leaving the site entirely.
 - **This panel.** A running list of what has changed, so a returning visitor can tell at a glance whether anything is new.
 - **Fixed:** Serie A's opening results briefly vanished from the published page on 23 August, after a rebuild from a stale local copy of the data overwrote them. The build now refuses to go quietly when the data it is about to publish is older than a day.
