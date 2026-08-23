@@ -351,6 +351,36 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 .prob i.h { background: var(--accent); }
 .prob i.d { background: var(--draw); }
 .prob i.a { background: var(--away); }
+.fx-head { display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; flex-wrap: wrap; margin: 2px 2px 12px; }
+.fx-head h4 { margin: 0; font-size: 19px; }
+.fx-verdict { margin: 0 2px 6px; }
+.fx-verdict .prob { height: 22px; }
+.fx-noverdict { border: 1px solid var(--border); border-left: 3px solid var(--draw);
+  background: var(--surface); border-radius: 6px; padding: 9px 12px; margin: 0 2px 6px;
+  font-size: 13.5px; color: var(--text-secondary); }
+.fx-names { font-weight: 600; margin: 16px 0 0; }
+.fx-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-secondary); margin: 18px 2px 6px; font-weight: 600; }
+.fx-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
+.fx-none { font-size: 13px; margin: 4px 2px; }
+.fx-form { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fx-form td, .fx-form th { padding: 3px 6px; border-bottom: 1px solid var(--border);
+  white-space: nowrap; }
+.fx-form th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-secondary); text-align: left; }
+.fx-form tr:last-child td { border-bottom: 0; }
+/* the one column carrying a name absorbs the slack; everything else is a
+   chip, a date or a number and stays as narrow as its content */
+.fx-form td, .fx-form th { width: 1%; }
+.fx-form .fx-grow { width: 100%; }
+.fx-season { margin: 0 2px 4px; font-size: 12px; }
+/* head-to-head is one full-width table, so pin the middle columns together
+   instead of letting the club names drift to opposite edges */
+.fx-h2h { max-width: 640px; }
+.fx-h2h td:nth-child(3) { width: 40%; text-align: right; }
+.fx-h2h td:nth-child(5) { width: 40%; }
+@media (max-width: 720px) { .fx-cols { grid-template-columns: 1fr; } }
 .pdot {
   display: inline-block; width: 10px; height: 10px; border-radius: 50%;
   vertical-align: -1px; margin-right: 4px;
@@ -894,6 +924,26 @@ def _outcome_probs(lam_home, lam_away):
     return home / total, draw / total, away / total
 
 
+def _fixture_lambdas(strengths, mu, home_adv, lg_deep, home, away):
+    """Expected goals for one fixture, and the thinner side's sample size.
+
+    Lifted out of predictions_block so the fixture explorer can show the
+    same numbers rather than a second implementation that drifts from it —
+    the two views disagreeing about the same match would be worse than
+    either being slightly wrong.
+    """
+    att_h, def_h, n_h, deep_h = strengths[home]
+    att_a, def_a, n_a, deep_a = strengths[away]
+    sqrt_ha = math.sqrt(home_adv)
+    lam_home = att_h * def_a / mu * sqrt_ha
+    lam_away = att_a * def_h / mu / sqrt_ha
+    if lg_deep and deep_h is not None and deep_a is not None:
+        lam_home *= (deep_h / lg_deep) ** PREDICT_DEEP_POWER
+        lam_away *= (deep_a / lg_deep) ** PREDICT_DEEP_POWER
+    return (max(0.1, min(6.0, lam_home)), max(0.1, min(6.0, lam_away)),
+            min(n_h, n_a))
+
+
 def predictions_block(db, league):
     fixtures = db.execute(
         """SELECT match_date, round, home_team, away_team, event_id, season
@@ -912,7 +962,6 @@ def predictions_block(db, league):
     if unmatched:
         print(f"  ! predictions ({league}): no xG history matched for: "
               + ", ".join(unmatched))
-    sqrt_ha = math.sqrt(home_adv)
 
     def seg(cls, share):
         pct = f"{share * 100:.0f}%"
@@ -937,21 +986,14 @@ def predictions_block(db, league):
                 f"<td>{escape(away)}</td><td class='num dim'>–</td></tr>"
             )
             continue
-        att_h, def_h, n_h, deep_h = strengths[mapped_home]
-        att_a, def_a, n_a, deep_a = strengths[mapped_away]
-        lam_home = att_h * def_a / mu * sqrt_ha
-        lam_away = att_a * def_h / mu / sqrt_ha
-        if lg_deep and deep_h is not None and deep_a is not None:
-            lam_home *= (deep_h / lg_deep) ** PREDICT_DEEP_POWER
-            lam_away *= (deep_a / lg_deep) ** PREDICT_DEEP_POWER
-        lam_home = max(0.1, min(6.0, lam_home))
-        lam_away = max(0.1, min(6.0, lam_away))
+        lam_home, lam_away, n_min = _fixture_lambdas(
+            strengths, mu, home_adv, lg_deep, mapped_home, mapped_away)
         p_home, p_draw, p_away = _outcome_probs(lam_home, lam_away)
         prediction_log.record(logged, today, event_id, league, season,
                               match_date, home, away,
                               (p_home, p_draw, p_away), (lam_home, lam_away))
         tip = (f"{home} {p_home * 100:.0f}% · draw {p_draw * 100:.0f}% · "
-               f"{away} {p_away * 100:.0f}% (on {min(n_h, n_a)}+ matches each)")
+               f"{away} {p_away * 100:.0f}% (on {n_min}+ matches each)")
         bar = (f"<div class='prob' title='{escape(tip)}'>"
                + seg("h", p_home) + seg("d", p_draw) + seg("a", p_away) + "</div>")
         body += (
@@ -2887,6 +2929,233 @@ def load_team_matches(db, league):
     return out
 
 
+# ---------------------------------------------------- fixture explorer data
+
+FIXTURES_SHOWN = PREDICT_SHOWN  # same slate as the Predictions block
+FIXTURE_FORM = 6                # recent matches shown per side
+FIXTURE_H2H = 8                 # past meetings shown
+FIXTURE_PLAYERS = 5             # top scorers/creators per side
+
+
+def _resolved_matches(db, league):
+    """Every stored match for a league as (season, date, home, away, hg, ag,
+    h_xg, a_xg), newest last — across all seasons, not just the current one.
+
+    Understat's team feed has no opponent column: it stores one row per team
+    per match, and the two halves of a fixture have to be paired back up.
+    Kickoff timestamp alone is not enough — two clubs playing different
+    opponents at the same time pair up spuriously, which handed Arsenal and
+    Chelsea three meetings in a two-fixture season. Requiring the scoreline
+    and both xG figures to mirror as well pins it down exactly: across the
+    21,598 stored home rows this resolves 21,597 of them, each to exactly
+    one opponent and none to two. The single miss is the Ligue 1 fixture
+    whose opponent Understat is still serving without a name (see
+    fetch_understat.py) — it reappears by itself once they fix it upstream.
+
+    Allsvenskan skips all of that: its FotMob-sourced table already names
+    the opponent.
+    """
+    if league in UNDERSTAT_LEAGUES:
+        rows = db.execute(
+            """SELECT h.season, h.match_date, h.team, a.team,
+                      h.scored, h.missed, h.xg, h.xga
+               FROM main.understat_team_matches h
+               JOIN main.understat_team_matches a
+                 ON h.league = a.league AND h.season = a.season
+                AND h.match_date = a.match_date
+                AND h.scored = a.missed AND h.missed = a.scored
+                AND ABS(h.xg - a.xga) < 0.0001 AND ABS(h.xga - a.xg) < 0.0001
+               WHERE h.league = ? AND h.home_away = 'h' AND a.home_away = 'a'
+                 AND h.team <> a.team
+               ORDER BY h.match_date""",
+            (league,),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT season, match_date, team, opponent, scored, missed, xg, xga
+               FROM main.fotmob_team_matches
+               WHERE league = ? AND home_away = 'h'
+               ORDER BY match_date""",
+            (league,),
+        ).fetchall()
+    return [
+        (r[0], r[1][:10], unescape(r[2]), unescape(r[3]), r[4], r[5],
+         round(r[6], 2), round(r[7], 2))
+        for r in rows
+    ]
+
+
+def _season_label(league, season):
+    """'2025' -> '2025/26' for the big five, left alone for calendar-year
+    leagues (Allsvenskan plays 2026 inside 2026)."""
+    if season is None:
+        return None
+    return f"{season}/{int(season) % 100 + 1}" if league in UNDERSTAT_LEAGUES else str(season)
+
+
+PLAYERS_MIN_MINUTES = 270   # ~3 full matches: below this a season's scoring
+                            # leaders are whoever happened to score first
+
+
+def _fixture_players(db, league, fx_names):
+    """Top few attacking contributors per club, each with the season they are
+    from, keyed by *fixture* name.
+
+    The player tables need their own name bridge rather than borrowing the
+    match tables': all three feeds disagree, and they disagree differently.
+    Understat calls Mainz "Mainz 05" in both, but FotMob's player feed uses
+    full club names ("IF Elfsborg", "Hammarby IF") where its own match feed
+    uses short ones. Matching on the source name would silently drop every
+    club whose two names differ — which is most of Allsvenskan.
+
+    Every club is resolved independently to the newest season in which it has
+    a meaningful amount of football played, because in August it does not have
+    one yet. Showing an empty box for every big-five club through the opening
+    weeks would make the section dead weight at exactly the moment someone is
+    looking at an opening-weekend fixture; last season's leading attackers are
+    genuinely informative there, as long as the box says that is what they are.
+    """
+    table = "understat_players" if league in UNDERSTAT_LEAGUES else "fotmob_players"
+    if table == "fotmob_players" and not fotmob_available(db):
+        return {}
+    rows = db.execute(
+        f"""SELECT season, team, player_name, minutes, goals, xg, assists, xa
+            FROM main.{table} WHERE league = ? AND minutes > 0
+            ORDER BY season DESC, team, (goals + assists) DESC, (xg + xa) DESC""",
+        (league,),
+    ).fetchall()
+    squad_names = {unescape(r[0]) for r in db.execute(
+        f"SELECT DISTINCT team FROM main.{table} WHERE league = ?", (league,))}
+    want = {hist: fx for fx, hist
+            in _predict_mapping(fx_names, list(squad_names)).items() if hist}
+    by_season = {}
+    for season, team, name, minutes, goals, xg, assists, xa in rows:
+        fx = want.get(unescape(team))
+        if fx is None:
+            continue
+        by_season.setdefault(fx, {}).setdefault(season, []).append(
+            [unescape(name), minutes, goals, round(xg or 0, 1),
+             assists, round(xa or 0, 1)]
+        )
+    out = {}
+    for team, seasons in by_season.items():
+        ordered = sorted(seasons, reverse=True)
+        pick = next(
+            (s for s in ordered
+             if sum(p[1] for p in seasons[s]) >= PLAYERS_MIN_MINUTES * FIXTURE_PLAYERS),
+            ordered[0],
+        )
+        out[team] = {"season": _season_label(league, pick),
+                     "rows": seasons[pick][:FIXTURE_PLAYERS]}
+    return out
+
+
+def load_fixture_data(db, league):
+    """Everything the fixture explorer needs for one league, as plain JSON.
+
+    Shaped to avoid repeating a club's form once per fixture it appears in:
+    `teams` is keyed by club and `fixtures` just names them, so adding
+    fixtures costs a line each rather than a full record.
+    """
+    fixtures = db.execute(
+        """SELECT event_id, match_date, match_time, round, home_team, away_team
+           FROM matches WHERE league = ? AND home_score IS NULL AND match_date >= ?
+           ORDER BY match_date, event_id LIMIT ?""",
+        (league, date.today().isoformat(), FIXTURES_SHOWN),
+    ).fetchall()
+    if not fixtures:
+        return None
+
+    # fixture names come from TheSportsDB, the xG history from Understat or
+    # FotMob; _predict_mapping is the same bridge the predictions use
+    played = _resolved_matches(db, league)
+    hist_names = {m[2] for m in played} | {m[3] for m in played}
+    fx_names = sorted({n for _, _, _, _, h, a in fixtures for n in (h, a)})
+    mapping = _predict_mapping(fx_names, list(hist_names))
+
+    strengths, mu, home_adv, lg_deep = _team_strengths(db, league)
+    s_mapping = _predict_mapping(fx_names, list(strengths)) if strengths else {}
+
+    # per-club: recent form (newest first) and the venue split that actually
+    # applies to it in this fixture — a home side's home record, not its overall
+    form, venue = {}, {}
+    for fx_name in fx_names:
+        hist = mapping.get(fx_name)
+        if hist is None:
+            continue
+        rows = []
+        for season, mdate, home, away, hg, ag, hxg, axg in played:
+            if home == hist:
+                rows.append((season, [mdate, "h", away, hg, ag, hxg, axg]))
+            elif away == hist:
+                rows.append((season, [mdate, "a", home, ag, hg, axg, hxg]))
+        rows.reverse()
+        form[fx_name] = [r for _, r in rows[:FIXTURE_FORM]]
+        # venue records are this season only; form deliberately is not, so a
+        # club's last six carry over the summer instead of showing nothing.
+        # Season labels differ per league (Allsvenskan is a calendar year,
+        # the big five span two), so the club's own newest label is the anchor
+        latest = rows[0][0] if rows else None
+        split = {"h": [0, 0, 0, 0.0, 0.0], "a": [0, 0, 0, 0.0, 0.0]}
+        for season, (mdate, ha, opp, gf, ga, xg, xga) in rows:
+            if season != latest:
+                continue
+            rec = split[ha]
+            rec[0] += 1
+            rec[1] += gf
+            rec[2] += ga
+            rec[3] += xg
+            rec[4] += xga
+        venue[fx_name] = {
+            "season": _season_label(league, latest),
+            "h": [split["h"][0], split["h"][1], split["h"][2],
+                  round(split["h"][3], 1), round(split["h"][4], 1)],
+            "a": [split["a"][0], split["a"][1], split["a"][2],
+                  round(split["a"][3], 1), round(split["a"][4], 1)],
+        }
+
+    players = _fixture_players(db, league, fx_names)
+
+    out_fixtures, h2h = [], {}
+    for event_id, mdate, mtime, rnd, home, away in fixtures:
+        rec = {
+            "id": event_id, "date": (mdate or "")[:10], "time": (mtime or "")[:5],
+            "round": rnd, "home": home, "away": away,
+        }
+        sh, sa = s_mapping.get(home), s_mapping.get(away)
+        if sh and sa:
+            lam_h, lam_a, n_min = _fixture_lambdas(
+                strengths, mu, home_adv, lg_deep, sh, sa)
+            probs = _outcome_probs(lam_h, lam_a)
+            rec["p"] = [round(p, 4) for p in probs]
+            # the displayed integers are rounded here rather than in the
+            # browser: Python rounds a half to even and JavaScript rounds it
+            # up, so a 18.5% draw showed as 18% on the League tab and 19%
+            # here — the same model appearing to contradict itself
+            rec["pct"] = [int(f"{p * 100:.0f}") for p in probs]
+            rec["lam"] = [round(lam_h, 2), round(lam_a, 2)]
+            rec["n"] = n_min
+        else:
+            # a promoted club with no top-flight xG history: say so rather
+            # than showing an invented probability
+            rec["nohist"] = [n for n in (home, away) if not s_mapping.get(n)]
+        hh, ha_ = mapping.get(home), mapping.get(away)
+        if hh and ha_:
+            meetings = [
+                [m[1], m[2] == hh, m[4], m[5], m[6], m[7]]
+                for m in played
+                if {m[2], m[3]} == {hh, ha_}
+            ]
+            if meetings:
+                key = f"{home}|{away}"
+                h2h[key] = list(reversed(meetings))[:FIXTURE_H2H]
+                rec["h2h"] = key
+        out_fixtures.append(rec)
+
+    return {"fixtures": out_fixtures, "form": form, "venue": venue,
+            "players": players, "h2h": h2h}
+
+
 def team_compare(teams_by_lg, tm_by_lg):
     if not any(teams_by_lg.values()):
         return ""
@@ -2939,6 +3208,63 @@ def team_compare(teams_by_lg, tm_by_lg):
         "now</em>, and what happened when they actually met.</p>"
     )
     return block("Team comparison", body, about)
+
+
+def fixtures_panel(db, leagues):
+    data = {lg: load_fixture_data(db, lg) for lg in leagues}
+    data = {lg: d for lg, d in data.items() if d}
+    if not data:
+        return ""
+    payload = json.dumps(
+        data, ensure_ascii=False, separators=(",", ":")
+    ).replace("</", "<\\/")
+    body = (
+        "<div class='controls'><select id='fx-pick'></select>"
+        "<button id='fx-prev' type='button'>‹ Prev</button>"
+        "<button id='fx-next' type='button'>Next ›</button></div>"
+        "<div class='chart-card' id='fx-card'></div>"
+        f"<script>const FIXTURES_BY_LG = {payload};</script>"
+    )
+    about = (
+        "<p><strong>What it shows.</strong> One upcoming fixture at a time, with "
+        "everything the site knows about the two clubs gathered in one place: the "
+        "model's win/draw/win call, both sides' recent form in results "
+        "<em>and</em> in chance quality, their past meetings, the venue split that "
+        "actually applies to this match, and each squad's leading attackers.</p>"
+        "<p><strong>The verdict</strong> is the same Poisson model as the "
+        "Predictions block on the League tab, reading from the same numbers — the "
+        "two can never disagree about a match. Its caveats apply here in full: no "
+        "transfers, no injuries, no suspensions, no new managers.</p>"
+        "<p><strong>Form</strong> is the last six matches, newest first, with the "
+        "score and both sides' xG that day. It deliberately reaches back across "
+        "the summer rather than showing an empty strip in August — a club's last "
+        "six competitive matches are still the best short-term evidence there is, "
+        "even if some were played in May. <strong>By venue</strong> shows each club "
+        "at the venue it will actually be at — the home side's home record against "
+        "the visitors' away record — over a single season, named in the heading. In "
+        "August that is still last season for a club that has not kicked off yet, "
+        "and the two sides of a fixture can even be anchored to different seasons; "
+        "the heading says which rather than calling it all 'this season'. The same "
+        "goes for <strong>leading attackers</strong>, labelled per club, which falls "
+        "back to the last completed season until this one has enough minutes in it "
+        "to mean anything.</p>"
+        "<p><strong>Head-to-head</strong> reaches back as far as the xG data goes "
+        "— up to twelve seasons — and gives each meeting's score alongside what "
+        "the chances were worth. A club that keeps losing these while winning the "
+        "xG is a different story from one that is simply outplayed. Meetings in "
+        "other competitions are not here; this is league data only.</p>"
+        "<p><strong>What's missing is marked.</strong> A promoted club has no "
+        "top-flight xG history, so the model declines to predict its fixtures "
+        "rather than inventing a number, and its form and head-to-head sections "
+        "say so instead of showing an empty table.</p>"
+    )
+    return (
+        "<h2>Upcoming fixtures</h2>"
+        "<p class='meta'>Pick a fixture to see both clubs side by side — the "
+        "model's call, recent form in results and in xG, past meetings, venue "
+        "splits and each squad's leading attackers.</p>"
+        + block("Fixture explorer", body, about)
+    )
 
 
 EXPLORER_JS = """
@@ -3624,6 +3950,191 @@ EXPLORER_JS = """
   document.addEventListener('leaguechange', build);
 })();
 
+(function () {  // fixture explorer
+  if (typeof FIXTURES_BY_LG === 'undefined') return;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const card = $('fx-card'), pick = $('fx-pick');
+  if (!card || !pick) return;
+  let D = null, idx = 0;
+
+  const num = (v, d) => (v == null ? '\\u2013' : Number(v).toFixed(d));
+  const sign = (v, d) => (v > 0 ? '+' : '') + num(v, d).replace('-', '\\u2212');
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function shortDate(iso) {
+    const p = String(iso || '').split('-');
+    if (p.length < 3) return iso || '';
+    return Number(p[2]) + ' ' + MONTHS[Number(p[1]) - 1] + ' ' + p[0].slice(2);
+  }
+  // W/D/L from the perspective of the row's team
+  const outcome = (gf, ga) => (gf > ga ? 'W' : gf < ga ? 'L' : 'D');
+
+  function verdict(f) {
+    if (!f.p) {
+      const who = (f.nohist || []).map(esc).join(' and ');
+      return "<div class='fx-noverdict'>No forecast for this one \\u2014 " + who +
+        ' ' + ((f.nohist || []).length > 1 ? 'have' : 'has') +
+        ' no top-flight xG history yet, so the model has nothing to build a ' +
+        'strength estimate from. It declines rather than guessing.</div>';
+    }
+    const [h, d, a] = f.p, pc = f.pct;
+    const seg = (cls, share, whole) => "<i class='" + cls + "' style='width:" +
+      (share * 100).toFixed(1) + "%'>" + (share >= 0.15 ? whole + '%' : '') + '</i>';
+    return "<div class='fx-verdict'>" +
+      "<div class='prob' title='" + esc(f.home) + ' ' + pc[0] +
+        '% \\u00b7 draw ' + pc[1] + '% \\u00b7 ' + esc(f.away) + ' ' +
+        pc[2] + "%'>" + seg('h', h, pc[0]) + seg('d', d, pc[1]) + seg('a', a, pc[2]) + '</div>' +
+      "<p class='meta'>Expected goals <b>" + num(f.lam[0], 1) + '\\u2013' +
+        num(f.lam[1], 1) + '</b> \\u00b7 built on at least ' + f.n +
+        ' matches per side \\u00b7 <span class="dim">a model, not a promise</span></p>' +
+      '</div>';
+  }
+
+  function formStrip(name) {
+    const rows = (D.form || {})[name] || [];
+    if (!rows.length) {
+      return "<p class='dim fx-none'>No stored match history for " + esc(name) + '.</p>';
+    }
+    let out = "<table class='fx-form'><tbody>";
+    rows.forEach((r) => {
+      const [date, ha, opp, gf, ga, xg, xga] = r;
+      const res = outcome(gf, ga);
+      out += '<tr><td>' + "<span class='chip " + res + "'>" + res + '</span></td>' +
+        "<td class='dim'>" + shortDate(date) + '</td>' +
+        "<td class='dim'>" + (ha === 'h' ? 'H' : 'A') + '</td>' +
+        "<td class='fx-grow'>" + esc(opp) + '</td>' +
+        "<td class='num score'>" + gf + '\\u2013' + ga + '</td>' +
+        "<td class='num dim' title='expected goals that day'>" +
+          num(xg, 2) + '\\u2013' + num(xga, 2) + '</td></tr>';
+    });
+    return out + '</tbody></table>';
+  }
+
+  function venueBox(name, side) {
+    const rec = (D.venue || {})[name] || {};
+    const v = rec[side];
+    const label = side === 'h' ? 'at home' : 'away';
+    if (!v || !v[0]) {
+      return "<p class='dim fx-none'>No matches " + label + ' in ' +
+        esc(rec.season || 'the stored season') + '.</p>';
+    }
+    const [mp, gf, ga, xg, xga] = v;
+    return "<div class='pd-totals'>" +
+      "<div><span class='pd-tv'>" + mp + "</span><span class='pd-tl'>" + label + '</span></div>' +
+      "<div><span class='pd-tv'>" + (gf / mp).toFixed(2) + "</span><span class='pd-tl'>goals</span></div>" +
+      "<div><span class='pd-tv'>" + (ga / mp).toFixed(2) + "</span><span class='pd-tl'>conceded</span></div>" +
+      "<div><span class='pd-tv'>" + (xg / mp).toFixed(2) + "</span><span class='pd-tl'>xG</span></div>" +
+      "<div><span class='pd-tv'>" + (xga / mp).toFixed(2) + "</span><span class='pd-tl'>xGA</span></div>" +
+      '</div>';
+  }
+
+  function h2hBlock(f) {
+    const rows = f.h2h ? (D.h2h || {})[f.h2h] || [] : [];
+    if (!rows.length) {
+      return "<p class='dim fx-none'>No previous league meeting in the stored data " +
+        '\\u2014 a first meeting at this level, or one of the clubs has no xG history yet.</p>';
+    }
+    let w = 0, dr = 0, l = 0;
+    rows.forEach((r) => {
+      // r = [date, homeIsFixtureHome, homeGoals, awayGoals, homeXg, awayXg]
+      const [, isHome, hg, ag] = r;
+      const gf = isHome ? hg : ag, ga = isHome ? ag : hg;
+      if (gf > ga) w++; else if (gf < ga) l++; else dr++;
+    });
+    let out = "<p class='meta'><b>" + esc(f.home) + '</b> ' + w + 'W ' + dr + 'D ' + l +
+      'L <span class=dim>in the last ' + rows.length +
+      (rows.length === 1 ? ' league meeting' : ' league meetings') + '</span></p>' +
+      "<table class='fx-form fx-h2h'><tbody>";
+    rows.forEach((r) => {
+      const [date, isHome, hg, ag, hxg, axg] = r;
+      const gf = isHome ? hg : ag, ga = isHome ? ag : hg;
+      const res = outcome(gf, ga);
+      const homeName = isHome ? f.home : f.away, awayName = isHome ? f.away : f.home;
+      out += '<tr>' + "<td><span class='chip " + res + "'>" + res + '</span></td>' +
+        "<td class='dim'>" + shortDate(date) + '</td>' +
+        "<td style='text-align:right'>" + esc(homeName) + '</td>' +
+        "<td class='num score'>" + hg + '\\u2013' + ag + '</td>' +
+        '<td>' + esc(awayName) + '</td>' +
+        "<td class='num dim' title='expected goals that day'>" +
+          num(hxg, 2) + '\\u2013' + num(axg, 2) + '</td></tr>';
+    });
+    return out + '</tbody></table>';
+  }
+
+  function playerBox(name) {
+    const rec = (D.players || {})[name] || {};
+    const rows = rec.rows || [];
+    if (!rows.length) {
+      return "<p class='dim fx-none'>No player data stored for " + esc(name) + ' yet.</p>';
+    }
+    let out = rec.season
+      ? "<p class='meta fx-season'>" + esc(rec.season) + '</p>' : '';
+    out += "<table class='fx-form'><thead><tr><th class='fx-grow'>Player</th>" +
+      "<th class='num'>Min</th><th class='num'>G</th><th class='num'>xG</th>" +
+      "<th class='num'>A</th><th class='num'>xA</th></tr></thead><tbody>";
+    rows.forEach((p) => {
+      out += "<tr><td class='fx-grow'>" + esc(p[0]) + "</td><td class='num dim'>" + p[1] +
+        "</td><td class='num'>" + p[2] + "</td><td class='num dim'>" + num(p[3], 1) +
+        "</td><td class='num'>" + p[4] + "</td><td class='num dim'>" + num(p[5], 1) +
+        '</td></tr>';
+    });
+    return out + '</tbody></table>';
+  }
+
+  function render() {
+    const f = (D && D.fixtures || [])[idx];
+    if (!f) { card.innerHTML = "<p class='dim'>No upcoming fixtures stored for this league.</p>"; return; }
+    const when = shortDate(f.date) + (f.time ? ' \\u00b7 ' + f.time : '') +
+      (f.round ? ' \\u00b7 Round ' + f.round : '');
+    const pair = (title, left, right) =>
+      "<h4 class='fx-h'>" + title + '</h4>' +
+      "<div class='fx-cols'><div>" + left + '</div><div>' + right + '</div></div>';
+    const heads = "<div class='fx-cols fx-names'><div>" + esc(f.home) +
+      " <span class='dim'>(home)</span></div><div>" + esc(f.away) +
+      " <span class='dim'>(away)</span></div></div>";
+    // the two clubs can be anchored to different seasons in August, so the
+    // venue heading names the season(s) rather than claiming "this season"
+    const vs = [f.home, f.away]
+      .map((n) => ((D.venue || {})[n] || {}).season)
+      .filter(Boolean);
+    const vlabel = 'By venue' + (vs.length
+      ? ' \\u2014 ' + esc(vs[0] === vs[1] ? vs[0] : vs.join(' / ')) : '');
+    card.innerHTML =
+      "<div class='fx-head'><h4>" + esc(f.home) + " <span class='dim'>v</span> " +
+        esc(f.away) + "</h4><span class='dim'>" + esc(when) + '</span></div>' +
+      verdict(f) +
+      heads +
+      pair('Recent form \\u2014 last six, newest first', formStrip(f.home), formStrip(f.away)) +
+      pair(vlabel, venueBox(f.home, 'h'), venueBox(f.away, 'a')) +
+      "<h4 class='fx-h'>Head to head</h4>" + h2hBlock(f) +
+      pair('Leading attackers', playerBox(f.home), playerBox(f.away));
+  }
+
+  function rebuild() {
+    D = FIXTURES_BY_LG[window.CUR_LG] || null;
+    idx = 0;
+    const list = (D && D.fixtures) || [];
+    pick.innerHTML = list.map((f, i) =>
+      '<option value=' + i + '>' + esc(shortDate(f.date)) + ' \\u2014 ' +
+      esc(f.home) + ' v ' + esc(f.away) + '</option>').join('');
+    pick.disabled = !list.length;
+    render();
+  }
+  function step(by) {
+    const list = (D && D.fixtures) || [];
+    if (!list.length) return;
+    idx = (idx + by + list.length) % list.length;
+    pick.value = idx;
+    render();
+  }
+  pick.addEventListener('change', () => { idx = Number(pick.value) || 0; render(); });
+  $('fx-prev').addEventListener('click', () => step(-1));
+  $('fx-next').addEventListener('click', () => step(1));
+  document.addEventListener('leaguechange', rebuild);
+  rebuild();
+})();
+
 (function () {  // back-to-top button
   const btn = document.createElement('button');
   btn.id = 'to-top';
@@ -4128,6 +4639,9 @@ def build_page(db, nav, generated, archive_label=None):
         panels.append(("league", "League", "".join(
             lgview(lg, league_section(db, lg), i == 0) for i, lg in enumerate(leagues)
         )))
+        fixtures = fixtures_panel(db, leagues)
+        if fixtures:
+            panels.append(("fixtures", "Fixtures", fixtures))
         if preseason_available(db):
             panels.append(("preseason", "Preseason", preseason_panel(db, leagues)))
     if understat_available(db):

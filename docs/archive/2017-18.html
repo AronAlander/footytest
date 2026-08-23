@@ -305,6 +305,36 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 .prob i.h { background: var(--accent); }
 .prob i.d { background: var(--draw); }
 .prob i.a { background: var(--away); }
+.fx-head { display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; flex-wrap: wrap; margin: 2px 2px 12px; }
+.fx-head h4 { margin: 0; font-size: 19px; }
+.fx-verdict { margin: 0 2px 6px; }
+.fx-verdict .prob { height: 22px; }
+.fx-noverdict { border: 1px solid var(--border); border-left: 3px solid var(--draw);
+  background: var(--surface); border-radius: 6px; padding: 9px 12px; margin: 0 2px 6px;
+  font-size: 13.5px; color: var(--text-secondary); }
+.fx-names { font-weight: 600; margin: 16px 0 0; }
+.fx-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-secondary); margin: 18px 2px 6px; font-weight: 600; }
+.fx-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
+.fx-none { font-size: 13px; margin: 4px 2px; }
+.fx-form { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fx-form td, .fx-form th { padding: 3px 6px; border-bottom: 1px solid var(--border);
+  white-space: nowrap; }
+.fx-form th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-secondary); text-align: left; }
+.fx-form tr:last-child td { border-bottom: 0; }
+/* the one column carrying a name absorbs the slack; everything else is a
+   chip, a date or a number and stays as narrow as its content */
+.fx-form td, .fx-form th { width: 1%; }
+.fx-form .fx-grow { width: 100%; }
+.fx-season { margin: 0 2px 4px; font-size: 12px; }
+/* head-to-head is one full-width table, so pin the middle columns together
+   instead of letting the club names drift to opposite edges */
+.fx-h2h { max-width: 640px; }
+.fx-h2h td:nth-child(3) { width: 40%; text-align: right; }
+.fx-h2h td:nth-child(5) { width: 40%; }
+@media (max-width: 720px) { .fx-cols { grid-template-columns: 1fr; } }
 .pdot {
   display: inline-block; width: 10px; height: 10px; border-radius: 50%;
   vertical-align: -1px; margin-right: 4px;
@@ -1064,6 +1094,191 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2017-08-20","a",3,0,2.09,0.3,1.03,3],
   }
   build();
   document.addEventListener('leaguechange', build);
+})();
+
+(function () {  // fixture explorer
+  if (typeof FIXTURES_BY_LG === 'undefined') return;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const card = $('fx-card'), pick = $('fx-pick');
+  if (!card || !pick) return;
+  let D = null, idx = 0;
+
+  const num = (v, d) => (v == null ? '\u2013' : Number(v).toFixed(d));
+  const sign = (v, d) => (v > 0 ? '+' : '') + num(v, d).replace('-', '\u2212');
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function shortDate(iso) {
+    const p = String(iso || '').split('-');
+    if (p.length < 3) return iso || '';
+    return Number(p[2]) + ' ' + MONTHS[Number(p[1]) - 1] + ' ' + p[0].slice(2);
+  }
+  // W/D/L from the perspective of the row's team
+  const outcome = (gf, ga) => (gf > ga ? 'W' : gf < ga ? 'L' : 'D');
+
+  function verdict(f) {
+    if (!f.p) {
+      const who = (f.nohist || []).map(esc).join(' and ');
+      return "<div class='fx-noverdict'>No forecast for this one \u2014 " + who +
+        ' ' + ((f.nohist || []).length > 1 ? 'have' : 'has') +
+        ' no top-flight xG history yet, so the model has nothing to build a ' +
+        'strength estimate from. It declines rather than guessing.</div>';
+    }
+    const [h, d, a] = f.p, pc = f.pct;
+    const seg = (cls, share, whole) => "<i class='" + cls + "' style='width:" +
+      (share * 100).toFixed(1) + "%'>" + (share >= 0.15 ? whole + '%' : '') + '</i>';
+    return "<div class='fx-verdict'>" +
+      "<div class='prob' title='" + esc(f.home) + ' ' + pc[0] +
+        '% \u00b7 draw ' + pc[1] + '% \u00b7 ' + esc(f.away) + ' ' +
+        pc[2] + "%'>" + seg('h', h, pc[0]) + seg('d', d, pc[1]) + seg('a', a, pc[2]) + '</div>' +
+      "<p class='meta'>Expected goals <b>" + num(f.lam[0], 1) + '\u2013' +
+        num(f.lam[1], 1) + '</b> \u00b7 built on at least ' + f.n +
+        ' matches per side \u00b7 <span class="dim">a model, not a promise</span></p>' +
+      '</div>';
+  }
+
+  function formStrip(name) {
+    const rows = (D.form || {})[name] || [];
+    if (!rows.length) {
+      return "<p class='dim fx-none'>No stored match history for " + esc(name) + '.</p>';
+    }
+    let out = "<table class='fx-form'><tbody>";
+    rows.forEach((r) => {
+      const [date, ha, opp, gf, ga, xg, xga] = r;
+      const res = outcome(gf, ga);
+      out += '<tr><td>' + "<span class='chip " + res + "'>" + res + '</span></td>' +
+        "<td class='dim'>" + shortDate(date) + '</td>' +
+        "<td class='dim'>" + (ha === 'h' ? 'H' : 'A') + '</td>' +
+        "<td class='fx-grow'>" + esc(opp) + '</td>' +
+        "<td class='num score'>" + gf + '\u2013' + ga + '</td>' +
+        "<td class='num dim' title='expected goals that day'>" +
+          num(xg, 2) + '\u2013' + num(xga, 2) + '</td></tr>';
+    });
+    return out + '</tbody></table>';
+  }
+
+  function venueBox(name, side) {
+    const rec = (D.venue || {})[name] || {};
+    const v = rec[side];
+    const label = side === 'h' ? 'at home' : 'away';
+    if (!v || !v[0]) {
+      return "<p class='dim fx-none'>No matches " + label + ' in ' +
+        esc(rec.season || 'the stored season') + '.</p>';
+    }
+    const [mp, gf, ga, xg, xga] = v;
+    return "<div class='pd-totals'>" +
+      "<div><span class='pd-tv'>" + mp + "</span><span class='pd-tl'>" + label + '</span></div>' +
+      "<div><span class='pd-tv'>" + (gf / mp).toFixed(2) + "</span><span class='pd-tl'>goals</span></div>" +
+      "<div><span class='pd-tv'>" + (ga / mp).toFixed(2) + "</span><span class='pd-tl'>conceded</span></div>" +
+      "<div><span class='pd-tv'>" + (xg / mp).toFixed(2) + "</span><span class='pd-tl'>xG</span></div>" +
+      "<div><span class='pd-tv'>" + (xga / mp).toFixed(2) + "</span><span class='pd-tl'>xGA</span></div>" +
+      '</div>';
+  }
+
+  function h2hBlock(f) {
+    const rows = f.h2h ? (D.h2h || {})[f.h2h] || [] : [];
+    if (!rows.length) {
+      return "<p class='dim fx-none'>No previous league meeting in the stored data " +
+        '\u2014 a first meeting at this level, or one of the clubs has no xG history yet.</p>';
+    }
+    let w = 0, dr = 0, l = 0;
+    rows.forEach((r) => {
+      // r = [date, homeIsFixtureHome, homeGoals, awayGoals, homeXg, awayXg]
+      const [, isHome, hg, ag] = r;
+      const gf = isHome ? hg : ag, ga = isHome ? ag : hg;
+      if (gf > ga) w++; else if (gf < ga) l++; else dr++;
+    });
+    let out = "<p class='meta'><b>" + esc(f.home) + '</b> ' + w + 'W ' + dr + 'D ' + l +
+      'L <span class=dim>in the last ' + rows.length +
+      (rows.length === 1 ? ' league meeting' : ' league meetings') + '</span></p>' +
+      "<table class='fx-form fx-h2h'><tbody>";
+    rows.forEach((r) => {
+      const [date, isHome, hg, ag, hxg, axg] = r;
+      const gf = isHome ? hg : ag, ga = isHome ? ag : hg;
+      const res = outcome(gf, ga);
+      const homeName = isHome ? f.home : f.away, awayName = isHome ? f.away : f.home;
+      out += '<tr>' + "<td><span class='chip " + res + "'>" + res + '</span></td>' +
+        "<td class='dim'>" + shortDate(date) + '</td>' +
+        "<td style='text-align:right'>" + esc(homeName) + '</td>' +
+        "<td class='num score'>" + hg + '\u2013' + ag + '</td>' +
+        '<td>' + esc(awayName) + '</td>' +
+        "<td class='num dim' title='expected goals that day'>" +
+          num(hxg, 2) + '\u2013' + num(axg, 2) + '</td></tr>';
+    });
+    return out + '</tbody></table>';
+  }
+
+  function playerBox(name) {
+    const rec = (D.players || {})[name] || {};
+    const rows = rec.rows || [];
+    if (!rows.length) {
+      return "<p class='dim fx-none'>No player data stored for " + esc(name) + ' yet.</p>';
+    }
+    let out = rec.season
+      ? "<p class='meta fx-season'>" + esc(rec.season) + '</p>' : '';
+    out += "<table class='fx-form'><thead><tr><th class='fx-grow'>Player</th>" +
+      "<th class='num'>Min</th><th class='num'>G</th><th class='num'>xG</th>" +
+      "<th class='num'>A</th><th class='num'>xA</th></tr></thead><tbody>";
+    rows.forEach((p) => {
+      out += "<tr><td class='fx-grow'>" + esc(p[0]) + "</td><td class='num dim'>" + p[1] +
+        "</td><td class='num'>" + p[2] + "</td><td class='num dim'>" + num(p[3], 1) +
+        "</td><td class='num'>" + p[4] + "</td><td class='num dim'>" + num(p[5], 1) +
+        '</td></tr>';
+    });
+    return out + '</tbody></table>';
+  }
+
+  function render() {
+    const f = (D && D.fixtures || [])[idx];
+    if (!f) { card.innerHTML = "<p class='dim'>No upcoming fixtures stored for this league.</p>"; return; }
+    const when = shortDate(f.date) + (f.time ? ' \u00b7 ' + f.time : '') +
+      (f.round ? ' \u00b7 Round ' + f.round : '');
+    const pair = (title, left, right) =>
+      "<h4 class='fx-h'>" + title + '</h4>' +
+      "<div class='fx-cols'><div>" + left + '</div><div>' + right + '</div></div>';
+    const heads = "<div class='fx-cols fx-names'><div>" + esc(f.home) +
+      " <span class='dim'>(home)</span></div><div>" + esc(f.away) +
+      " <span class='dim'>(away)</span></div></div>";
+    // the two clubs can be anchored to different seasons in August, so the
+    // venue heading names the season(s) rather than claiming "this season"
+    const vs = [f.home, f.away]
+      .map((n) => ((D.venue || {})[n] || {}).season)
+      .filter(Boolean);
+    const vlabel = 'By venue' + (vs.length
+      ? ' \u2014 ' + esc(vs[0] === vs[1] ? vs[0] : vs.join(' / ')) : '');
+    card.innerHTML =
+      "<div class='fx-head'><h4>" + esc(f.home) + " <span class='dim'>v</span> " +
+        esc(f.away) + "</h4><span class='dim'>" + esc(when) + '</span></div>' +
+      verdict(f) +
+      heads +
+      pair('Recent form \u2014 last six, newest first', formStrip(f.home), formStrip(f.away)) +
+      pair(vlabel, venueBox(f.home, 'h'), venueBox(f.away, 'a')) +
+      "<h4 class='fx-h'>Head to head</h4>" + h2hBlock(f) +
+      pair('Leading attackers', playerBox(f.home), playerBox(f.away));
+  }
+
+  function rebuild() {
+    D = FIXTURES_BY_LG[window.CUR_LG] || null;
+    idx = 0;
+    const list = (D && D.fixtures) || [];
+    pick.innerHTML = list.map((f, i) =>
+      '<option value=' + i + '>' + esc(shortDate(f.date)) + ' \u2014 ' +
+      esc(f.home) + ' v ' + esc(f.away) + '</option>').join('');
+    pick.disabled = !list.length;
+    render();
+  }
+  function step(by) {
+    const list = (D && D.fixtures) || [];
+    if (!list.length) return;
+    idx = (idx + by + list.length) % list.length;
+    pick.value = idx;
+    render();
+  }
+  pick.addEventListener('change', () => { idx = Number(pick.value) || 0; render(); });
+  $('fx-prev').addEventListener('click', () => step(-1));
+  $('fx-next').addEventListener('click', () => step(1));
+  document.addEventListener('leaguechange', rebuild);
+  rebuild();
 })();
 
 (function () {  // back-to-top button
