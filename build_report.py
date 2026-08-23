@@ -371,6 +371,15 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .fx-head { display: flex; justify-content: space-between; align-items: baseline;
   gap: 12px; flex-wrap: wrap; margin: 2px 2px 12px; }
 .fx-head h4 { margin: 0; font-size: 19px; }
+.fx-score { font-variant-numeric: tabular-nums; padding: 0 4px; }
+.fx-xg { display: flex; align-items: baseline; gap: 10px; margin: 0 2px 4px;
+  font-size: 13.5px; color: var(--text-secondary); }
+.fx-xg b { font-size: 17px; color: var(--text-primary);
+  font-variant-numeric: tabular-nums; }
+.fx-grade { display: inline-block; padding: 1px 7px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 700; margin-left: 4px; color: #fff; }
+.fx-grade.ok { background: var(--win); }
+.fx-grade.no { background: var(--loss); }
 .fx-verdict { margin: 0 2px 6px; }
 .fx-verdict .prob { height: 22px; }
 .fx-noverdict { border: 1px solid var(--border); border-left: 3px solid var(--draw);
@@ -785,10 +794,11 @@ def matches_table(db, league, finished, limit=10):
     for match_date, rnd, home, hs, as_, away, event_id in rows:
         score = f"<span class='score'>{hs} – {as_}</span>" if hs is not None else "<span class='dim'>vs</span>"
         rnd_label = f"R{rnd}" if rnd else ""
-        # upcoming rows carry their id so the fixture explorer can open them;
-        # the explorer marks up only the ones it actually holds, so a played
-        # match or a fixture past its cutoff simply stays inert
-        fx = "" if finished else f" data-fx='{escape(str(event_id))}'"
+        # every row carries its id so the explorer can open it — an upcoming
+        # fixture as a preview, a played one as a match report. The explorer
+        # marks up only the ids it actually holds, so a match beyond either
+        # slate simply stays inert
+        fx = f" data-fx='{escape(str(event_id))}'"
         body += (
             f"<tr{fx}><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
             f"<td style='text-align:right'{_team_attr(home, tmap)}>{escape(home or '')}</td>"
@@ -2994,6 +3004,7 @@ def load_team_matches(db, league):
 # ---------------------------------------------------- fixture explorer data
 
 FIXTURES_SHOWN = PREDICT_SHOWN  # same slate as the Predictions block
+RESULTS_SHOWN = 10              # matches the Recent results table lists
 FIXTURE_FORM = 6                # recent matches shown per side
 FIXTURE_H2H = 8                 # past meetings shown
 FIXTURE_PLAYERS = 5             # top scorers/creators per side
@@ -3125,14 +3136,24 @@ def load_fixture_data(db, league):
            ORDER BY match_date, event_id LIMIT ?""",
         (league, date.today().isoformat(), FIXTURES_SHOWN),
     ).fetchall()
-    if not fixtures:
+    results = db.execute(
+        """SELECT event_id, match_date, match_time, round, home_team, away_team,
+                  home_score, away_score
+           FROM matches WHERE league = ? AND home_score IS NOT NULL
+           ORDER BY match_date DESC, event_id LIMIT ?""",
+        (league, RESULTS_SHOWN),
+    ).fetchall()
+    if not fixtures and not results:
         return None
 
     # fixture names come from TheSportsDB, the xG history from Understat or
     # FotMob; _predict_mapping is the same bridge the predictions use
     played = _resolved_matches(db, league)
     hist_names = {m[2] for m in played} | {m[3] for m in played}
-    fx_names = sorted({n for _, _, _, _, h, a in fixtures for n in (h, a)})
+    fx_names = sorted(
+        {n for _, _, _, _, h, a in fixtures for n in (h, a)}
+        | {n for _, _, _, _, h, a, _, _ in results for n in (h, a)}
+    )
     mapping = _predict_mapping(fx_names, list(hist_names))
 
     strengths, mu, home_adv, lg_deep = _team_strengths(db, league)
@@ -3179,6 +3200,27 @@ def load_fixture_data(db, league):
     players = _fixture_players(db, league, fx_names)
 
     out_fixtures, h2h = [], {}
+
+    def add_h2h(rec, home, away, before=None):
+        """Attach past meetings between these two, newest first.
+
+        `before` drops meetings from that date on, so a match report shows
+        the history the two sides brought into it rather than including the
+        match being reported.
+        """
+        hh, ha_ = mapping.get(home), mapping.get(away)
+        if not (hh and ha_):
+            return
+        meetings = [
+            [m[1], m[2] == hh, m[4], m[5], m[6], m[7]]
+            for m in played
+            if {m[2], m[3]} == {hh, ha_} and (before is None or m[1] < before)
+        ]
+        if meetings:
+            key = f"{home}|{away}|{rec['id']}"
+            h2h[key] = list(reversed(meetings))[:FIXTURE_H2H]
+            rec["h2h"] = key
+
     for event_id, mdate, mtime, rnd, home, away in fixtures:
         rec = {
             "id": event_id, "date": (mdate or "")[:10], "time": (mtime or "")[:5],
@@ -3201,21 +3243,50 @@ def load_fixture_data(db, league):
             # a promoted club with no top-flight xG history: say so rather
             # than showing an invented probability
             rec["nohist"] = [n for n in (home, away) if not s_mapping.get(n)]
-        hh, ha_ = mapping.get(home), mapping.get(away)
-        if hh and ha_:
-            meetings = [
-                [m[1], m[2] == hh, m[4], m[5], m[6], m[7]]
-                for m in played
-                if {m[2], m[3]} == {hh, ha_}
-            ]
-            if meetings:
-                key = f"{home}|{away}"
-                h2h[key] = list(reversed(meetings))[:FIXTURE_H2H]
-                rec["h2h"] = key
+        add_h2h(rec, home, away)
         out_fixtures.append(rec)
 
-    return {"fixtures": out_fixtures, "form": form, "venue": venue,
-            "players": players, "h2h": h2h}
+    # ---- match reports for matches already played -----------------------
+    # the actual xG of a given match, keyed the way the results table names
+    # the clubs, so a report can say what the chances were worth on the day
+    xg_by_match = {}
+    for _, mdate, h, a, hg, ag, hxg, axg in played:
+        xg_by_match[(mdate, h, a)] = (hg, ag, hxg, axg)
+
+    logged = prediction_log.load()
+    out_results = []
+    for event_id, mdate, mtime, rnd, home, away, hg, ag in results:
+        day = (mdate or "")[:10]
+        rec = {
+            "id": event_id, "kind": "r", "date": day, "time": (mtime or "")[:5],
+            "round": rnd, "home": home, "away": away, "hg": hg, "ag": ag,
+        }
+        hit = xg_by_match.get((day, mapping.get(home), mapping.get(away)))
+        if hit:
+            # the score is taken from the xG feed's own row for the match, not
+            # from TheSportsDB, so the goals and the xG beside them always
+            # describe the same 90 minutes; a disagreement means the two feeds
+            # are describing different matches and the xG is left off
+            if hit[0] == hg and hit[1] == ag:
+                rec["hxg"], rec["axg"] = hit[2], hit[3]
+        # what the model said in advance, if this fixture was ever published
+        row = logged.get(str(event_id))
+        if row:
+            try:
+                probs = prediction_log.probabilities(row)
+                rec["p"] = [round(p, 4) for p in probs]
+                rec["pct"] = [int(f"{p * 100:.0f}") for p in probs]
+                rec["lam"] = [round(float(row["lam_home"]), 2),
+                              round(float(row["lam_away"]), 2)]
+                rec["first"] = row["first_seen"]
+                rec["last"] = row["last_seen"]
+            except (KeyError, TypeError, ValueError):
+                pass
+        add_h2h(rec, home, away, before=day)
+        out_results.append(rec)
+
+    return {"fixtures": out_fixtures, "results": out_results, "form": form,
+            "venue": venue, "players": players, "h2h": h2h}
 
 
 def team_compare(teams_by_lg, tm_by_lg):
@@ -3289,11 +3360,23 @@ def fixtures_panel(db, leagues):
         f"<script>const FIXTURES_BY_LG = {payload};</script>"
     )
     about = (
-        "<p><strong>What it shows.</strong> One upcoming fixture at a time, with "
-        "everything the site knows about the two clubs gathered in one place: the "
-        "model's win/draw/win call, both sides' recent form in results "
-        "<em>and</em> in chance quality, their past meetings, the venue split that "
-        "actually applies to this match, and each squad's leading attackers.</p>"
+        "<p><strong>What it shows.</strong> One match at a time, in either tense. "
+        "An <strong>upcoming fixture</strong> gets everything the site knows about "
+        "the two clubs gathered in one place: the model's win/draw/win call, both "
+        "sides' recent form in results <em>and</em> in chance quality, their past "
+        "meetings, the venue split that actually applies to this match, and each "
+        "squad's leading attackers.</p>"
+        "<p><strong>A match already played</strong> gets a report instead: the "
+        "score, what the chances were worth on the day, and — the part worth "
+        "coming for — <em>what this site said about it beforehand</em>, taken from "
+        "the call written down before kickoff and never edited since. It is marked "
+        "called it or missed on the day's actual result. A match that was never in "
+        "a predictions slate says so rather than inventing a retrospective opinion; "
+        "that is usually a promoted club with no top-flight xG history at the time. "
+        "Form and squad lists are deliberately left off a report — they would "
+        "describe the clubs now, not as they were then.</p>"
+        "<p>The head-to-head on a report stops <em>before</em> the match being "
+        "reported, so it shows the history the two sides actually brought into it.</p>"
         "<p><strong>The verdict</strong> is the same Poisson model as the "
         "Predictions block on the League tab, reading from the same numbers — the "
         "two can never disagree about a match. Its caveats apply here in full: no "
@@ -3322,11 +3405,11 @@ def fixtures_panel(db, leagues):
         "say so instead of showing an empty table.</p>"
     )
     return (
-        "<h2>Upcoming fixtures</h2>"
-        "<p class='meta'>Pick a fixture to see both clubs side by side — the "
-        "model's call, recent form in results and in xG, past meetings, venue "
-        "splits and each squad's leading attackers.</p>"
-        + block("Fixture explorer", body, about)
+        "<h2>Matches</h2>"
+        "<p class='meta'>Pick an upcoming fixture to see both clubs side by side, "
+        "or a match already played to see the score, what the chances were worth, "
+        "and what the model said about it beforehand.</p>"
+        + block("Match explorer", body, about)
     )
 
 
@@ -4049,7 +4132,9 @@ EXPLORER_JS = """
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const card = $('fx-card'), pick = $('fx-pick');
   if (!card || !pick) return;
-  let D = null, idx = 0;
+  // one list, both tenses: a played match renders as a report, an upcoming
+  // one as a preview, and the dropdown groups them under their own headings
+  let D = null, idx = 0, ENTRIES = [];
 
   const num = (v, d) => (v == null ? '\\u2013' : Number(v).toFixed(d));
   const sign = (v, d) => (v > 0 ? '+' : '') + num(v, d).replace('-', '\\u2212');
@@ -4175,9 +4260,76 @@ EXPLORER_JS = """
     return out + '</tbody></table>';
   }
 
+  // ---- match report, for a match already played ----------------------
+  function chanceVerdict(m) {
+    if (m.hxg == null || m.axg == null) return '';
+    const d = m.hxg - m.axg, EVEN = 0.3;
+    const won = m.hg > m.ag ? m.home : m.ag > m.hg ? m.away : null;
+    const better = d > EVEN ? m.home : d < -EVEN ? m.away : null;
+    let s;
+    if (!better) {
+      s = won ? esc(won) + ' won a match that was close on chance quality.'
+              : 'Level on the pitch and level on chance quality.';
+    } else if (!won) {
+      s = esc(better) + ' created the better chances but it finished level.';
+    } else if (better === won) {
+      s = esc(won) + ' created the better chances and won.';
+    } else {
+      s = esc(better) + ' created the better chances; ' + esc(won) + ' won anyway.';
+    }
+    return "<p class='meta'>" + s + ' <span class="dim">One match of xG is a ' +
+      'small sample \\u2014 chance quality describes the 90 minutes, it does not ' +
+      'award the points.</span></p>';
+  }
+
+  function callBox(m) {
+    if (!m.pct) {
+      return "<p class='dim fx-none'>No published call for this one \\u2014 it was " +
+        'never in a predictions slate, usually because a club had no top-flight ' +
+        'xG history at the time.</p>';
+    }
+    const outcome = m.hg > m.ag ? 0 : m.hg === m.ag ? 1 : 2;
+    const top = m.pct.indexOf(Math.max.apply(null, m.pct));
+    const names = [m.home, 'a draw', m.away];
+    const seg = (cls, share, whole) => "<i class='" + cls + "' style='width:" +
+      (share * 100).toFixed(1) + "%'>" + (share >= 0.15 ? whole + '%' : '') + '</i>';
+    const hit = top === outcome;
+    const badge = "<span class='fx-grade " + (hit ? 'ok' : 'no') + "'>" +
+      (hit ? 'called it' : 'missed') + '</span>';
+    const when = m.first
+      ? (m.first === m.last
+          ? 'written down on ' + shortDate(m.first)
+          : 'first called ' + shortDate(m.first) + ', last updated ' + shortDate(m.last))
+      : '';
+    return "<div class='prob'>" + seg('h', m.p[0], m.pct[0]) +
+      seg('d', m.p[1], m.pct[1]) + seg('a', m.p[2], m.pct[2]) + '</div>' +
+      "<p class='meta'>Leaned " + esc(names[top]) + ' at ' + m.pct[top] + '% ' + badge +
+      (m.lam ? " <span class='dim'>\\u00b7 forecast " + num(m.lam[0], 1) + '\\u2013' +
+        num(m.lam[1], 1) : "<span class='dim'>") +
+      (when ? ' \\u00b7 ' + when : '') + '</span></p>';
+  }
+
+  function renderResult(m) {
+    const when = shortDate(m.date) + (m.round ? ' \\u00b7 Round ' + m.round : '');
+    const xg = (m.hxg != null && m.axg != null)
+      ? "<div class='fx-xg'><span>Expected goals</span><b>" + num(m.hxg, 2) +
+        ' \\u2013 ' + num(m.axg, 2) + '</b></div>'
+      : "<p class='dim fx-none'>No xG stored for this match yet \\u2014 the feed " +
+        'usually catches up within a day.</p>';
+    card.innerHTML =
+      "<div class='fx-head'><h4>" + esc(m.home) + " <span class='fx-score'>" +
+        m.hg + ' \\u2013 ' + m.ag + '</span> ' + esc(m.away) +
+        "</h4><span class='dim'>" + esc(when) + '</span></div>' +
+      xg + chanceVerdict(m) +
+      "<h4 class='fx-h'>What the model said beforehand</h4>" + callBox(m) +
+      "<h4 class='fx-h'>Head to head before this match</h4>" + h2hBlock(m);
+  }
+
   function render() {
-    const f = (D && D.fixtures || [])[idx];
-    if (!f) { card.innerHTML = "<p class='dim'>No upcoming fixtures stored for this league.</p>"; return; }
+    const e = ENTRIES[idx];
+    if (!e) { card.innerHTML = "<p class='dim'>No matches stored for this league.</p>"; return; }
+    if (e.kind === 'r') return renderResult(e);
+    const f = e;
     const when = shortDate(f.date) + (f.time ? ' \\u00b7 ' + f.time : '') +
       (f.round ? ' \\u00b7 Round ' + f.round : '');
     const pair = (title, left, right) =>
@@ -4206,16 +4358,31 @@ EXPLORER_JS = """
 
   function rebuild() {
     D = FIXTURES_BY_LG[window.CUR_LG] || null;
-    idx = 0;
-    const list = (D && D.fixtures) || [];
-    pick.innerHTML = list.map((f, i) =>
-      '<option value=' + i + '>' + esc(shortDate(f.date)) + ' \\u2014 ' +
-      esc(f.home) + ' v ' + esc(f.away) + '</option>').join('');
-    pick.disabled = !list.length;
+    const results = (D && D.results) || [];
+    const fixtures = (D && D.fixtures) || [];
+    ENTRIES = results.concat(fixtures);
+    // open on the next fixture rather than an old result: the upcoming match
+    // is what someone arriving at this tab is usually after
+    idx = fixtures.length ? results.length : 0;
+    const opt = (e, i) => '<option value=' + i + '>' + esc(shortDate(e.date)) +
+      ' \\u2014 ' + esc(e.home) + (e.kind === 'r'
+        ? ' ' + e.hg + '\\u2013' + e.ag + ' ' : ' v ') + esc(e.away) + '</option>';
+    let html = '';
+    if (results.length) {
+      html += "<optgroup label='Recent results'>" +
+        results.map((e, i) => opt(e, i)).join('') + '</optgroup>';
+    }
+    if (fixtures.length) {
+      html += "<optgroup label='Upcoming fixtures'>" +
+        fixtures.map((e, i) => opt(e, results.length + i)).join('') + '</optgroup>';
+    }
+    pick.innerHTML = html;
+    pick.disabled = !ENTRIES.length;
+    pick.value = idx;
     render();
   }
   function step(by) {
-    const list = (D && D.fixtures) || [];
+    const list = ENTRIES;
     if (!list.length) return;
     idx = (idx + by + list.length) % list.length;
     pick.value = idx;
@@ -4225,9 +4392,12 @@ EXPLORER_JS = """
   $('fx-prev').addEventListener('click', () => step(-1));
   $('fx-next').addEventListener('click', () => step(1));
 
-  // ---- opening a fixture from the League tab -------------------------
-  const holds = (lg, id) => ((FIXTURES_BY_LG[lg] || {}).fixtures || [])
-    .some((f) => String(f.id) === String(id));
+  // ---- opening a match from the League tab ---------------------------
+  const entriesOf = (lg) => {
+    const d = FIXTURES_BY_LG[lg] || {};
+    return (d.results || []).concat(d.fixtures || []);
+  };
+  const holds = (lg, id) => entriesOf(lg).some((f) => String(f.id) === String(id));
 
   window.showFixture = function (league, id) {
     if (league && league !== window.CUR_LG) {
@@ -4240,8 +4410,7 @@ EXPLORER_JS = """
       });
       if (!moved && !FIXTURES_BY_LG[league]) return false;
     }
-    const list = (D && D.fixtures) || [];
-    const i = list.findIndex((f) => String(f.id) === String(id));
+    const i = ENTRIES.findIndex((f) => String(f.id) === String(id));
     if (i < 0) return false;
     if (window.showPanel) window.showPanel('fixtures');
     idx = i;
@@ -4350,7 +4519,10 @@ def league_section(db, league):
         + between_seasons_note(table_season, next_season, next_start)
         + standings_table(db, league, past)
         + home_away_table(db, league, past)
-        + block("Recent results" + past, matches_table(db, league, finished=True))
+        + block("Recent results" + past,
+                "<p class='meta fx-hint' hidden>Click a result to see the xG "
+                "behind it — and what the model said before kickoff.</p>"
+                + matches_table(db, league, finished=True))
         + block("Upcoming fixtures" + ahead,
                 # revealed client-side only where rows really are clickable,
                 # so it never promises a link the explorer cannot open
@@ -4832,7 +5004,7 @@ def build_page(db, nav, generated, archive_label=None):
         )))
         fixtures = fixtures_panel(db, leagues)
         if fixtures:
-            panels.append(("fixtures", "Fixtures", fixtures))
+            panels.append(("fixtures", "Matches", fixtures))
         if preseason_available(db):
             panels.append(("preseason", "Preseason", preseason_panel(db, leagues)))
     if understat_available(db):

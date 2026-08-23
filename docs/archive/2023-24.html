@@ -325,6 +325,15 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .fx-head { display: flex; justify-content: space-between; align-items: baseline;
   gap: 12px; flex-wrap: wrap; margin: 2px 2px 12px; }
 .fx-head h4 { margin: 0; font-size: 19px; }
+.fx-score { font-variant-numeric: tabular-nums; padding: 0 4px; }
+.fx-xg { display: flex; align-items: baseline; gap: 10px; margin: 0 2px 4px;
+  font-size: 13.5px; color: var(--text-secondary); }
+.fx-xg b { font-size: 17px; color: var(--text-primary);
+  font-variant-numeric: tabular-nums; }
+.fx-grade { display: inline-block; padding: 1px 7px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 700; margin-left: 4px; color: #fff; }
+.fx-grade.ok { background: var(--win); }
+.fx-grade.no { background: var(--loss); }
 .fx-verdict { margin: 0 2px 6px; }
 .fx-verdict .prob { height: 22px; }
 .fx-noverdict { border: 1px solid var(--border); border-left: 3px solid var(--draw);
@@ -1149,7 +1158,9 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const card = $('fx-card'), pick = $('fx-pick');
   if (!card || !pick) return;
-  let D = null, idx = 0;
+  // one list, both tenses: a played match renders as a report, an upcoming
+  // one as a preview, and the dropdown groups them under their own headings
+  let D = null, idx = 0, ENTRIES = [];
 
   const num = (v, d) => (v == null ? '\u2013' : Number(v).toFixed(d));
   const sign = (v, d) => (v > 0 ? '+' : '') + num(v, d).replace('-', '\u2212');
@@ -1275,9 +1286,76 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
     return out + '</tbody></table>';
   }
 
+  // ---- match report, for a match already played ----------------------
+  function chanceVerdict(m) {
+    if (m.hxg == null || m.axg == null) return '';
+    const d = m.hxg - m.axg, EVEN = 0.3;
+    const won = m.hg > m.ag ? m.home : m.ag > m.hg ? m.away : null;
+    const better = d > EVEN ? m.home : d < -EVEN ? m.away : null;
+    let s;
+    if (!better) {
+      s = won ? esc(won) + ' won a match that was close on chance quality.'
+              : 'Level on the pitch and level on chance quality.';
+    } else if (!won) {
+      s = esc(better) + ' created the better chances but it finished level.';
+    } else if (better === won) {
+      s = esc(won) + ' created the better chances and won.';
+    } else {
+      s = esc(better) + ' created the better chances; ' + esc(won) + ' won anyway.';
+    }
+    return "<p class='meta'>" + s + ' <span class="dim">One match of xG is a ' +
+      'small sample \u2014 chance quality describes the 90 minutes, it does not ' +
+      'award the points.</span></p>';
+  }
+
+  function callBox(m) {
+    if (!m.pct) {
+      return "<p class='dim fx-none'>No published call for this one \u2014 it was " +
+        'never in a predictions slate, usually because a club had no top-flight ' +
+        'xG history at the time.</p>';
+    }
+    const outcome = m.hg > m.ag ? 0 : m.hg === m.ag ? 1 : 2;
+    const top = m.pct.indexOf(Math.max.apply(null, m.pct));
+    const names = [m.home, 'a draw', m.away];
+    const seg = (cls, share, whole) => "<i class='" + cls + "' style='width:" +
+      (share * 100).toFixed(1) + "%'>" + (share >= 0.15 ? whole + '%' : '') + '</i>';
+    const hit = top === outcome;
+    const badge = "<span class='fx-grade " + (hit ? 'ok' : 'no') + "'>" +
+      (hit ? 'called it' : 'missed') + '</span>';
+    const when = m.first
+      ? (m.first === m.last
+          ? 'written down on ' + shortDate(m.first)
+          : 'first called ' + shortDate(m.first) + ', last updated ' + shortDate(m.last))
+      : '';
+    return "<div class='prob'>" + seg('h', m.p[0], m.pct[0]) +
+      seg('d', m.p[1], m.pct[1]) + seg('a', m.p[2], m.pct[2]) + '</div>' +
+      "<p class='meta'>Leaned " + esc(names[top]) + ' at ' + m.pct[top] + '% ' + badge +
+      (m.lam ? " <span class='dim'>\u00b7 forecast " + num(m.lam[0], 1) + '\u2013' +
+        num(m.lam[1], 1) : "<span class='dim'>") +
+      (when ? ' \u00b7 ' + when : '') + '</span></p>';
+  }
+
+  function renderResult(m) {
+    const when = shortDate(m.date) + (m.round ? ' \u00b7 Round ' + m.round : '');
+    const xg = (m.hxg != null && m.axg != null)
+      ? "<div class='fx-xg'><span>Expected goals</span><b>" + num(m.hxg, 2) +
+        ' \u2013 ' + num(m.axg, 2) + '</b></div>'
+      : "<p class='dim fx-none'>No xG stored for this match yet \u2014 the feed " +
+        'usually catches up within a day.</p>';
+    card.innerHTML =
+      "<div class='fx-head'><h4>" + esc(m.home) + " <span class='fx-score'>" +
+        m.hg + ' \u2013 ' + m.ag + '</span> ' + esc(m.away) +
+        "</h4><span class='dim'>" + esc(when) + '</span></div>' +
+      xg + chanceVerdict(m) +
+      "<h4 class='fx-h'>What the model said beforehand</h4>" + callBox(m) +
+      "<h4 class='fx-h'>Head to head before this match</h4>" + h2hBlock(m);
+  }
+
   function render() {
-    const f = (D && D.fixtures || [])[idx];
-    if (!f) { card.innerHTML = "<p class='dim'>No upcoming fixtures stored for this league.</p>"; return; }
+    const e = ENTRIES[idx];
+    if (!e) { card.innerHTML = "<p class='dim'>No matches stored for this league.</p>"; return; }
+    if (e.kind === 'r') return renderResult(e);
+    const f = e;
     const when = shortDate(f.date) + (f.time ? ' \u00b7 ' + f.time : '') +
       (f.round ? ' \u00b7 Round ' + f.round : '');
     const pair = (title, left, right) =>
@@ -1306,16 +1384,31 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
 
   function rebuild() {
     D = FIXTURES_BY_LG[window.CUR_LG] || null;
-    idx = 0;
-    const list = (D && D.fixtures) || [];
-    pick.innerHTML = list.map((f, i) =>
-      '<option value=' + i + '>' + esc(shortDate(f.date)) + ' \u2014 ' +
-      esc(f.home) + ' v ' + esc(f.away) + '</option>').join('');
-    pick.disabled = !list.length;
+    const results = (D && D.results) || [];
+    const fixtures = (D && D.fixtures) || [];
+    ENTRIES = results.concat(fixtures);
+    // open on the next fixture rather than an old result: the upcoming match
+    // is what someone arriving at this tab is usually after
+    idx = fixtures.length ? results.length : 0;
+    const opt = (e, i) => '<option value=' + i + '>' + esc(shortDate(e.date)) +
+      ' \u2014 ' + esc(e.home) + (e.kind === 'r'
+        ? ' ' + e.hg + '\u2013' + e.ag + ' ' : ' v ') + esc(e.away) + '</option>';
+    let html = '';
+    if (results.length) {
+      html += "<optgroup label='Recent results'>" +
+        results.map((e, i) => opt(e, i)).join('') + '</optgroup>';
+    }
+    if (fixtures.length) {
+      html += "<optgroup label='Upcoming fixtures'>" +
+        fixtures.map((e, i) => opt(e, results.length + i)).join('') + '</optgroup>';
+    }
+    pick.innerHTML = html;
+    pick.disabled = !ENTRIES.length;
+    pick.value = idx;
     render();
   }
   function step(by) {
-    const list = (D && D.fixtures) || [];
+    const list = ENTRIES;
     if (!list.length) return;
     idx = (idx + by + list.length) % list.length;
     pick.value = idx;
@@ -1325,9 +1418,12 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
   $('fx-prev').addEventListener('click', () => step(-1));
   $('fx-next').addEventListener('click', () => step(1));
 
-  // ---- opening a fixture from the League tab -------------------------
-  const holds = (lg, id) => ((FIXTURES_BY_LG[lg] || {}).fixtures || [])
-    .some((f) => String(f.id) === String(id));
+  // ---- opening a match from the League tab ---------------------------
+  const entriesOf = (lg) => {
+    const d = FIXTURES_BY_LG[lg] || {};
+    return (d.results || []).concat(d.fixtures || []);
+  };
+  const holds = (lg, id) => entriesOf(lg).some((f) => String(f.id) === String(id));
 
   window.showFixture = function (league, id) {
     if (league && league !== window.CUR_LG) {
@@ -1340,8 +1436,7 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2023-08-21","a",2,0,1.15,1.17,-0.03,3
       });
       if (!moved && !FIXTURES_BY_LG[league]) return false;
     }
-    const list = (D && D.fixtures) || [];
-    const i = list.findIndex((f) => String(f.id) === String(id));
+    const i = ENTRIES.findIndex((f) => String(f.id) === String(id));
     if (i < 0) return false;
     if (window.showPanel) window.showPanel('fixtures');
     idx = i;
