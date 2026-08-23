@@ -17,7 +17,7 @@ import sqlite3
 import unicodedata
 
 from bisect import bisect
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from html import escape, unescape
 from pathlib import Path
 
@@ -4703,12 +4703,79 @@ def build_page(db, nav, generated, archive_label=None):
     )
 
 
+STALE_HOURS = 18   # a nightly build fetches immediately before building, so
+                   # its data is minutes old. This only fires on a rebuild
+                   # that skipped the fetch, which is exactly the case worth
+                   # shouting about
+
+# every source that stamps its rows with a fetch time; standings carry
+# snapshot_date instead and move only when the table itself does
+FRESHNESS_TABLES = [
+    ("results and fixtures", "matches"),
+    ("Understat xG", "understat_team_matches"),
+    ("FotMob xG", "fotmob_team_matches"),
+    ("preseason friendlies", "preseason_matches"),
+]
+
+
+def stale_sources(db, now=None):
+    """(label, timestamp, age in hours) for each source older than STALE_HOURS.
+
+    Covers a gap --strict cannot: --strict aborts when a fetcher *fails*, but
+    nothing notices when a fetcher simply was not run. A rebuild from a
+    day-old database then republishes day-old numbers over fresher ones that
+    are already live, and every other check still passes — the build
+    succeeds, the safety greps pass, the page renders, and the 'Generated'
+    badge says today, because it records when the HTML was built and not how
+    old the data inside it is. That is precisely what happened on 2026-08-23:
+    a rebuild from a stale local copy erased Serie A's opening results from
+    the published page.
+
+    Checked per table rather than per league on purpose. A league that
+    returns no rows (Serie A had no Understat data at all for weeks into the
+    2026/27 season) never updates its own fetched_at, so per-league checks
+    would cry stale every night for a league that is simply not covered yet.
+    """
+    now = now or datetime.now(timezone.utc)
+    out = []
+    for label, table in FRESHNESS_TABLES:
+        try:
+            raw = db.execute(f"SELECT MAX(fetched_at) FROM main.{table}").fetchone()[0]
+        except sqlite3.Error:
+            continue      # table absent from this database entirely
+        if not raw:
+            continue      # never fetched: nothing to have gone stale
+        try:
+            stamp = datetime.fromisoformat(raw)
+        except (TypeError, ValueError):
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        age = (now - stamp).total_seconds() / 3600
+        if age > STALE_HOURS:
+            out.append((label, raw, age))
+    return out
+
+
+def warn_if_stale(db):
+    stale = stale_sources(db)
+    if not stale:
+        return
+    print(f"  ! stale data - these sources have not been fetched for over "
+          f"{STALE_HOURS}h:")
+    for label, raw, age in stale:
+        print(f"      {label}: last fetched {raw} ({age:.0f}h ago)")
+    print("    Publishing this build would overwrite the live page with data "
+          "older than it. Run `python update.py` first.")
+
+
 def main() -> None:
     if not DB_PATH.exists():
         raise SystemExit("No football.sqlite found - run `python fetch_data.py` first.")
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     db = sqlite3.connect(DB_PATH)
+    warn_if_stale(db)
     scope_to_current_season(db)
     html = build_page(db, season_nav(db), generated)
     REPORT_PATH.write_text(html, encoding="utf-8")
