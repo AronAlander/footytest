@@ -305,6 +305,14 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 .prob i.h { background: var(--accent); }
 .prob i.d { background: var(--draw); }
 .prob i.a { background: var(--away); }
+.changelog { margin: 12px 0 0; max-width: 780px; }
+.changelog > summary { font-size: 13.5px; }
+.cl-date { margin: 10px 0 4px; font-size: 12px; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--text-secondary); }
+.cl-date:first-child { margin-top: 2px; }
+.cl-list { margin: 0; padding-left: 18px; }
+.cl-list li { margin: 3px 0; font-size: 13.5px; color: var(--text-secondary); }
+.cl-list strong { color: var(--text-primary); }
 .team-link { cursor: pointer; }
 .team-link:hover { color: var(--accent); text-decoration: underline;
   text-underline-offset: 2px; }
@@ -628,6 +636,13 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
       parts.push('lg=' + window.CUR_LG.replace(/ /g, '_'));
     const active = document.querySelector("nav.tabs button[aria-selected='true']");
     if (active) parts.push(active.dataset.panel);
+    // which match is open, so a refresh or a pasted link comes back to it.
+    // Written only on the matches panel: the team deep link parses whatever
+    // follows lg=, and an m= trailing it there would end up inside a name
+    if (active && active.dataset.panel === 'fixtures' && window.currentMatch) {
+      const id = window.currentMatch();
+      if (id) parts.push('m=' + id);
+    }
     history.replaceState(null, '', '#' + parts.join('&'));
   };
   tabs.forEach((b) => b.addEventListener('click', () => {
@@ -1164,6 +1179,9 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
   // one list, both tenses: a played match renders as a report, an upcoming
   // one as a preview, and the dropdown groups them under their own headings
   let D = null, idx = 0, ENTRIES = [];
+  // a match named in the URL wins over the default, once, on the first build
+  const _m = /(?:^|&)m=([^&]+)/.exec(decodeURIComponent(location.hash.slice(1)));
+  let wanted = _m ? _m[1] : null;
 
   const num = (v, d) => (v == null ? '\u2013' : Number(v).toFixed(d));
   const sign = (v, d) => (v > 0 ? '+' : '') + num(v, d).replace('-', '\u2212');
@@ -1410,6 +1428,11 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
     // open on the next fixture rather than an old result: the upcoming match
     // is what someone arriving at this tab is usually after
     idx = fixtures.length ? results.length : 0;
+    if (wanted) {
+      const i = ENTRIES.findIndex((e) => String(e.id) === wanted);
+      if (i >= 0) idx = i;
+      wanted = null;   // only restores the once; a league switch starts fresh
+    }
     const opt = (e, i) => '<option value=' + i + '>' + esc(shortDate(e.date)) +
       ' \u2014 ' + esc(e.home) + (e.kind === 'r'
         ? ' ' + e.hg + '\u2013' + e.ag + ' ' : ' v ') + esc(e.away) + '</option>';
@@ -1426,15 +1449,26 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
     pick.disabled = !ENTRIES.length;
     pick.value = idx;
     render();
+    // the league switcher syncs the hash before it fires leaguechange, so
+    // without this the URL would still name the previous league's match
+    remember();
   }
+  window.currentMatch = () => (ENTRIES[idx] || {}).id || null;
+  const remember = () => { if (window.syncHash) window.syncHash(); };
+
   function step(by) {
     const list = ENTRIES;
     if (!list.length) return;
     idx = (idx + by + list.length) % list.length;
     pick.value = idx;
     render();
+    remember();
   }
-  pick.addEventListener('change', () => { idx = Number(pick.value) || 0; render(); });
+  pick.addEventListener('change', () => {
+    idx = Number(pick.value) || 0;
+    render();
+    remember();
+  });
   $('fx-prev').addEventListener('click', () => step(-1));
   $('fx-next').addEventListener('click', () => step(1));
 
@@ -1458,10 +1492,13 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2014-08-31","h",3,1,2.01,2.04,-0.03,3
     }
     const i = ENTRIES.findIndex((f) => String(f.id) === String(id));
     if (i < 0) return false;
-    if (window.showPanel) window.showPanel('fixtures');
     idx = i;
     pick.value = i;
     render();
+    // panel first would sync the hash before idx moved, writing the match
+    // that was open a moment ago
+    if (window.showPanel) window.showPanel('fixtures');
+    remember();
     card.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return true;
   };

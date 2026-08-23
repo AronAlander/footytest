@@ -351,6 +351,14 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 .prob i.h { background: var(--accent); }
 .prob i.d { background: var(--draw); }
 .prob i.a { background: var(--away); }
+.changelog { margin: 12px 0 0; max-width: 780px; }
+.changelog > summary { font-size: 13.5px; }
+.cl-date { margin: 10px 0 4px; font-size: 12px; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--text-secondary); }
+.cl-date:first-child { margin-top: 2px; }
+.cl-list { margin: 0; padding-left: 18px; }
+.cl-list li { margin: 3px 0; font-size: 13.5px; color: var(--text-secondary); }
+.cl-list strong { color: var(--text-primary); }
 .team-link { cursor: pointer; }
 .team-link:hover { color: var(--accent); text-decoration: underline;
   text-underline-offset: 2px; }
@@ -3615,6 +3623,13 @@ EXPLORER_JS = """
       parts.push('lg=' + window.CUR_LG.replace(/ /g, '_'));
     const active = document.querySelector("nav.tabs button[aria-selected='true']");
     if (active) parts.push(active.dataset.panel);
+    // which match is open, so a refresh or a pasted link comes back to it.
+    // Written only on the matches panel: the team deep link parses whatever
+    // follows lg=, and an m= trailing it there would end up inside a name
+    if (active && active.dataset.panel === 'fixtures' && window.currentMatch) {
+      const id = window.currentMatch();
+      if (id) parts.push('m=' + id);
+    }
     history.replaceState(null, '', '#' + parts.join('&'));
   };
   tabs.forEach((b) => b.addEventListener('click', () => {
@@ -4151,6 +4166,9 @@ EXPLORER_JS = """
   // one list, both tenses: a played match renders as a report, an upcoming
   // one as a preview, and the dropdown groups them under their own headings
   let D = null, idx = 0, ENTRIES = [];
+  // a match named in the URL wins over the default, once, on the first build
+  const _m = /(?:^|&)m=([^&]+)/.exec(decodeURIComponent(location.hash.slice(1)));
+  let wanted = _m ? _m[1] : null;
 
   const num = (v, d) => (v == null ? '\\u2013' : Number(v).toFixed(d));
   const sign = (v, d) => (v > 0 ? '+' : '') + num(v, d).replace('-', '\\u2212');
@@ -4397,6 +4415,11 @@ EXPLORER_JS = """
     // open on the next fixture rather than an old result: the upcoming match
     // is what someone arriving at this tab is usually after
     idx = fixtures.length ? results.length : 0;
+    if (wanted) {
+      const i = ENTRIES.findIndex((e) => String(e.id) === wanted);
+      if (i >= 0) idx = i;
+      wanted = null;   // only restores the once; a league switch starts fresh
+    }
     const opt = (e, i) => '<option value=' + i + '>' + esc(shortDate(e.date)) +
       ' \\u2014 ' + esc(e.home) + (e.kind === 'r'
         ? ' ' + e.hg + '\\u2013' + e.ag + ' ' : ' v ') + esc(e.away) + '</option>';
@@ -4413,15 +4436,26 @@ EXPLORER_JS = """
     pick.disabled = !ENTRIES.length;
     pick.value = idx;
     render();
+    // the league switcher syncs the hash before it fires leaguechange, so
+    // without this the URL would still name the previous league's match
+    remember();
   }
+  window.currentMatch = () => (ENTRIES[idx] || {}).id || null;
+  const remember = () => { if (window.syncHash) window.syncHash(); };
+
   function step(by) {
     const list = ENTRIES;
     if (!list.length) return;
     idx = (idx + by + list.length) % list.length;
     pick.value = idx;
     render();
+    remember();
   }
-  pick.addEventListener('change', () => { idx = Number(pick.value) || 0; render(); });
+  pick.addEventListener('change', () => {
+    idx = Number(pick.value) || 0;
+    render();
+    remember();
+  });
   $('fx-prev').addEventListener('click', () => step(-1));
   $('fx-next').addEventListener('click', () => step(1));
 
@@ -4445,10 +4479,13 @@ EXPLORER_JS = """
     }
     const i = ENTRIES.findIndex((f) => String(f.id) === String(id));
     if (i < 0) return false;
-    if (window.showPanel) window.showPanel('fixtures');
     idx = i;
     pick.value = i;
     render();
+    // panel first would sync the hash before idx moved, writing the match
+    // that was open a moment ago
+    if (window.showPanel) window.showPanel('fixtures');
+    remember();
     card.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return true;
   };
@@ -4752,6 +4789,58 @@ GLOSSARY = [
      "best summary of how well a team actually played, ignoring finishing luck at "
      "both ends."),
 ]
+
+
+CHANGELOG_PATH = PROJECT_DIR / "CHANGELOG.md"
+CHANGELOG_SHOWN = 4   # dated entries rendered; older ones stay in the file
+
+
+def _inline_md(text):
+    """The little of Markdown the changelog actually uses, escaped first so a
+    stray angle bracket in an entry can never become markup."""
+    out = escape(text)
+    out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out)
+    out = re.sub(r"(?<![*\w])\*([^*]+?)\*(?!\*)", r"<em>\1</em>", out)
+    out = re.sub(r"`([^`]+?)`", r"<code>\1</code>", out)
+    return out
+
+
+def parse_changelog(path=CHANGELOG_PATH):
+    """[(heading, [bullet, ...]), ...] newest first, straight from the file.
+
+    Hand-written rather than generated from git history: the log is full of
+    reasoning aimed at whoever edits this code next, which is not what a
+    reader of the site wants, and the Actions checkout is shallow anyway so
+    the history is not reliably there to read.
+    """
+    if not path.exists():
+        return []
+    entries, current = [], None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.rstrip()
+        if line.startswith("## "):
+            current = (line[3:].strip(), [])
+            entries.append(current)
+        elif line.startswith("- ") and current is not None:
+            current[1].append(line[2:].strip())
+    return [e for e in entries if e[1]]
+
+
+def changelog_block(entries):
+    if not entries:
+        return ""
+    body = ""
+    for heading, bullets in entries[:CHANGELOG_SHOWN]:
+        body += (f"<h4 class='cl-date'>{escape(heading)}</h4><ul class='cl-list'>"
+                 + "".join(f"<li>{_inline_md(b)}</li>" for b in bullets)
+                 + "</ul>")
+    more = ""
+    if len(entries) > CHANGELOG_SHOWN:
+        more = (f"<p class='meta'>{len(entries) - CHANGELOG_SHOWN} older "
+                "entries are in CHANGELOG.md in the repository.</p>")
+    return ("<details class='about changelog'><summary>What's new"
+            f" <span class='dim'>· {escape(entries[0][0])}</span></summary>"
+            f"<div class='about-body'>{body}{more}</div></details>")
 
 
 def metric_glossary():
@@ -5085,6 +5174,9 @@ def build_page(db, nav, generated, archive_label=None):
                   "<code>python fetch_data.py</code> and <code>python fetch_understat.py</code> "
                   "regularly to keep the database current.")
     badges = "".join(f"<span class='badge'>{escape(t)}</span>" for t in badge_texts)
+    # the archive pages are frozen snapshots of a finished season; a running
+    # list of what changed this week belongs on the live dashboard only
+    whats_new = "" if archive else changelog_block(parse_changelog())
 
     return (
         f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
@@ -5092,7 +5184,7 @@ def build_page(db, nav, generated, archive_label=None):
         f"<title>{escape(title)}</title><style>{CSS}</style></head><body><div class='wrap'>"
         f"<header class='hero'><h1>Football dashboard</h1>"
         f"<p class='tagline'>{tagline}</p>"
-        f"<div class='badges'>{badges}</div></header>"
+        f"<div class='badges'>{badges}</div>{whats_new}</header>"
         + nav + lg_bar + tab_bar + panel_html
         + f"<footer>{footer}</footer></div>"
         f"<script>{EXPLORER_JS}{_poisson_js()}</script></body></html>"
