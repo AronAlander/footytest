@@ -305,6 +305,18 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 .prob i.h { background: var(--accent); }
 .prob i.d { background: var(--draw); }
 .prob i.a { background: var(--away); }
+tr.fx-link { cursor: pointer; }
+tr.fx-link:hover td { background: var(--row-hover); }
+tr.fx-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* a quiet chevron that only shows the row is live on hover/focus */
+tr.fx-link td:last-child { position: relative; }
+tr.fx-link td:last-child::after {
+  content: '\203A'; position: absolute; right: 6px; top: 50%;
+  transform: translateY(-50%); color: var(--accent); opacity: 0;
+  font-weight: 700; transition: opacity .12s;
+}
+tr.fx-link:hover td:last-child::after,
+tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .fx-head { display: flex; justify-content: space-between; align-items: baseline;
   gap: 12px; flex-wrap: wrap; margin: 2px 2px 12px; }
 .fx-head h4 { margin: 0; font-size: 19px; }
@@ -605,6 +617,13 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2016-08-21","h",3,2,2.6,1.75,0.85,3],
     activate(b.dataset.panel);
     window.syncHash();
   }));
+  // so a fixture row on the League tab can send the reader to the explorer
+  window.showPanel = function (name) {
+    if (!document.getElementById('panel-' + name)) return false;
+    activate(name);
+    window.syncHash();
+    return true;
+  };
   const initial = decodeURIComponent(location.hash.slice(1)).split('&')
     .filter((s) => s && !s.includes('='))[0] || '';
   activate(document.getElementById('panel-' + initial) ? initial : tabs[0].dataset.panel);
@@ -1277,8 +1296,73 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2016-08-21","h",3,2,2.6,1.75,0.85,3],
   pick.addEventListener('change', () => { idx = Number(pick.value) || 0; render(); });
   $('fx-prev').addEventListener('click', () => step(-1));
   $('fx-next').addEventListener('click', () => step(1));
-  document.addEventListener('leaguechange', rebuild);
+
+  // ---- opening a fixture from the League tab -------------------------
+  const holds = (lg, id) => ((FIXTURES_BY_LG[lg] || {}).fixtures || [])
+    .some((f) => String(f.id) === String(id));
+
+  window.showFixture = function (league, id) {
+    if (league && league !== window.CUR_LG) {
+      // go through the league switcher's own button so it stays the single
+      // place that knows how to change league (it fires leaguechange, which
+      // rebuilds this panel) rather than reaching into its state from here
+      let moved = false;
+      document.querySelectorAll('nav.lgswitch button').forEach((b) => {
+        if (b.dataset.lg === league) { b.click(); moved = true; }
+      });
+      if (!moved && !FIXTURES_BY_LG[league]) return false;
+    }
+    const list = (D && D.fixtures) || [];
+    const i = list.findIndex((f) => String(f.id) === String(id));
+    if (i < 0) return false;
+    if (window.showPanel) window.showPanel('fixtures');
+    idx = i;
+    pick.value = i;
+    render();
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return true;
+  };
+
+  // only rows the explorer actually holds become clickable: the League tab
+  // lists played matches and can reach further ahead than the explorer's
+  // slate, and a link that goes nowhere is worse than no link
+  function linkRows() {
+    document.querySelectorAll('tr[data-fx]').forEach((tr) => {
+      const view = tr.closest('.lgview');
+      const lg = view ? view.dataset.lg : window.CUR_LG;
+      const ok = holds(lg, tr.dataset.fx);
+      tr.classList.toggle('fx-link', ok);
+      if (ok) {
+        tr.tabIndex = 0;
+        tr.setAttribute('role', 'link');
+        tr.title = 'Open in the fixture explorer';
+      } else {
+        tr.removeAttribute('tabindex');
+        tr.removeAttribute('role');
+      }
+    });
+    document.querySelectorAll('.fx-hint').forEach((h) => {
+      const sec = h.closest('section.block');
+      h.hidden = !(sec && sec.querySelector('tr.fx-link'));
+    });
+  }
+  function open(tr) {
+    const view = tr.closest('.lgview');
+    window.showFixture(view ? view.dataset.lg : window.CUR_LG, tr.dataset.fx);
+  }
+  document.addEventListener('click', (e) => {
+    const tr = e.target.closest && e.target.closest('tr.fx-link');
+    if (tr) open(tr);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const tr = e.target.closest && e.target.closest('tr.fx-link');
+    if (tr) { e.preventDefault(); open(tr); }
+  });
+
+  document.addEventListener('leaguechange', () => { rebuild(); linkRows(); });
   rebuild();
+  linkRows();
 })();
 
 (function () {  // back-to-top button

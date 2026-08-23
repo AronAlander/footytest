@@ -351,6 +351,18 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 .prob i.h { background: var(--accent); }
 .prob i.d { background: var(--draw); }
 .prob i.a { background: var(--away); }
+tr.fx-link { cursor: pointer; }
+tr.fx-link:hover td { background: var(--row-hover); }
+tr.fx-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* a quiet chevron that only shows the row is live on hover/focus */
+tr.fx-link td:last-child { position: relative; }
+tr.fx-link td:last-child::after {
+  content: '\\203A'; position: absolute; right: 6px; top: 50%;
+  transform: translateY(-50%); color: var(--accent); opacity: 0;
+  font-weight: 700; transition: opacity .12s;
+}
+tr.fx-link:hover td:last-child::after,
+tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .fx-head { display: flex; justify-content: space-between; align-items: baseline;
   gap: 12px; flex-wrap: wrap; margin: 2px 2px 12px; }
 .fx-head h4 { margin: 0; font-size: 19px; }
@@ -712,14 +724,16 @@ def home_away_table(db, league, title_suffix=""):
 def matches_table(db, league, finished, limit=10):
     if finished:
         rows = db.execute(
-            """SELECT match_date, round, home_team, home_score, away_score, away_team
+            """SELECT match_date, round, home_team, home_score, away_score, away_team,
+                      event_id
                FROM matches WHERE league = ? AND home_score IS NOT NULL
                ORDER BY match_date DESC, event_id LIMIT ?""",
             (league, limit),
         ).fetchall()
     else:
         rows = db.execute(
-            """SELECT match_date, round, home_team, home_score, away_score, away_team
+            """SELECT match_date, round, home_team, home_score, away_score, away_team,
+                      event_id
                FROM matches WHERE league = ? AND home_score IS NULL AND match_date >= ?
                ORDER BY match_date, event_id LIMIT ?""",
             (league, date.today().isoformat(), limit),
@@ -727,11 +741,15 @@ def matches_table(db, league, finished, limit=10):
     if not rows:
         return "<p class='dim'>No matches in the database yet.</p>"
     body = ""
-    for match_date, rnd, home, hs, as_, away in rows:
+    for match_date, rnd, home, hs, as_, away, event_id in rows:
         score = f"<span class='score'>{hs} – {as_}</span>" if hs is not None else "<span class='dim'>vs</span>"
         rnd_label = f"R{rnd}" if rnd else ""
+        # upcoming rows carry their id so the fixture explorer can open them;
+        # the explorer marks up only the ones it actually holds, so a played
+        # match or a fixture past its cutoff simply stays inert
+        fx = "" if finished else f" data-fx='{escape(str(event_id))}'"
         body += (
-            f"<tr><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
+            f"<tr{fx}><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
             f"<td style='text-align:right'>{escape(home or '')}</td><td style='text-align:center'>{score}</td>"
             f"<td>{escape(away or '')}</td></tr>"
         )
@@ -976,11 +994,12 @@ def predictions_block(db, league):
     body = ""
     for match_date, rnd, home, away, event_id, season in fixtures:
         rnd_label = f"R{rnd}" if rnd else ""
+        fx = f" data-fx='{escape(str(event_id))}'"
         mapped_home, mapped_away = mapping.get(home), mapping.get(away)
         if not mapped_home or not mapped_away:
             missing = home if not mapped_home else away
             body += (
-                f"<tr><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
+                f"<tr{fx}><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
                 f"<td style='text-align:right'>{escape(home)}</td>"
                 f"<td class='dim' style='text-align:center'>no xG history for {escape(missing)}</td>"
                 f"<td>{escape(away)}</td><td class='num dim'>–</td></tr>"
@@ -997,7 +1016,7 @@ def predictions_block(db, league):
         bar = (f"<div class='prob' title='{escape(tip)}'>"
                + seg("h", p_home) + seg("d", p_draw) + seg("a", p_away) + "</div>")
         body += (
-            f"<tr><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
+            f"<tr{fx}><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
             f"<td style='text-align:right'>{escape(home)}</td>"
             f"<td style='min-width:180px'>{bar}</td>"
             f"<td>{escape(away)}</td>"
@@ -3459,6 +3478,13 @@ EXPLORER_JS = """
     activate(b.dataset.panel);
     window.syncHash();
   }));
+  // so a fixture row on the League tab can send the reader to the explorer
+  window.showPanel = function (name) {
+    if (!document.getElementById('panel-' + name)) return false;
+    activate(name);
+    window.syncHash();
+    return true;
+  };
   const initial = decodeURIComponent(location.hash.slice(1)).split('&')
     .filter((s) => s && !s.includes('='))[0] || '';
   activate(document.getElementById('panel-' + initial) ? initial : tabs[0].dataset.panel);
@@ -4131,8 +4157,73 @@ EXPLORER_JS = """
   pick.addEventListener('change', () => { idx = Number(pick.value) || 0; render(); });
   $('fx-prev').addEventListener('click', () => step(-1));
   $('fx-next').addEventListener('click', () => step(1));
-  document.addEventListener('leaguechange', rebuild);
+
+  // ---- opening a fixture from the League tab -------------------------
+  const holds = (lg, id) => ((FIXTURES_BY_LG[lg] || {}).fixtures || [])
+    .some((f) => String(f.id) === String(id));
+
+  window.showFixture = function (league, id) {
+    if (league && league !== window.CUR_LG) {
+      // go through the league switcher's own button so it stays the single
+      // place that knows how to change league (it fires leaguechange, which
+      // rebuilds this panel) rather than reaching into its state from here
+      let moved = false;
+      document.querySelectorAll('nav.lgswitch button').forEach((b) => {
+        if (b.dataset.lg === league) { b.click(); moved = true; }
+      });
+      if (!moved && !FIXTURES_BY_LG[league]) return false;
+    }
+    const list = (D && D.fixtures) || [];
+    const i = list.findIndex((f) => String(f.id) === String(id));
+    if (i < 0) return false;
+    if (window.showPanel) window.showPanel('fixtures');
+    idx = i;
+    pick.value = i;
+    render();
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return true;
+  };
+
+  // only rows the explorer actually holds become clickable: the League tab
+  // lists played matches and can reach further ahead than the explorer's
+  // slate, and a link that goes nowhere is worse than no link
+  function linkRows() {
+    document.querySelectorAll('tr[data-fx]').forEach((tr) => {
+      const view = tr.closest('.lgview');
+      const lg = view ? view.dataset.lg : window.CUR_LG;
+      const ok = holds(lg, tr.dataset.fx);
+      tr.classList.toggle('fx-link', ok);
+      if (ok) {
+        tr.tabIndex = 0;
+        tr.setAttribute('role', 'link');
+        tr.title = 'Open in the fixture explorer';
+      } else {
+        tr.removeAttribute('tabindex');
+        tr.removeAttribute('role');
+      }
+    });
+    document.querySelectorAll('.fx-hint').forEach((h) => {
+      const sec = h.closest('section.block');
+      h.hidden = !(sec && sec.querySelector('tr.fx-link'));
+    });
+  }
+  function open(tr) {
+    const view = tr.closest('.lgview');
+    window.showFixture(view ? view.dataset.lg : window.CUR_LG, tr.dataset.fx);
+  }
+  document.addEventListener('click', (e) => {
+    const tr = e.target.closest && e.target.closest('tr.fx-link');
+    if (tr) open(tr);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const tr = e.target.closest && e.target.closest('tr.fx-link');
+    if (tr) { e.preventDefault(); open(tr); }
+  });
+
+  document.addEventListener('leaguechange', () => { rebuild(); linkRows(); });
   rebuild();
+  linkRows();
 })();
 
 (function () {  // back-to-top button
@@ -4165,7 +4256,12 @@ def league_section(db, league):
         + standings_table(db, league, past)
         + home_away_table(db, league, past)
         + block("Recent results" + past, matches_table(db, league, finished=True))
-        + block("Upcoming fixtures" + ahead, matches_table(db, league, finished=False))
+        + block("Upcoming fixtures" + ahead,
+                # revealed client-side only where rows really are clickable,
+                # so it never promises a link the explorer cannot open
+                "<p class='meta fx-hint' hidden>Click a fixture for the full "
+                "breakdown — form, head-to-head and the model's call.</p>"
+                + matches_table(db, league, finished=False))
         + predictions_block(db, league)
         + season_projection_block(db, league)
         + season_projection_distribution(db, league)
