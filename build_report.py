@@ -402,10 +402,13 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .fx-form .fx-grow { width: 100%; }
 .fx-season { margin: 0 2px 4px; font-size: 12px; }
 /* head-to-head is one full-width table, so pin the middle columns together
-   instead of letting the club names drift to opposite edges */
-.fx-h2h { max-width: 640px; }
-.fx-h2h td:nth-child(3) { width: 40%; text-align: right; }
-.fx-h2h td:nth-child(5) { width: 40%; }
+   instead of letting the club names drift to opposite edges. No result chip
+   here on purpose — see h2hBlock; the winner is marked on the name instead */
+.fx-h2h { max-width: 620px; }
+.fx-h2h td:nth-child(2) { text-align: right; }
+.fx-won { font-weight: 700; color: var(--text-primary); }
+/* the all-matches strip sits under the venue one as the quieter reference */
+.pd-totals.fx-all { margin-top: 6px; opacity: .78; }
 @media (max-width: 720px) { .fx-cols { grid-template-columns: 1fr; } }
 .pdot {
   display: inline-block; width: 10px; height: 10px; border-radius: 50%;
@@ -3189,12 +3192,18 @@ def load_fixture_data(db, league):
             rec[2] += ga
             rec[3] += xg
             rec[4] += xga
+        # the venue record answers "how do they go at this ground", the
+        # combined one "how good are they, full stop" — a side that is
+        # excellent at home and ordinary overall is the interesting case, and
+        # showing only one half of it hides that
+        both = [split["h"][i] + split["a"][i] for i in range(5)]
         venue[fx_name] = {
             "season": _season_label(league, latest),
             "h": [split["h"][0], split["h"][1], split["h"][2],
                   round(split["h"][3], 1), round(split["h"][4], 1)],
             "a": [split["a"][0], split["a"][1], split["a"][2],
                   round(split["a"][3], 1), round(split["a"][4], 1)],
+            "all": [both[0], both[1], both[2], round(both[3], 1), round(both[4], 1)],
         }
 
     players = _fixture_players(db, league, fx_names)
@@ -3387,7 +3396,10 @@ def fixtures_panel(db, leagues):
         "six competitive matches are still the best short-term evidence there is, "
         "even if some were played in May. <strong>By venue</strong> shows each club "
         "at the venue it will actually be at — the home side's home record against "
-        "the visitors' away record — over a single season, named in the heading. In "
+        "the visitors' away record — with its record across <em>all</em> matches "
+        "underneath, because a side that is excellent at home and ordinary overall "
+        "is exactly the case the venue row alone would hide. Both cover a single "
+        "season, named in the heading. In "
         "August that is still last season for a club that has not kicked off yet, "
         "and the two sides of a fixture can even be anchored to different seasons; "
         "the heading says which rather than calling it all 'this season'. The same "
@@ -3397,8 +3409,12 @@ def fixtures_panel(db, leagues):
         "<p><strong>Head-to-head</strong> reaches back as far as the xG data goes "
         "— up to twelve seasons — and gives each meeting's score alongside what "
         "the chances were worth. A club that keeps losing these while winning the "
-        "xG is a different story from one that is simply outplayed. Meetings in "
-        "other competitions are not here; this is league data only.</p>"
+        "xG is a different story from one that is simply outplayed. It is kept "
+        "deliberately neutral: no win/loss colouring, because this is the two "
+        "clubs' shared history rather than a run of form belonging to whichever "
+        "side happens to be at home this time — the winner of each meeting is "
+        "marked on its name, and the tally names both clubs. Meetings in other "
+        "competitions are not here; this is league data only.</p>"
         "<p><strong>What's missing is marked.</strong> A promoted club has no "
         "top-flight xG history, so the model declines to predict its fixtures "
         "rather than inventing a number, and its form and head-to-head sections "
@@ -4191,20 +4207,29 @@ EXPLORER_JS = """
 
   function venueBox(name, side) {
     const rec = (D.venue || {})[name] || {};
-    const v = rec[side];
     const label = side === 'h' ? 'at home' : 'away';
-    if (!v || !v[0]) {
-      return "<p class='dim fx-none'>No matches " + label + ' in ' +
+    const strip = (v, lab, cls) => {
+      if (!v || !v[0]) return '';
+      const [mp, gf, ga, xg, xga] = v;
+      const cell = (val, l) => "<div><span class='pd-tv'>" + val +
+        "</span><span class='pd-tl'>" + l + '</span></div>';
+      return "<div class='pd-totals" + (cls || '') + "'>" +
+        cell(mp, lab) + cell((gf / mp).toFixed(2), 'goals') +
+        cell((ga / mp).toFixed(2), 'conceded') +
+        cell((xg / mp).toFixed(2), 'xG') + cell((xga / mp).toFixed(2), 'xGA') +
+        '</div>';
+    };
+    const here = strip(rec[side], label);
+    const all = strip(rec.all, 'all matches', ' fx-all');
+    if (!here && !all) {
+      return "<p class='dim fx-none'>No matches in " +
         esc(rec.season || 'the stored season') + '.</p>';
     }
-    const [mp, gf, ga, xg, xga] = v;
-    return "<div class='pd-totals'>" +
-      "<div><span class='pd-tv'>" + mp + "</span><span class='pd-tl'>" + label + '</span></div>' +
-      "<div><span class='pd-tv'>" + (gf / mp).toFixed(2) + "</span><span class='pd-tl'>goals</span></div>" +
-      "<div><span class='pd-tv'>" + (ga / mp).toFixed(2) + "</span><span class='pd-tl'>conceded</span></div>" +
-      "<div><span class='pd-tv'>" + (xg / mp).toFixed(2) + "</span><span class='pd-tl'>xG</span></div>" +
-      "<div><span class='pd-tv'>" + (xga / mp).toFixed(2) + "</span><span class='pd-tl'>xGA</span></div>" +
-      '</div>';
+    if (!here) {
+      return "<p class='dim fx-none'>No matches " + label + ' yet in ' +
+        esc(rec.season || 'the stored season') + '.</p>' + all;
+    }
+    return here + all;
   }
 
   function h2hBlock(f) {
@@ -4213,6 +4238,11 @@ EXPLORER_JS = """
       return "<p class='dim fx-none'>No previous league meeting in the stored data " +
         '\\u2014 a first meeting at this level, or one of the clubs has no xG history yet.</p>';
     }
+    // Deliberately neutral: this table is the two clubs' shared history, not
+    // one of them having a good or bad run, so there are no win/loss chips
+    // colouring a past meeting by whichever side happens to be at home in
+    // the match on screen. The tally names both clubs instead of expressing
+    // one side's record as W/D/L.
     let w = 0, dr = 0, l = 0;
     rows.forEach((r) => {
       // r = [date, homeIsFixtureHome, homeGoals, awayGoals, homeXg, awayXg]
@@ -4220,20 +4250,23 @@ EXPLORER_JS = """
       const gf = isHome ? hg : ag, ga = isHome ? ag : hg;
       if (gf > ga) w++; else if (gf < ga) l++; else dr++;
     });
-    let out = "<p class='meta'><b>" + esc(f.home) + '</b> ' + w + 'W ' + dr + 'D ' + l +
-      'L <span class=dim>in the last ' + rows.length +
+    const wins = (n, who) => '<b>' + esc(who) + '</b> ' + n +
+      (n === 1 ? ' win' : ' wins');
+    let out = "<p class='meta'>" + wins(w, f.home) + ' \\u00b7 ' + dr +
+      (dr === 1 ? ' draw' : ' draws') + ' \\u00b7 ' + wins(l, f.away) +
+      " <span class=dim>in the last " + rows.length +
       (rows.length === 1 ? ' league meeting' : ' league meetings') + '</span></p>' +
       "<table class='fx-form fx-h2h'><tbody>";
     rows.forEach((r) => {
       const [date, isHome, hg, ag, hxg, axg] = r;
-      const gf = isHome ? hg : ag, ga = isHome ? ag : hg;
-      const res = outcome(gf, ga);
       const homeName = isHome ? f.home : f.away, awayName = isHome ? f.away : f.home;
-      out += '<tr>' + "<td><span class='chip " + res + "'>" + res + '</span></td>' +
+      // the winning side's name carries the weight the chip used to
+      const hw = hg > ag ? ' fx-won' : '', aw = ag > hg ? ' fx-won' : '';
+      out += '<tr>' +
         "<td class='dim'>" + shortDate(date) + '</td>' +
-        "<td style='text-align:right'>" + esc(homeName) + '</td>' +
+        "<td style='text-align:right' class='fx-grow" + hw + "'>" + esc(homeName) + '</td>' +
         "<td class='num score'>" + hg + '\\u2013' + ag + '</td>' +
-        '<td>' + esc(awayName) + '</td>' +
+        "<td class='fx-grow" + aw + "'>" + esc(awayName) + '</td>' +
         "<td class='num dim' title='expected goals that day'>" +
           num(hxg, 2) + '\\u2013' + num(axg, 2) + '</td></tr>';
     });
