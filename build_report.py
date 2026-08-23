@@ -351,6 +351,11 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 .prob i.h { background: var(--accent); }
 .prob i.d { background: var(--draw); }
 .prob i.a { background: var(--away); }
+.team-link { cursor: pointer; }
+.team-link:hover { color: var(--accent); text-decoration: underline;
+  text-underline-offset: 2px; }
+.team-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
+  border-radius: 3px; }
 tr.fx-link { cursor: pointer; }
 tr.fx-link:hover td { background: var(--row-hover); }
 tr.fx-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -498,6 +503,36 @@ def lgview(league, content, first):
     """Per-league wrapper; the league switcher toggles visibility client-side."""
     hidden = "" if first else " hidden"
     return f"<div class='lgview' data-lg='{escape(league)}'{hidden}>{content}</div>"
+
+
+# ------------------------------------------------------- cross-tab linking
+
+def _team_link_map(db, league):
+    """League-tab club name -> the name Team analytics knows it by.
+
+    Only clubs that tab actually covers get an entry. That is a live
+    constraint, not a theoretical one: Team analytics is built from this
+    season's matches, so two days into a campaign it holds 8 of Serie A's 20
+    clubs, and a link for the other twelve would go nowhere.
+
+    The two feeds also disagree about names ("Inter Milan" against Understat's
+    "Inter"), which _predict_mapping already knows how to bridge.
+    """
+    names = [t["team"] for t in load_teams(db, league)]
+    if not names:
+        return {}
+    display = sorted({r[0] for r in db.execute(
+        "SELECT DISTINCT home_team FROM matches WHERE league = ?", (league,))
+        if r[0]})
+    if not display:
+        return {}
+    return {d: a for d, a in _predict_mapping(display, names).items() if a}
+
+
+def _team_attr(name, tmap):
+    """data-team on a club's cell, or nothing when that club is not covered."""
+    target = tmap.get(name)
+    return f" data-team='{escape(target)}'" if target else ""
 
 
 # ---------------------------------------------------------------- standings
@@ -651,12 +686,14 @@ def standings_table(db, league, title_suffix=""):
         earlier = compute_table(matches, upto_round=max_round - TREND_WINDOW)
         previous_rank = {team: i for i, (team, _) in enumerate(earlier, 1)}
 
+    tmap = _team_link_map(db, league)
     body = ""
     for rank, (team, t) in enumerate(table, 1):
         change = previous_rank[team] - rank if team in previous_rank else None
         zone = " class='zone-cl'" if rank <= 4 else " class='zone-rel'" if rank > len(table) - 3 else ""
         body += (
-            f"<tr{zone}><td class='num'>{rank}</td><td>{escape(team)}</td>"
+            f"<tr{zone}><td class='num'>{rank}</td>"
+            f"<td{_team_attr(team, tmap)}>{escape(team)}</td>"
             f"<td class='num'>{t['p']}</td><td class='num'>{t['w']}</td>"
             f"<td class='num'>{t['d']}</td><td class='num'>{t['l']}</td>"
             f"<td class='num'>{t['gf']}–{t['ga']}</td>"
@@ -683,7 +720,9 @@ def standings_table(db, league, title_suffix=""):
         "A blue stripe marks the top four (Champions League places), a red stripe the "
         "bottom three (relegation).</p>"
     )
-    return block("Standings" + title_suffix, card, about)
+    hint = ("<p class='meta team-hint' hidden>Click a club for its style "
+            "profile in Team analytics.</p>")
+    return block("Standings" + title_suffix, hint + card, about)
 
 
 def home_away_table(db, league, title_suffix=""):
@@ -691,10 +730,11 @@ def home_away_table(db, league, title_suffix=""):
     if not matches:
         return ""
     body = ""
+    tmap = _team_link_map(db, league)
     for team, t in compute_table(matches):
         h, a = t["home"], t["away"]
         body += (
-            f"<tr><td>{escape(team)}</td>"
+            f"<tr><td{_team_attr(team, tmap)}>{escape(team)}</td>"
             f"<td class='num'>{h['w']}-{h['d']}-{h['l']}</td>"
             f"<td class='num'>{h['gf']}–{h['ga']}</td><td class='num score'>{h['pts']}</td>"
             f"<td class='num'>{a['w']}-{a['d']}-{a['l']}</td>"
@@ -740,6 +780,7 @@ def matches_table(db, league, finished, limit=10):
         ).fetchall()
     if not rows:
         return "<p class='dim'>No matches in the database yet.</p>"
+    tmap = _team_link_map(db, league)
     body = ""
     for match_date, rnd, home, hs, as_, away, event_id in rows:
         score = f"<span class='score'>{hs} – {as_}</span>" if hs is not None else "<span class='dim'>vs</span>"
@@ -750,8 +791,9 @@ def matches_table(db, league, finished, limit=10):
         fx = "" if finished else f" data-fx='{escape(str(event_id))}'"
         body += (
             f"<tr{fx}><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
-            f"<td style='text-align:right'>{escape(home or '')}</td><td style='text-align:center'>{score}</td>"
-            f"<td>{escape(away or '')}</td></tr>"
+            f"<td style='text-align:right'{_team_attr(home, tmap)}>{escape(home or '')}</td>"
+            f"<td style='text-align:center'>{score}</td>"
+            f"<td{_team_attr(away, tmap)}>{escape(away or '')}</td></tr>"
         )
     return f"<div class='card'><table><tbody>{body}</tbody></table></div>"
 
@@ -990,6 +1032,7 @@ def predictions_block(db, league):
     # card below can grade the site on what it actually said in advance
     logged = prediction_log.load()
     today = date.today().isoformat()
+    tmap = _team_link_map(db, league)
 
     body = ""
     for match_date, rnd, home, away, event_id, season in fixtures:
@@ -1000,9 +1043,9 @@ def predictions_block(db, league):
             missing = home if not mapped_home else away
             body += (
                 f"<tr{fx}><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
-                f"<td style='text-align:right'>{escape(home)}</td>"
+                f"<td style='text-align:right'{_team_attr(home, tmap)}>{escape(home)}</td>"
                 f"<td class='dim' style='text-align:center'>no xG history for {escape(missing)}</td>"
-                f"<td>{escape(away)}</td><td class='num dim'>–</td></tr>"
+                f"<td{_team_attr(away, tmap)}>{escape(away)}</td><td class='num dim'>–</td></tr>"
             )
             continue
         lam_home, lam_away, n_min = _fixture_lambdas(
@@ -1017,9 +1060,9 @@ def predictions_block(db, league):
                + seg("h", p_home) + seg("d", p_draw) + seg("a", p_away) + "</div>")
         body += (
             f"<tr{fx}><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
-            f"<td style='text-align:right'>{escape(home)}</td>"
+            f"<td style='text-align:right'{_team_attr(home, tmap)}>{escape(home)}</td>"
             f"<td style='min-width:180px'>{bar}</td>"
-            f"<td>{escape(away)}</td>"
+            f"<td{_team_attr(away, tmap)}>{escape(away)}</td>"
             f"<td class='num dim'>{lam_home:.1f}–{lam_away:.1f}</td></tr>"
         )
     prediction_log.save(logged)
@@ -3191,17 +3234,18 @@ def team_compare(teams_by_lg, tm_by_lg):
         f"<div class='controls'>{selects}"
         "<button id='tc-clear' type='button'>Clear</button></div>"
         "<div class='chart-card' id='tc-empty'><p class='dim' style='margin:4px 2px'>"
-        "Pick two or three teams above to see their playing styles side by side. "
-        "Picking exactly <em>two</em> unlocks a head-to-head deep dive: this season's "
-        "meetings, a tale-of-the-tape bar duel, recent form, home/away splits and "
-        "overlaid form curves.</p></div>"
+        "Pick a team above for its style profile, or two or three to see them side "
+        "by side. Picking exactly <em>two</em> unlocks a head-to-head deep dive: this "
+        "season's meetings, a tale-of-the-tape bar duel, recent form, home/away splits "
+        "and overlaid form curves.</p></div>"
         "<div class='chart-card' id='tc-card' hidden></div>"
         f"<script>const TEAMS_BY_LG = {payload};\nconst TM_BY_LG = {tm_payload};</script>"
     )
     about = (
-        "<p><strong>What it shows.</strong> Up to three teams overlaid on a radar of six "
+        "<p><strong>What it shows.</strong> One to three teams overlaid on a radar of six "
         "style dimensions, each expressed as the team's <em>percentile</em> among the "
-        "sides in that league. <strong>Attack</strong> is non-penalty xG "
+        "sides in that league. A single team is a profile rather than a comparison — "
+        "that is where a click on a club's name over on the League tab lands. <strong>Attack</strong> is non-penalty xG "
         "created per match and <strong>Defence</strong> is non-penalty xG conceded "
         "(flipped, so further out = fewer chances allowed). <strong>Finishing</strong> is "
         "goals minus xG — conversion above or below what the chances deserved. "
@@ -3915,7 +3959,9 @@ EXPLORER_JS = """
     const ts = [1, 2, 3].map((i) => byTeam($('tc-' + i).value))
       .filter((t) => t && !seen.has(t.team) && seen.add(t.team)).slice(0, 3);
     const card = $('tc-card'), empty = $('tc-empty');
-    if (ts.length < 2) { card.hidden = true; empty.hidden = false; return; }
+    // one team is a profile rather than a comparison, and worth rendering:
+    // it is where a click on a club name from the League tab lands
+    if (!ts.length) { card.hidden = true; empty.hidden = false; return; }
     empty.hidden = true; card.hidden = false;
     const legend = "<div class='pc-legend'>" + ts.map((t, i) =>
       "<span><span class='pc-dot pc" + i + "'></span>" + esc(t.team) +
@@ -3923,6 +3969,27 @@ EXPLORER_JS = """
     card.innerHTML = legend + radarSvg(ts) +
       (ts.length === 2 ? h2hHtml(ts[0], ts[1]) : compareTable(ts));
   }
+  // entry point for a click on a club name over on the League tab
+  window.showTeam = function (league, name) {
+    if (league && league !== window.CUR_LG) {
+      let moved = false;
+      document.querySelectorAll('nav.lgswitch button').forEach((b) => {
+        if (b.dataset.lg === league) { b.click(); moved = true; }
+      });
+      if (!moved && !TEAMS_BY_LG[league]) return false;
+    }
+    if (!byTeam(name)) return false;
+    if (window.showPanel) window.showPanel('teams');
+    $('tc-1').value = name;
+    $('tc-2').value = '';
+    $('tc-3').value = '';
+    renderTC();
+    $('tc-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return true;
+  };
+  window.hasTeam = (league, name) =>
+    (TEAMS_BY_LG[league] || []).some((t) => t.team === name);
+
   [1, 2, 3].forEach((i) => $('tc-' + i).addEventListener('change', renderTC));
   $('tc-clear').addEventListener('click', () => {
     [1, 2, 3].forEach((i) => { $('tc-' + i).value = ''; });
@@ -4184,15 +4251,40 @@ EXPLORER_JS = """
     return true;
   };
 
-  // only rows the explorer actually holds become clickable: the League tab
-  // lists played matches and can reach further ahead than the explorer's
-  // slate, and a link that goes nowhere is worse than no link
-  function linkRows() {
+  window.hasFixture = holds;
+
+  document.addEventListener('leaguechange', rebuild);
+  rebuild();
+})();
+
+(function () {  // cross-tab links: club names and fixture rows on the League tab
+  // One dispatcher for both kinds of link, because they overlap: a club cell
+  // sits inside a clickable fixture row, and two independent listeners would
+  // race for the same click. Here the more specific target simply wins.
+  function lgOf(el) {
+    const view = el.closest('.lgview');
+    return view ? view.dataset.lg : window.CUR_LG;
+  }
+  function mark() {
+    document.querySelectorAll('[data-team]').forEach((el) => {
+      const ok = window.hasTeam && window.hasTeam(lgOf(el), el.dataset.team);
+      el.classList.toggle('team-link', !!ok);
+      if (ok) {
+        el.tabIndex = 0;
+        el.setAttribute('role', 'link');
+        el.title = 'Open ' + el.dataset.team + ' in Team analytics';
+      } else {
+        el.removeAttribute('tabindex');
+        el.removeAttribute('role');
+        el.removeAttribute('title');
+      }
+    });
+    // only rows the explorer actually holds: the League tab lists played
+    // matches and can reach past the explorer's slate, and a link that goes
+    // nowhere is worse than no link
     document.querySelectorAll('tr[data-fx]').forEach((tr) => {
-      const view = tr.closest('.lgview');
-      const lg = view ? view.dataset.lg : window.CUR_LG;
-      const ok = holds(lg, tr.dataset.fx);
-      tr.classList.toggle('fx-link', ok);
+      const ok = window.hasFixture && window.hasFixture(lgOf(tr), tr.dataset.fx);
+      tr.classList.toggle('fx-link', !!ok);
       if (ok) {
         tr.tabIndex = 0;
         tr.setAttribute('role', 'link');
@@ -4202,28 +4294,31 @@ EXPLORER_JS = """
         tr.removeAttribute('role');
       }
     });
+    // each hint only appears where its own kind of link really exists
     document.querySelectorAll('.fx-hint').forEach((h) => {
       const sec = h.closest('section.block');
       h.hidden = !(sec && sec.querySelector('tr.fx-link'));
     });
+    document.querySelectorAll('.team-hint').forEach((h) => {
+      const sec = h.closest('section.block');
+      h.hidden = !(sec && sec.querySelector('.team-link'));
+    });
   }
-  function open(tr) {
-    const view = tr.closest('.lgview');
-    window.showFixture(view ? view.dataset.lg : window.CUR_LG, tr.dataset.fx);
+  function dispatch(e) {
+    if (!e.target.closest) return false;
+    const team = e.target.closest('.team-link');
+    if (team) return window.showTeam(lgOf(team), team.dataset.team);
+    const row = e.target.closest('tr.fx-link');
+    if (row) return window.showFixture(lgOf(row), row.dataset.fx);
+    return false;
   }
-  document.addEventListener('click', (e) => {
-    const tr = e.target.closest && e.target.closest('tr.fx-link');
-    if (tr) open(tr);
-  });
+  document.addEventListener('click', dispatch);
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
-    const tr = e.target.closest && e.target.closest('tr.fx-link');
-    if (tr) { e.preventDefault(); open(tr); }
+    if (dispatch(e)) e.preventDefault();
   });
-
-  document.addEventListener('leaguechange', () => { rebuild(); linkRows(); });
-  rebuild();
-  linkRows();
+  document.addEventListener('leaguechange', mark);
+  mark();
 })();
 
 (function () {  // back-to-top button
