@@ -344,6 +344,9 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .fx-grade.no { background: var(--loss); }
 .fx-verdict { margin: 0 2px 6px; }
 .fx-verdict .prob { height: 22px; }
+.fx-luck { border-left: 3px solid var(--accent); background: var(--surface);
+  border-radius: 0 6px 6px 0; padding: 8px 12px; margin: 8px 2px 0;
+  font-size: 13.5px; }
 .fx-noverdict { border: 1px solid var(--border); border-left: 3px solid var(--draw);
   background: var(--surface); border-radius: 6px; padding: 9px 12px; margin: 0 2px 6px;
   font-size: 13.5px; color: var(--text-secondary); }
@@ -1375,6 +1378,80 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2018-08-25","a",2,3,0.52,2.04,-1.52,0
       'award the points.</span></p>';
   }
 
+  // Understat reruns a finished match from the chances both sides created and
+  // reports how often each side comes out on top. It is not a prediction --
+  // it exists only after the match -- so it answers a different question from
+  // the model's call: not "who wins" but "who deserved to".
+  const probBar = (p, pct, cls) => {
+    const seg = (c, share, whole) => "<i class='" + c + "' style='width:" +
+      (share * 100).toFixed(1) + "%'>" + (share >= 0.15 ? whole + '%' : '') + '</i>';
+    return "<div class='prob " + cls + "'>" + seg('h', p[0], pct[0]) +
+      seg('d', p[1], pct[1]) + seg('a', p[2], pct[2]) + '</div>';
+  };
+
+  function sideName(m, i) {
+    return i === 1 ? 'a draw' : esc(i === 0 ? m.home : m.away);
+  }
+
+  function deservedBox(m) {
+    const won = m.hg > m.ag ? 0 : m.hg === m.ag ? 1 : 2;
+    const top = m.fc.indexOf(Math.max.apply(null, m.fc));
+    let read;
+    if (m.fc[top] < 0.4) {
+      read = 'Replayed from those chances the match splits close to evenly' +
+        (won === 1 ? ', and it finished level.'
+                   : ' — ' + sideName(m, won) + ' took the points from a ' +
+                     'match that could have gone any way.');
+    } else if (top === won) {
+      read = 'Replayed from those chances, ' +
+        (won === 1 ? 'it finishes level ' : sideName(m, top) + ' come out on top ') +
+        m.fcpct[top] + '% of the time — the result the match deserved.';
+    } else {
+      read = 'Replayed from those chances, ' +
+        (top === 1 ? 'it finishes level ' : sideName(m, top) + ' come out on top ') +
+        m.fcpct[top] + '% of the time. ' +
+        (won === 1 ? 'It finished level.' : sideName(m, won) + ' won it.');
+    }
+    return probBar(m.fc, m.fcpct, 'fc') +
+      "<p class='meta'>" + read + " <span class='dim'>Understat's simulation " +
+      'of the shots actually taken — it knows what the chances were, so ' +
+      'it is a verdict on the 90 minutes, never a forecast of them.</span></p>';
+  }
+
+  // the point of showing both: a missed call on a match the chances say we
+  // read correctly is a different failure from one the chances agree with
+  function luckLine(m) {
+    if (!m.fc || !m.pct) return '';
+    const won = m.hg > m.ag ? 0 : m.hg === m.ag ? 1 : 2;
+    const pick = m.pct.indexOf(Math.max.apply(null, m.pct));
+    const top = m.fc.indexOf(Math.max.apply(null, m.fc));
+    let s;
+    if (m.fc[top] < 0.4) {
+      // no lean worth the name: saying the chances "back" anything here would
+      // read as agreement the numbers do not actually contain
+      s = pick === won
+        ? 'The model called it, though the chances split the match too evenly ' +
+          'to say anyone deserved it.'
+        : 'The model missed, but the chances split the match too evenly to say ' +
+          'anyone deserved it either.';
+    } else if (pick === won) {
+      s = top === won
+        ? 'The model called it, and the chances back the result.'
+        : 'The model called it, but the chances lean towards ' + sideName(m, top) +
+          ' — right about the winner, flattered by how it finished.';
+    } else if (top === pick) {
+      s = 'The model missed, and yet the chances lean the same way it did — ' +
+        'a reading beaten by the finishing rather than by the football.';
+    } else if (top === won) {
+      s = 'The model missed, and the chances back the result.';
+    } else {
+      // the chances favour neither the call nor the winner -- usually a draw
+      s = 'The model missed, but so did the chances: they lean towards ' +
+        sideName(m, top) + ', which is not what happened either.';
+    }
+    return "<div class='fx-luck'>" + s + '</div>';
+  }
+
   function callBox(m) {
     if (!m.pct) {
       return "<p class='dim fx-none'>No published call for this one \u2014 it was " +
@@ -1384,8 +1461,6 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2018-08-25","a",2,3,0.52,2.04,-1.52,0
     const outcome = m.hg > m.ag ? 0 : m.hg === m.ag ? 1 : 2;
     const top = m.pct.indexOf(Math.max.apply(null, m.pct));
     const names = [m.home, 'a draw', m.away];
-    const seg = (cls, share, whole) => "<i class='" + cls + "' style='width:" +
-      (share * 100).toFixed(1) + "%'>" + (share >= 0.15 ? whole + '%' : '') + '</i>';
     const hit = top === outcome;
     const badge = "<span class='fx-grade " + (hit ? 'ok' : 'no') + "'>" +
       (hit ? 'called it' : 'missed') + '</span>';
@@ -1394,8 +1469,7 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2018-08-25","a",2,3,0.52,2.04,-1.52,0
           ? 'written down on ' + shortDate(m.first)
           : 'first called ' + shortDate(m.first) + ', last updated ' + shortDate(m.last))
       : '';
-    return "<div class='prob'>" + seg('h', m.p[0], m.pct[0]) +
-      seg('d', m.p[1], m.pct[1]) + seg('a', m.p[2], m.pct[2]) + '</div>' +
+    return probBar(m.p, m.pct, '') +
       "<p class='meta'>Leaned " + esc(names[top]) + ' at ' + m.pct[top] + '% ' + badge +
       (m.lam ? " <span class='dim'>\u00b7 forecast " + num(m.lam[0], 1) + '\u2013' +
         num(m.lam[1], 1) : "<span class='dim'>") +
@@ -1413,8 +1487,13 @@ const TM_BY_LG = {"Serie A":{"AC Milan":[["2018-08-25","a",2,3,0.52,2.04,-1.52,0
       "<div class='fx-head'><h4>" + esc(m.home) + " <span class='fx-score'>" +
         m.hg + ' \u2013 ' + m.ag + '</span> ' + esc(m.away) +
         "</h4><span class='dim'>" + esc(when) + '</span></div>' +
-      xg + chanceVerdict(m) +
+      xg +
+      // the forecast supersedes the xG-difference verdict rather than sitting
+      // beside it: same question, and this one answers it properly
+      (m.fc ? "<h4 class='fx-h'>What the chances deserved</h4>" + deservedBox(m)
+            : chanceVerdict(m)) +
       "<h4 class='fx-h'>What the model said beforehand</h4>" + callBox(m) +
+      luckLine(m) +
       "<h4 class='fx-h'>Head to head before this match</h4>" + h2hBlock(m);
   }
 
