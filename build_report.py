@@ -1165,6 +1165,119 @@ CALIBRATION_BUCKETS = [     # (low, high, label) on the top pick's probability
 ]
 
 
+DESERVED_MIN = 10   # below this the split is noise even pooled across leagues
+
+
+def deserved_comparison(db, leagues):
+    """Every published call in the leagues Understat covers, scored twice:
+    against what happened, and against what the chances deserved.
+
+    Pooled across leagues on purpose. Per league the graded log stays a
+    handful of matches for months, and a luck estimate drawn from a handful
+    of matches is itself mostly luck; the model is the same in all five, so
+    the pooled figure is the one that means anything first.
+
+    The second score is the Brier the same call would have earned on
+    average had the match been replayed from the chances both sides
+    created -- an expectation over Understat's forecast, rather than the
+    single 0/1 outcome that happened to occur. Both are the same statistic
+    on the same scale, so the gap between them is readable: close together
+    means results have been landing where the chances said they would.
+
+    A caveat worth keeping in view: the chances a side created are not
+    themselves free of luck, so this measures deviation from a better
+    proxy for the truth, not from the truth.
+    """
+    logged = prediction_log.load()
+    n = hits = agree = 0
+    brier = deserved_brier = deserved_hits = 0.0
+    for league in leagues:
+        graded = prediction_log.graded(db, logged, league)
+        if not graded:
+            continue
+        names = {x for row, _, _, _ in graded for x in (row["home"], row["away"])}
+        lookup = _forecasts_for(db, league, names)
+        for row, home_score, away_score, outcome in graded:
+            fc = lookup.get((row["match_date"], row["home"], row["away"]))
+            # same scoreline guard as everywhere else: a forecast that belongs
+            # to a different match would quietly poison the average
+            if not fc or fc[1] != home_score or fc[2] != away_score:
+                continue
+            q = fc[0]
+            probs = prediction_log.probabilities(row)
+            pick = max(range(3), key=lambda i: probs[i])
+            n += 1
+            hits += int(pick == outcome)
+            brier += sum((p - (1.0 if i == outcome else 0.0)) ** 2
+                         for i, p in enumerate(probs))
+            deserved_brier += sum(
+                q[j] * sum((p - (1.0 if i == j else 0.0)) ** 2
+                           for i, p in enumerate(probs))
+                for j in range(3)
+            )
+            deserved_hits += q[pick]
+            agree += int(max(range(3), key=lambda i: q[i]) == outcome)
+    if n < DESERVED_MIN:
+        return None
+    return {
+        "n": n,
+        "hits": hits / n * 100,
+        "deserved_hits": deserved_hits / n * 100,
+        "brier": brier / n,
+        "deserved_brier": deserved_brier / n,
+        "agree": agree / n * 100,
+    }
+
+
+def deserved_block(db, league):
+    """The skill-or-luck half of the report card. Empty for Allsvenskan,
+    whose feed has no shot-level simulation to be scored against."""
+    if league not in UNDERSTAT_LEAGUES:
+        return ""
+    c = deserved_comparison(db, UNDERSTAT_LEAGUES)
+    if not c:
+        return ""
+    gap = c["brier"] - c["deserved_brier"]
+    if gap > 0.03:
+        reading = (
+            "Results have been landing worse for these calls than the chances "
+            "behind them implied — on this evidence the model is reading "
+            "the football better than its record shows."
+        )
+    elif gap < -0.03:
+        reading = (
+            "Results have been kinder to these calls than the chances behind "
+            "them warranted — the record currently flatters the model."
+        )
+    else:
+        reading = (
+            "The two are close, which is the unexciting and healthy answer: "
+            "results have landed about where the chances said they would, so "
+            "the record above is being earned rather than won or lost on luck."
+        )
+    return (
+        "<h4>Skill or luck — the same calls, scored against the chances</h4>"
+        # the scope has to land before the numbers do: this is the one block on
+        # a league's page that is not about that league, and read the other way
+        # round its 50% looks like it should match the headline table's
+        f"<p class='meta'>Not just {escape(league)}: every one of the "
+        f"{c['n']} graded calls across the five leagues Understat covers, "
+        "because no single league has anywhere near enough of them yet.</p>"
+        "<div class='card'><table><thead><tr><th>Call scored against</th>"
+        "<th class='num'>Top pick right</th><th class='num'>Brier</th>"
+        "</tr></thead><tbody>"
+        f"<tr><td>What happened</td><td class='num'>{c['hits']:.0f}%</td>"
+        f"<td class='num'>{c['brier']:.3f}</td></tr>"
+        "<tr><td>What the chances deserved</td>"
+        f"<td class='num'>{c['deserved_hits']:.0f}%</td>"
+        f"<td class='num'>{c['deserved_brier']:.3f}</td></tr>"
+        "</tbody></table></div>"
+        f"<p class='meta'>{reading} <span class='dim'>For scale, the side the "
+        f"chances favoured actually won {c['agree']:.0f}% of these "
+        "matches.</span></p>"
+    )
+
+
 def report_card_block(db, league):
     """How the published predictions have actually fared.
 
@@ -1298,9 +1411,22 @@ def report_card_block(db, league):
         "between publication and kickoff, a further row re-scores the same "
         "fixtures using the first call the site ever published for them; if "
         "that number is close to the main one, the extra fortnight of data "
-        "adds less than you would think."
+        "adds less than you would think. The <em>skill or luck</em> table "
+        "scores the very same calls a second time, against Understat's "
+        "post-match simulation of each fixture instead of against its "
+        "scoreline: the Brier a call would have earned on average had the "
+        "match been replayed from the chances both sides created. It is the "
+        "one number here that can tell a bad model from a bad night, and it "
+        "is pooled across the five leagues Understat covers because per "
+        "league there are nowhere near enough graded calls to read. It is "
+        "not a rival forecast — Understat's number exists only after the "
+        "final whistle and knows every shot that was taken, which is exactly "
+        "what makes it a fair standard to be judged against and a useless "
+        "one to predict with."
     )
-    return block("Model report card", note + headline + calibration + recent_table,
+    return block("Model report card",
+                 note + headline + calibration + recent_table
+                 + deserved_block(db, league),
                  about=about)
 
 
