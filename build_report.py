@@ -392,6 +392,9 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .fx-grade.no { background: var(--loss); }
 .fx-verdict { margin: 0 2px 6px; }
 .fx-verdict .prob { height: 22px; }
+.fx-luck { border-left: 3px solid var(--accent); background: var(--surface);
+  border-radius: 0 6px 6px 0; padding: 8px 12px; margin: 8px 2px 0;
+  font-size: 13.5px; }
 .fx-noverdict { border: 1px solid var(--border); border-left: 3px solid var(--draw);
   background: var(--surface); border-radius: 6px; padding: 9px 12px; margin: 0 2px 6px;
   font-size: 13.5px; color: var(--text-secondary); }
@@ -1162,6 +1165,119 @@ CALIBRATION_BUCKETS = [     # (low, high, label) on the top pick's probability
 ]
 
 
+DESERVED_MIN = 10   # below this the split is noise even pooled across leagues
+
+
+def deserved_comparison(db, leagues):
+    """Every published call in the leagues Understat covers, scored twice:
+    against what happened, and against what the chances deserved.
+
+    Pooled across leagues on purpose. Per league the graded log stays a
+    handful of matches for months, and a luck estimate drawn from a handful
+    of matches is itself mostly luck; the model is the same in all five, so
+    the pooled figure is the one that means anything first.
+
+    The second score is the Brier the same call would have earned on
+    average had the match been replayed from the chances both sides
+    created -- an expectation over Understat's forecast, rather than the
+    single 0/1 outcome that happened to occur. Both are the same statistic
+    on the same scale, so the gap between them is readable: close together
+    means results have been landing where the chances said they would.
+
+    A caveat worth keeping in view: the chances a side created are not
+    themselves free of luck, so this measures deviation from a better
+    proxy for the truth, not from the truth.
+    """
+    logged = prediction_log.load()
+    n = hits = agree = 0
+    brier = deserved_brier = deserved_hits = 0.0
+    for league in leagues:
+        graded = prediction_log.graded(db, logged, league)
+        if not graded:
+            continue
+        names = {x for row, _, _, _ in graded for x in (row["home"], row["away"])}
+        lookup = _forecasts_for(db, league, names)
+        for row, home_score, away_score, outcome in graded:
+            fc = lookup.get((row["match_date"], row["home"], row["away"]))
+            # same scoreline guard as everywhere else: a forecast that belongs
+            # to a different match would quietly poison the average
+            if not fc or fc[1] != home_score or fc[2] != away_score:
+                continue
+            q = fc[0]
+            probs = prediction_log.probabilities(row)
+            pick = max(range(3), key=lambda i: probs[i])
+            n += 1
+            hits += int(pick == outcome)
+            brier += sum((p - (1.0 if i == outcome else 0.0)) ** 2
+                         for i, p in enumerate(probs))
+            deserved_brier += sum(
+                q[j] * sum((p - (1.0 if i == j else 0.0)) ** 2
+                           for i, p in enumerate(probs))
+                for j in range(3)
+            )
+            deserved_hits += q[pick]
+            agree += int(max(range(3), key=lambda i: q[i]) == outcome)
+    if n < DESERVED_MIN:
+        return None
+    return {
+        "n": n,
+        "hits": hits / n * 100,
+        "deserved_hits": deserved_hits / n * 100,
+        "brier": brier / n,
+        "deserved_brier": deserved_brier / n,
+        "agree": agree / n * 100,
+    }
+
+
+def deserved_block(db, league):
+    """The skill-or-luck half of the report card. Empty for Allsvenskan,
+    whose feed has no shot-level simulation to be scored against."""
+    if league not in UNDERSTAT_LEAGUES:
+        return ""
+    c = deserved_comparison(db, UNDERSTAT_LEAGUES)
+    if not c:
+        return ""
+    gap = c["brier"] - c["deserved_brier"]
+    if gap > 0.03:
+        reading = (
+            "Results have been landing worse for these calls than the chances "
+            "behind them implied — on this evidence the model is reading "
+            "the football better than its record shows."
+        )
+    elif gap < -0.03:
+        reading = (
+            "Results have been kinder to these calls than the chances behind "
+            "them warranted — the record currently flatters the model."
+        )
+    else:
+        reading = (
+            "The two are close, which is the unexciting and healthy answer: "
+            "results have landed about where the chances said they would, so "
+            "the record above is being earned rather than won or lost on luck."
+        )
+    return (
+        "<h4>Skill or luck — the same calls, scored against the chances</h4>"
+        # the scope has to land before the numbers do: this is the one block on
+        # a league's page that is not about that league, and read the other way
+        # round its 50% looks like it should match the headline table's
+        f"<p class='meta'>Not just {escape(league)}: every one of the "
+        f"{c['n']} graded calls across the five leagues Understat covers, "
+        "because no single league has anywhere near enough of them yet.</p>"
+        "<div class='card'><table><thead><tr><th>Call scored against</th>"
+        "<th class='num'>Top pick right</th><th class='num'>Brier</th>"
+        "</tr></thead><tbody>"
+        f"<tr><td>What happened</td><td class='num'>{c['hits']:.0f}%</td>"
+        f"<td class='num'>{c['brier']:.3f}</td></tr>"
+        "<tr><td>What the chances deserved</td>"
+        f"<td class='num'>{c['deserved_hits']:.0f}%</td>"
+        f"<td class='num'>{c['deserved_brier']:.3f}</td></tr>"
+        "</tbody></table></div>"
+        f"<p class='meta'>{reading} <span class='dim'>For scale, the side the "
+        f"chances favoured actually won {c['agree']:.0f}% of these "
+        "matches.</span></p>"
+    )
+
+
 def report_card_block(db, league):
     """How the published predictions have actually fared.
 
@@ -1295,9 +1411,22 @@ def report_card_block(db, league):
         "between publication and kickoff, a further row re-scores the same "
         "fixtures using the first call the site ever published for them; if "
         "that number is close to the main one, the extra fortnight of data "
-        "adds less than you would think."
+        "adds less than you would think. The <em>skill or luck</em> table "
+        "scores the very same calls a second time, against Understat's "
+        "post-match simulation of each fixture instead of against its "
+        "scoreline: the Brier a call would have earned on average had the "
+        "match been replayed from the chances both sides created. It is the "
+        "one number here that can tell a bad model from a bad night, and it "
+        "is pooled across the five leagues Understat covers because per "
+        "league there are nowhere near enough graded calls to read. It is "
+        "not a rival forecast — Understat's number exists only after the "
+        "final whistle and knows every shot that was taken, which is exactly "
+        "what makes it a fair standard to be judged against and a useless "
+        "one to predict with."
     )
-    return block("Model report card", note + headline + calibration + recent_table,
+    return block("Model report card",
+                 note + headline + calibration + recent_table
+                 + deserved_block(db, league),
                  about=about)
 
 
@@ -3071,6 +3200,52 @@ def _resolved_matches(db, league):
     ]
 
 
+def _forecasts_for(db, league, names):
+    """Understat's post-match forecast, keyed by (date, home, away) using the
+    caller's own club names.
+
+    The forecast is a rerun of the match from the chances both sides created,
+    so it exists only once a match has been played, and only in the five
+    leagues Understat covers -- Allsvenskan's feed has no equivalent and
+    simply gets nothing. Each entry carries the scoreline Understat has on
+    file so the caller can refuse a row when the two feeds turn out to be
+    describing different 90 minutes.
+
+    Understat rounds each probability to four places, so a set can sum to
+    0.99; they are renormalised here rather than left to quietly bias every
+    number computed from them.
+    """
+    if league not in UNDERSTAT_LEAGUES or not names:
+        return {}
+    # a database from before the table existed must degrade to "no forecast",
+    # not crash the whole build
+    if not db.execute(
+        "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?",
+        ("understat_fixtures",),
+    ).fetchone():
+        return {}
+    rows = db.execute(
+        """SELECT kickoff, home, away, home_goals, away_goals,
+                  fc_home, fc_draw, fc_away
+           FROM main.understat_fixtures
+           WHERE league = ? AND fc_home IS NOT NULL""",
+        (league,),
+    ).fetchall()
+    if not rows:
+        return {}
+    us_names = sorted({unescape(r[1]) for r in rows} | {unescape(r[2]) for r in rows})
+    back = {us: own for own, us
+            in _predict_mapping(sorted(set(names)), us_names).items() if us}
+    out = {}
+    for kickoff, home, away, hg, ag, w, d, l in rows:
+        h, a = back.get(unescape(home)), back.get(unescape(away))
+        total = w + d + l
+        if not (h and a) or total <= 0:
+            continue
+        out[((kickoff or "")[:10], h, a)] = ([w / total, d / total, l / total], hg, ag)
+    return out
+
+
 def _season_label(league, season):
     """'2025' -> '2025/26' for the big five, left alone for calendar-year
     leagues (Allsvenskan plays 2026 inside 2026)."""
@@ -3271,6 +3446,8 @@ def load_fixture_data(db, league):
     xg_by_match = {}
     for _, mdate, h, a, hg, ag, hxg, axg in played:
         xg_by_match[(mdate, h, a)] = (hg, ag, hxg, axg)
+    # Understat's rerun of the same match, keyed the same way
+    forecasts = _forecasts_for(db, league, fx_names)
 
     logged = prediction_log.load()
     out_results = []
@@ -3288,6 +3465,12 @@ def load_fixture_data(db, league):
             # are describing different matches and the xG is left off
             if hit[0] == hg and hit[1] == ag:
                 rec["hxg"], rec["axg"] = hit[2], hit[3]
+        # what the chances deserved: the same scoreline check applies, since a
+        # forecast attached to the wrong match would read as a confident lie
+        fc = forecasts.get((day, home, away))
+        if fc and fc[1] == hg and fc[2] == ag:
+            rec["fc"] = [round(p, 4) for p in fc[0]]
+            rec["fcpct"] = [int(f"{p * 100:.0f}") for p in fc[0]]
         # what the model said in advance, if this fixture was ever published
         row = logged.get(str(event_id))
         if row:
@@ -4364,6 +4547,80 @@ EXPLORER_JS = """
       'award the points.</span></p>';
   }
 
+  // Understat reruns a finished match from the chances both sides created and
+  // reports how often each side comes out on top. It is not a prediction --
+  // it exists only after the match -- so it answers a different question from
+  // the model's call: not "who wins" but "who deserved to".
+  const probBar = (p, pct, cls) => {
+    const seg = (c, share, whole) => "<i class='" + c + "' style='width:" +
+      (share * 100).toFixed(1) + "%'>" + (share >= 0.15 ? whole + '%' : '') + '</i>';
+    return "<div class='prob " + cls + "'>" + seg('h', p[0], pct[0]) +
+      seg('d', p[1], pct[1]) + seg('a', p[2], pct[2]) + '</div>';
+  };
+
+  function sideName(m, i) {
+    return i === 1 ? 'a draw' : esc(i === 0 ? m.home : m.away);
+  }
+
+  function deservedBox(m) {
+    const won = m.hg > m.ag ? 0 : m.hg === m.ag ? 1 : 2;
+    const top = m.fc.indexOf(Math.max.apply(null, m.fc));
+    let read;
+    if (m.fc[top] < 0.4) {
+      read = 'Replayed from those chances the match splits close to evenly' +
+        (won === 1 ? ', and it finished level.'
+                   : ' — ' + sideName(m, won) + ' took the points from a ' +
+                     'match that could have gone any way.');
+    } else if (top === won) {
+      read = 'Replayed from those chances, ' +
+        (won === 1 ? 'it finishes level ' : sideName(m, top) + ' come out on top ') +
+        m.fcpct[top] + '% of the time — the result the match deserved.';
+    } else {
+      read = 'Replayed from those chances, ' +
+        (top === 1 ? 'it finishes level ' : sideName(m, top) + ' come out on top ') +
+        m.fcpct[top] + '% of the time. ' +
+        (won === 1 ? 'It finished level.' : sideName(m, won) + ' won it.');
+    }
+    return probBar(m.fc, m.fcpct, 'fc') +
+      "<p class='meta'>" + read + " <span class='dim'>Understat's simulation " +
+      'of the shots actually taken — it knows what the chances were, so ' +
+      'it is a verdict on the 90 minutes, never a forecast of them.</span></p>';
+  }
+
+  // the point of showing both: a missed call on a match the chances say we
+  // read correctly is a different failure from one the chances agree with
+  function luckLine(m) {
+    if (!m.fc || !m.pct) return '';
+    const won = m.hg > m.ag ? 0 : m.hg === m.ag ? 1 : 2;
+    const pick = m.pct.indexOf(Math.max.apply(null, m.pct));
+    const top = m.fc.indexOf(Math.max.apply(null, m.fc));
+    let s;
+    if (m.fc[top] < 0.4) {
+      // no lean worth the name: saying the chances "back" anything here would
+      // read as agreement the numbers do not actually contain
+      s = pick === won
+        ? 'The model called it, though the chances split the match too evenly ' +
+          'to say anyone deserved it.'
+        : 'The model missed, but the chances split the match too evenly to say ' +
+          'anyone deserved it either.';
+    } else if (pick === won) {
+      s = top === won
+        ? 'The model called it, and the chances back the result.'
+        : 'The model called it, but the chances lean towards ' + sideName(m, top) +
+          ' — right about the winner, flattered by how it finished.';
+    } else if (top === pick) {
+      s = 'The model missed, and yet the chances lean the same way it did — ' +
+        'a reading beaten by the finishing rather than by the football.';
+    } else if (top === won) {
+      s = 'The model missed, and the chances back the result.';
+    } else {
+      // the chances favour neither the call nor the winner -- usually a draw
+      s = 'The model missed, but so did the chances: they lean towards ' +
+        sideName(m, top) + ', which is not what happened either.';
+    }
+    return "<div class='fx-luck'>" + s + '</div>';
+  }
+
   function callBox(m) {
     if (!m.pct) {
       return "<p class='dim fx-none'>No published call for this one \\u2014 it was " +
@@ -4373,8 +4630,6 @@ EXPLORER_JS = """
     const outcome = m.hg > m.ag ? 0 : m.hg === m.ag ? 1 : 2;
     const top = m.pct.indexOf(Math.max.apply(null, m.pct));
     const names = [m.home, 'a draw', m.away];
-    const seg = (cls, share, whole) => "<i class='" + cls + "' style='width:" +
-      (share * 100).toFixed(1) + "%'>" + (share >= 0.15 ? whole + '%' : '') + '</i>';
     const hit = top === outcome;
     const badge = "<span class='fx-grade " + (hit ? 'ok' : 'no') + "'>" +
       (hit ? 'called it' : 'missed') + '</span>';
@@ -4383,8 +4638,7 @@ EXPLORER_JS = """
           ? 'written down on ' + shortDate(m.first)
           : 'first called ' + shortDate(m.first) + ', last updated ' + shortDate(m.last))
       : '';
-    return "<div class='prob'>" + seg('h', m.p[0], m.pct[0]) +
-      seg('d', m.p[1], m.pct[1]) + seg('a', m.p[2], m.pct[2]) + '</div>' +
+    return probBar(m.p, m.pct, '') +
       "<p class='meta'>Leaned " + esc(names[top]) + ' at ' + m.pct[top] + '% ' + badge +
       (m.lam ? " <span class='dim'>\\u00b7 forecast " + num(m.lam[0], 1) + '\\u2013' +
         num(m.lam[1], 1) : "<span class='dim'>") +
@@ -4402,8 +4656,13 @@ EXPLORER_JS = """
       "<div class='fx-head'><h4>" + esc(m.home) + " <span class='fx-score'>" +
         m.hg + ' \\u2013 ' + m.ag + '</span> ' + esc(m.away) +
         "</h4><span class='dim'>" + esc(when) + '</span></div>' +
-      xg + chanceVerdict(m) +
+      xg +
+      // the forecast supersedes the xG-difference verdict rather than sitting
+      // beside it: same question, and this one answers it properly
+      (m.fc ? "<h4 class='fx-h'>What the chances deserved</h4>" + deservedBox(m)
+            : chanceVerdict(m)) +
       "<h4 class='fx-h'>What the model said beforehand</h4>" + callBox(m) +
+      luckLine(m) +
       "<h4 class='fx-h'>Head to head before this match</h4>" + h2hBlock(m);
   }
 
