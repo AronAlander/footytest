@@ -11,6 +11,7 @@ Usage:
     python fetch_understat.py                # current season (auto-detected)
     python fetch_understat.py 2018 2019      # specific seasons (starting year)
     python fetch_understat.py --backfill     # every season Understat has (2014+)
+    python fetch_understat.py --fixtures-from-cache   # re-parse data/*.json only
 """
 
 import gzip
@@ -93,6 +94,24 @@ CREATE TABLE IF NOT EXISTS understat_team_matches (
     fetched_at    TEXT,
     PRIMARY KEY (season, league, team, match_date)
 );
+CREATE TABLE IF NOT EXISTS understat_fixtures (
+    match_id    TEXT PRIMARY KEY,
+    season      TEXT NOT NULL,
+    league      TEXT NOT NULL,
+    kickoff     TEXT,
+    home        TEXT,
+    away        TEXT,
+    home_goals  INTEGER,
+    away_goals  INTEGER,
+    home_xg     REAL,
+    away_xg     REAL,
+    fc_home     REAL,
+    fc_draw     REAL,
+    fc_away     REAL,
+    fetched_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS understat_fixtures_league
+    ON understat_fixtures (league, kickoff);
 """
 
 
@@ -127,7 +146,18 @@ def fetch_league(db, league, slug, season, fetched_at):
     (DATA_DIR / f"understat_{slug.lower()}_{season}.json").write_text(
         json.dumps(data, indent=2), encoding="utf-8"
     )
+    store_league(db, league, season, data, fetched_at)
 
+
+def _maybe(value, cast):
+    """Understat serves numbers as strings and unplayed fixtures as nulls."""
+    return None if value in (None, "") else cast(value)
+
+
+def store_league(db, league, season, data, fetched_at):
+    """Write one season's payload. Split out from the fetch so the same
+    parse can be replayed from the cached JSON under data/ (--fixtures-from-cache)
+    without going back to Understat."""
     players = data.get("players") or []
     for p in players:
         db.execute(
@@ -176,8 +206,68 @@ def fetch_league(db, league, slug, season, fetched_at):
                 ),
             )
             match_count += 1
+    fixture_count = store_fixtures(db, league, season, data, fetched_at)
     skip_note = f", {skipped} skipped (no team name yet)" if skipped else ""
-    print(f"  {league}: {len(players)} players, {match_count} team-match rows{skip_note}")
+    print(f"  {league}: {len(players)} players, {match_count} team-match rows, "
+          f"{fixture_count} fixtures{skip_note}")
+
+
+def store_fixtures(db, league, season, data, fetched_at):
+    """The `dates` array: one row per fixture, with Understat's own forecast.
+
+    Unlike the per-team history this names both clubs and carries a stable
+    Understat match id, and it is the only place their forecast appears --
+    a *post-match* simulation of the chances both sides created, so it
+    exists for played matches only and is null for everything upcoming.
+    Unplayed rows are stored anyway: they cost nothing and they are what
+    turns this into a proper fixture list.
+    """
+    count = 0
+    for fx in data.get("dates") or []:
+        match_id = fx.get("id")
+        home, away = fx.get("h") or {}, fx.get("a") or {}
+        if not (match_id and home.get("title") and away.get("title")):
+            continue
+        goals, xg = fx.get("goals") or {}, fx.get("xG") or {}
+        forecast = fx.get("forecast") or {}
+        db.execute(
+            "INSERT OR REPLACE INTO understat_fixtures VALUES "
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                str(match_id), season, league, fx.get("datetime"),
+                html.unescape(home["title"]), html.unescape(away["title"]),
+                _maybe(goals.get("h"), int), _maybe(goals.get("a"), int),
+                _maybe(xg.get("h"), float), _maybe(xg.get("a"), float),
+                _maybe(forecast.get("w"), float), _maybe(forecast.get("d"), float),
+                _maybe(forecast.get("l"), float),
+                fetched_at,
+            ),
+        )
+        count += 1
+    return count
+
+
+def backfill_fixtures_from_cache(db, fetched_at):
+    """Populate understat_fixtures from the JSON already on disk.
+
+    understat_fixtures was added long after the rest, so an existing
+    database has every season's players and team history but no fixtures.
+    Every payload they came from is still cached under data/, so the table
+    can be filled without a single request. Only fixtures are touched --
+    a stale cache file must not be allowed to overwrite fresher player or
+    team rows.
+    """
+    total = 0
+    for league, slug in LEAGUES.items():
+        for path in sorted(DATA_DIR.glob(f"understat_{slug.lower()}_*.json")):
+            season = path.stem.rsplit("_", 1)[-1]
+            data = json.loads(path.read_text(encoding="utf-8"))
+            total += store_fixtures(db, league, season, data, fetched_at)
+    db.commit()
+    played = db.execute(
+        "SELECT COUNT(*) FROM understat_fixtures WHERE fc_home IS NOT NULL"
+    ).fetchone()[0]
+    print(f"{total} fixtures from {DATA_DIR}, {played} with a forecast")
 
 
 def seasons_from_args(argv):
@@ -197,6 +287,11 @@ def main() -> None:
     db = sqlite3.connect(DB_PATH)
     migrate_if_needed(db)
     fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    if "--fixtures-from-cache" in sys.argv:
+        backfill_fixtures_from_cache(db, fetched_at)
+        db.close()
+        return
 
     seasons = seasons_from_args(sys.argv[1:])
     for season in seasons:
