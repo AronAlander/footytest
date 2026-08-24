@@ -3217,6 +3217,13 @@ def _forecasts_for(db, league, names):
     """
     if league not in UNDERSTAT_LEAGUES or not names:
         return {}
+    # a database from before the table existed must degrade to "no forecast",
+    # not crash the whole build
+    if not db.execute(
+        "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?",
+        ("understat_fixtures",),
+    ).fetchone():
+        return {}
     rows = db.execute(
         """SELECT kickoff, home, away, home_goals, away_goals,
                   fc_home, fc_draw, fc_away
