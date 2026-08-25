@@ -22,6 +22,7 @@ from bisect import bisect
 from datetime import date, datetime, timedelta, timezone
 from html import escape, unescape
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import prediction_log
 import projection_log
@@ -5485,9 +5486,45 @@ def season_nav(db, current_page_season=None):
     )
 
 
+STOCKHOLM = "Europe/Stockholm"
+NIGHTLY_UTC = (3, 15)   # the cron in .github/workflows/update.yml, in UTC
+
+
+def _in_stockholm(moment):
+    """(wall clock, zone name) for an aware UTC moment.
+
+    The nightly build runs on a GitHub runner, whose clock is UTC, so a bare
+    datetime.now() stamped the page two hours behind the only person who
+    reads it -- and did it silently, with no zone on the badge to give the
+    game away. Falls back to UTC on a machine with no IANA database rather
+    than lying about which hour it is showing.
+    """
+    try:
+        return moment.astimezone(ZoneInfo(STOCKHOLM)), "Stockholm"
+    except Exception:
+        return moment, "UTC"
+
+
+def build_stamp(now=None):
+    """When this build ran, as '2026-08-25 06:15 (Stockholm)'."""
+    moment, zone = _in_stockholm(now or datetime.now(timezone.utc))
+    return f"{moment:%Y-%m-%d %H:%M} ({zone})"
+
+
+def nightly_start(now=None):
+    """The workflow's cron as a Stockholm wall clock, derived rather than
+    written down so it stays right either side of the daylight-saving
+    switch instead of being an hour out for half the year."""
+    day = (now or datetime.now(timezone.utc)).date()
+    fires = datetime(day.year, day.month, day.day, *NIGHTLY_UTC,
+                     tzinfo=timezone.utc)
+    moment, zone = _in_stockholm(fires)
+    return f"{moment:%H:%M} " + ("Stockholm time" if zone == "Stockholm" else "UTC")
+
+
 def build_page(db, nav, generated, archive_label=None):
     """The full dashboard HTML. archive_label (e.g. '2018/19') switches to the
-    archive layout: Understat tabs only, no volatile 'Generated' badge so the
+    archive layout: Understat tabs only, no volatile 'Updated' badge so the
     file only changes when the code or data does."""
     archive = archive_label is not None
     league_table = "understat_players" if archive else "matches"
@@ -5544,14 +5581,18 @@ def build_page(db, nav, generated, archive_label=None):
                   "Rebuilt whenever the report generator changes.")
     else:
         badge_texts = [coverage_label(db, leagues),
-                       "TheSportsDB + Understat + FotMob", f"Generated {generated}"]
+                       "TheSportsDB + Understat + FotMob", f"Updated {generated}"]
         title = "Football dashboard"
         tagline = ("The big five European leagues — plus Allsvenskan — under the hood: "
                    "standings, xG team analytics, player profiles and second-order "
                    "insights.")
-        footer = ("Standings are computed from the stored results. Run "
-                  "<code>python fetch_data.py</code> and <code>python fetch_understat.py</code> "
-                  "regularly to keep the database current.")
+        # the old text here told the reader to run the fetchers by hand, which
+        # has not been true since the nightly workflow existed. What is
+        # actually worth knowing is when to come back for last night's results
+        footer = ("Standings are computed from the stored results. The site "
+                  f"refreshes itself every night from about {nightly_start()}, "
+                  "and the rebuild takes around a quarter of an hour — a late "
+                  "kick-off lands shortly after that.")
     badges = "".join(f"<span class='badge'>{escape(t)}</span>" for t in badge_texts)
     # the archive pages are frozen snapshots of a finished season; a running
     # list of what changed this week belongs on the live dashboard only
@@ -5664,7 +5705,7 @@ def main() -> None:
         return show_changelog()
     if not DB_PATH.exists():
         raise SystemExit("No football.sqlite found - run `python fetch_data.py` first.")
-    generated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    generated = build_stamp()
 
     db = sqlite3.connect(DB_PATH)
     warn_if_stale(db)
