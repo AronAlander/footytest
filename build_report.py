@@ -1660,9 +1660,12 @@ def _history_depth(db, league, season, as_of=None):
     say when it's true, since "the model's history goes back 128 days" asks
     a reader to do arithmetic that "built from this season alone" doesn't.
 
-    Every big-five league has several seasons on file and is nowhere near
-    either condition; a league whose feed only starts with its current
-    season (Allsvenskan, until FotMob is backfilled further) trips both."""
+    Every league now has several seasons on file and is nowhere near either
+    condition. Allsvenskan used to trip both, holding 2026 alone until
+    fetch_fotmob.py was backfilled to 2023 — which is worth keeping in mind
+    when adding a league, because nothing else complains: the model quietly
+    shrinks every club to the league average and projects the whole table to
+    the same points, and only this pair of flags says why."""
     now = as_of or date.today()
     oldest = db.execute(
         "SELECT MIN(match_date) FROM main.understat_team_matches WHERE league = ?",
