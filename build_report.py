@@ -334,6 +334,11 @@ svg .radar-poly.pc1 { stroke: var(--win); fill: var(--win); }
 svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 .h2h-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
          color: var(--text-secondary); margin: 20px 0 8px; font-weight: 700; }
+/* recent form under a single club's profile; the table itself reuses .fx-form */
+.tc-form { margin-top: 4px; }
+.tc-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+            margin: 0 2px 8px; font-size: 12.5px; }
+.tc-chips .dim { margin-left: 6px; }
 .h2h-metric { margin: 9px 0; }
 .h2h-lab { text-align: center; font-size: 11px; color: var(--text-secondary);
            text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
@@ -3312,6 +3317,47 @@ def _fixture_players(db, league, fx_names):
     return out
 
 
+def _club_history(played, name):
+    """One club's matches from a _resolved_matches list, newest first, as
+    (season, [date, home/away, opponent, scored, conceded, xG, xGA]).
+
+    Always from that club's own point of view, so an away row reads the same
+    way a home row does and nothing downstream has to remember which side of
+    the fixture it is looking at.
+    """
+    rows = []
+    for season, mdate, home, away, hg, ag, hxg, axg in played:
+        if home == name:
+            rows.append((season, [mdate, "h", away, hg, ag, hxg, axg]))
+        elif away == name:
+            rows.append((season, [mdate, "a", home, ag, hg, axg, hxg]))
+    rows.reverse()
+    return rows
+
+
+def load_team_form(db, league, limit=FIXTURE_FORM):
+    """Recent form for every club Team analytics covers, keyed by the name
+    that tab knows it by.
+
+    The fixture explorer already builds this, but keyed by TheSportsDB's
+    names and only for the clubs on its slate -- a club with no upcoming
+    fixture and no recent result would be missing exactly when its profile
+    is the only place left to read about it. Keying off load_teams instead
+    covers the tab completely and needs no name bridge, since both come from
+    the same feed.
+    """
+    names = [t["team"] for t in load_teams(db, league)]
+    if not names:
+        return {}
+    played = _resolved_matches(db, league)
+    out = {}
+    for name in names:
+        rows = [r for _, r in _club_history(played, name)[:limit]]
+        if rows:
+            out[name] = rows
+    return out
+
+
 def load_fixture_data(db, league):
     """Everything the fixture explorer needs for one league, as plain JSON.
 
@@ -3355,13 +3401,7 @@ def load_fixture_data(db, league):
         hist = mapping.get(fx_name)
         if hist is None:
             continue
-        rows = []
-        for season, mdate, home, away, hg, ag, hxg, axg in played:
-            if home == hist:
-                rows.append((season, [mdate, "h", away, hg, ag, hxg, axg]))
-            elif away == hist:
-                rows.append((season, [mdate, "a", home, ag, hg, axg, hxg]))
-        rows.reverse()
+        rows = _club_history(played, hist)
         form[fx_name] = [r for _, r in rows[:FIXTURE_FORM]]
         # venue records are this season only; form deliberately is not, so a
         # club's last six carry over the summer instead of showing nothing.
@@ -3492,7 +3532,7 @@ def load_fixture_data(db, league):
             "venue": venue, "players": players, "h2h": h2h}
 
 
-def team_compare(teams_by_lg, tm_by_lg):
+def team_compare(teams_by_lg, tm_by_lg, form_by_lg):
     if not any(teams_by_lg.values()):
         return ""
     # select options are (re)built client-side per league
@@ -3504,22 +3544,33 @@ def team_compare(teams_by_lg, tm_by_lg):
     tm_payload = json.dumps(
         tm_by_lg, ensure_ascii=False, separators=(",", ":")
     ).replace("</", "<\\/")
+    form_payload = json.dumps(
+        form_by_lg, ensure_ascii=False, separators=(",", ":")
+    ).replace("</", "<\\/")
+    # empty on the archive pages, where cross-season form has no business being
+    has_form = any(form_by_lg.values())
     body = (
         f"<div class='controls'>{selects}"
         "<button id='tc-clear' type='button'>Clear</button></div>"
         "<div class='chart-card' id='tc-empty'><p class='dim' style='margin:4px 2px'>"
-        "Pick a team above for its style profile, or two or three to see them side "
-        "by side. Picking exactly <em>two</em> unlocks a head-to-head deep dive: this "
+        "Pick a team above for its style profile" + (" and recent form" if has_form else "")
+        + ", or two or three to "
+        "see them side by side. Picking exactly <em>two</em> unlocks a head-to-head deep dive: this "
         "season's meetings, a tale-of-the-tape bar duel, recent form, home/away splits "
         "and overlaid form curves.</p></div>"
         "<div class='chart-card' id='tc-card' hidden></div>"
-        f"<script>const TEAMS_BY_LG = {payload};\nconst TM_BY_LG = {tm_payload};</script>"
+        f"<script>const TEAMS_BY_LG = {payload};\nconst TM_BY_LG = {tm_payload};\n"
+        f"const FORM_BY_LG = {form_payload};</script>"
     )
     about = (
         "<p><strong>What it shows.</strong> One to three teams overlaid on a radar of six "
         "style dimensions, each expressed as the team's <em>percentile</em> among the "
         "sides in that league. A single team is a profile rather than a comparison — "
-        "that is where a click on a club's name over on the League tab lands. <strong>Attack</strong> is non-penalty xG "
+        "that is where a click on a club's name over on the League tab lands"
+        + (", and it carries the club's last six matches underneath, because the radar "
+           "says what kind of side this is and only the results say how it is going"
+           if has_form else "")
+        + ". <strong>Attack</strong> is non-penalty xG "
         "created per match and <strong>Defence</strong> is non-penalty xG conceded "
         "(flipped, so further out = fewer chances allowed). <strong>Finishing</strong> is "
         "goals minus xG — conversion above or below what the chances deserved. "
@@ -4068,6 +4119,51 @@ EXPLORER_JS = """
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   let TEAMS = TEAMS_BY_LG[window.CUR_LG] || [];
   let TM = TM_BY_LG[window.CUR_LG] || {};
+  let FORM = (typeof FORM_BY_LG === 'undefined' ? {} : FORM_BY_LG)[window.CUR_LG] || {};
+
+  /* ---- recent form: what the percentiles above were actually built from ---- */
+  const FMONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function fDate(iso) {
+    const p = String(iso || '').split('-');
+    return p.length < 3 ? (iso || '')
+      : Number(p[2]) + ' ' + FMONTHS[Number(p[1]) - 1] + ' ' + p[0].slice(2);
+  }
+  const fNum = (v, d) => (v == null ? '\\u2013' : Number(v).toFixed(d));
+  const fRes = (gf, ga) => (gf > ga ? 'W' : gf < ga ? 'L' : 'D');
+
+  // the radar answers "what kind of side is this"; it cannot answer "how is it
+  // going", and a profile reached by clicking a league-table row is usually
+  // opened with the second question in mind
+  function formBlock(name) {
+    const rows = FORM[name] || [];
+    if (!rows.length) return '';
+    // oldest-first chips, the way a form guide is read, over a newest-first table
+    const chips = rows.slice().reverse().map((r) => {
+      const l = fRes(r[3], r[4]);
+      return "<span class='chip " + l + "'>" + l + '</span>';
+    }).join('');
+    let pts = 0;
+    rows.forEach((r) => { pts += r[3] > r[4] ? 3 : r[3] === r[4] ? 1 : 0; });
+    let body = "<table class='fx-form'><tbody>";
+    rows.forEach((r) => {
+      const l = fRes(r[3], r[4]);
+      body += "<tr><td><span class='chip " + l + "'>" + l + '</span></td>' +
+        "<td class='dim'>" + fDate(r[0]) + '</td>' +
+        "<td class='dim'>" + (r[1] === 'h' ? 'H' : 'A') + '</td>' +
+        "<td class='fx-grow'>" + esc(r[2]) + '</td>' +
+        "<td class='num score'>" + r[3] + '\\u2013' + r[4] + '</td>' +
+        "<td class='num dim' title='expected goals that day'>" +
+          fNum(r[5], 2) + '\\u2013' + fNum(r[6], 2) + '</td></tr>';
+    });
+    // chips run oldest to newest, the way a form guide is read; the table
+    // under them runs newest first, the way a results list is
+    return "<div class='tc-form'><div class='h2h-h'>Recent form</div>" +
+      "<div class='tc-chips'>" + chips + "<span class='dim'>oldest to newest " +
+      '\\u00b7 ' + pts + ' of ' + rows.length * 3 + ' points</span></div>' +
+      body + '</tbody></table></div>';
+  }
+
   function rebuildSelects() {
     const options = TEAMS.map((t) => '<option>' + esc(t.team) + '</option>').join('');
     [1, 2, 3].forEach((i) => {
@@ -4296,7 +4392,10 @@ EXPLORER_JS = """
       "<span><span class='pc-dot pc" + i + "'></span>" + esc(t.team) +
       " <span class='dim'>(" + t.pts + " pts)</span></span>").join('') + '</div>';
     card.innerHTML = legend + radarSvg(ts) +
-      (ts.length === 2 ? h2hHtml(ts[0], ts[1]) : compareTable(ts));
+      (ts.length === 2 ? h2hHtml(ts[0], ts[1]) : compareTable(ts)) +
+      // only on a single club: two teams already get recent form inside the
+      // head-to-head, and three stacked form tables would bury the radar
+      (ts.length === 1 ? formBlock(ts[0].team) : '');
   }
   // entry point for a click on a club name over on the League tab
   window.showTeam = function (league, name) {
@@ -4327,6 +4426,7 @@ EXPLORER_JS = """
   document.addEventListener('leaguechange', () => {
     TEAMS = TEAMS_BY_LG[window.CUR_LG] || [];
     TM = TM_BY_LG[window.CUR_LG] || {};
+    FORM = (typeof FORM_BY_LG === 'undefined' ? {} : FORM_BY_LG)[window.CUR_LG] || {};
     rebuildSelects();
     renderTC();
   });
@@ -5235,7 +5335,7 @@ def metric_glossary():
     )
 
 
-def teams_panel(db, leagues):
+def teams_panel(db, leagues, archive=False):
     tables = "".join(
         lgview(lg, xg_table(db, lg), i == 0) for i, lg in enumerate(leagues)
     )
@@ -5246,8 +5346,13 @@ def teams_panel(db, leagues):
     return (
         f"<h2>Team analytics <span class='dim'>({sources_label(db, leagues)})</span></h2>"
         + metric_glossary() + tables
+        # recent form is deliberately cross-season, which is right on the live
+        # dashboard and wrong on a frozen one: an archive page would show a
+        # club's 2026 results under a 2018/19 heading, and every archive file
+        # would churn each time anybody played
         + team_compare({lg: load_teams(db, lg) for lg in leagues},
-                       {lg: load_team_matches(db, lg) for lg in leagues})
+                       {lg: load_team_matches(db, lg) for lg in leagues},
+                       {} if archive else {lg: load_team_form(db, lg) for lg in leagues})
         + charts
     )
 
@@ -5546,7 +5651,7 @@ def build_page(db, nav, generated, archive_label=None):
         if preseason_available(db):
             panels.append(("preseason", "Preseason", preseason_panel(db, leagues)))
     if understat_available(db):
-        panels.append(("teams", "Team analytics", teams_panel(db, leagues)))
+        panels.append(("teams", "Team analytics", teams_panel(db, leagues, archive)))
         panels.append(("players", "Players", players_panel(db, leagues)))
         panels.append(("insights", "Insights", insights_panel(db, leagues)))
         if len(leagues) > 1:
