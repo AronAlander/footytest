@@ -59,7 +59,12 @@ the big five leagues plus Russia.
 without notice): full player leaderboards (xG, xA, xGOT, shots on target,
 chances created; seasons back to 2017) and per-match team stats (xG, npxG,
 xGOT, shots on target, possession) at one request per match — a season is ~240
-matches, re-runs fetch only new results. FotMob has no PPDA, deep completions,
+matches, re-runs fetch only new results. Seasons 2023 onward are stored, which
+is what the prediction lookback window (`PREDICT_LOOKBACK_DAYS`, 1400 days)
+can actually reach: before that backfill the database held 2026 alone, so on
+the season's opening weekend the model had no history for any club, shrank
+every one of them to the league average, and projected the whole table to
+finish on the same ~38 points. FotMob has no PPDA, deep completions,
 xGChain/xGBuildup or xPts; xPts is computed here from each match's xG with a
 Poisson model. In the dashboard Allsvenskan therefore gets the League tab, the
 xG table, form curves, the team head-to-head deep dive (with a reduced radar)

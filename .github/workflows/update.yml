@@ -38,13 +38,18 @@ jobs:
         with:
           python-version: "3.11"
 
+      # v3 forces one cold start so the run picks up the reseeded database.
+      # Bumping this is the ONLY way history reaches the cloud: the nightly
+      # fetchers only ever ask for the current season, so a warm cache can
+      # never gain a past one however many times it runs. Bump it again after
+      # any backfill that has to reach production.
       - name: Restore database from cache
         uses: actions/cache@v4
         with:
           path: football.sqlite
-          key: football-db-v2-${{ github.run_id }}
+          key: football-db-v3-${{ github.run_id }}
           restore-keys: |
-            football-db-v2-
+            football-db-v3-
 
       # a cold cache starts from the committed seed snapshot, NOT empty:
       # TheSportsDB is only fetched for the current season, so an empty start
