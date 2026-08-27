@@ -5694,10 +5694,14 @@ def build_page(db, nav, generated, archive_label=None):
         # the old text here told the reader to run the fetchers by hand, which
         # has not been true since the nightly workflow existed. What is
         # actually worth knowing is when to come back for last night's results
+        # -- but only as a habit, not a promise: GitHub's scheduler is
+        # best-effort and has started this run eleven hours late, so the
+        # sentence has to send the reader to the badge rather than the clock
         footer = ("Standings are computed from the stored results. The site "
-                  f"refreshes itself every night from about {nightly_start()}, "
-                  "and the rebuild takes around a quarter of an hour — a late "
-                  "kick-off lands shortly after that.")
+                  f"rebuilds itself overnight, usually from about {nightly_start()}, "
+                  "and takes around a quarter of an hour — though the schedule is "
+                  "best-effort and can run hours late, so the <em>Updated</em> badge "
+                  "at the top is the one to trust for how fresh this page is.")
     badges = "".join(f"<span class='badge'>{escape(t)}</span>" for t in badge_texts)
     # the archive pages are frozen snapshots of a finished season; a running
     # list of what changed this week belongs on the live dashboard only
