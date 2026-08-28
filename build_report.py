@@ -705,7 +705,7 @@ def trend_arrow(change):
     return "<span class='dim'>=</span>"
 
 
-def standings_table(db, league, title_suffix=""):
+def standings_table(db, league, title_suffix="", trend=True):
     matches = completed_matches(db, league)
     if not matches:
         return "<p class='dim'>No completed matches in the database yet.</p>"
@@ -713,7 +713,9 @@ def standings_table(db, league, title_suffix=""):
 
     max_round = max((m[0] for m in matches if m[0] is not None), default=None)
     previous_rank = {}
-    if max_round and max_round > TREND_WINDOW:
+    # a frozen season turns the trend column off rather than filling it with
+    # dashes: "climbing or sliding" is a question about a table still moving
+    if trend and max_round and max_round > TREND_WINDOW:
         earlier = compute_table(matches, upto_round=max_round - TREND_WINDOW)
         previous_rank = {team: i for i, (team, _) in enumerate(earlier, 1)}
 
@@ -730,24 +732,26 @@ def standings_table(db, league, title_suffix=""):
             f"<td class='num'>{t['gf']}–{t['ga']}</td>"
             f"<td class='num'>{t['gf'] - t['ga']:+d}</td>"
             f"<td class='num score'>{t['pts']}</td>"
-            f"<td class='num'>{trend_arrow(change)}</td>"
-            f"<td>{form_chips(team_form(db, league, team))}</td></tr>"
+            + (f"<td class='num'>{trend_arrow(change)}</td>" if trend else "")
+            + f"<td>{form_chips(team_form(db, league, team))}</td></tr>"
         )
     card = (
         "<div class='card'><table><thead><tr>"
         "<th class='num'>#</th><th>Team</th><th class='num'>P</th>"
         "<th class='num'>W</th><th class='num'>D</th><th class='num'>L</th>"
         "<th class='num'>Goals</th><th class='num'>+/−</th><th class='num'>Pts</th>"
-        f"<th class='num'>±{TREND_WINDOW}R</th><th>Form</th>"
-        f"</tr></thead><tbody>{body}</tbody></table></div>"
+        + (f"<th class='num'>±{TREND_WINDOW}R</th>" if trend else "")
+        + f"<th>Form</th></tr></thead><tbody>{body}</tbody></table></div>"
     )
     about = (
         "<p><strong>What it shows.</strong> The league table, computed from every stored "
         "result rather than copied from a website — wins are 3 points, draws 1; ties are "
         "broken by goal difference, then goals scored.</p>"
-        f"<p><strong>The extras.</strong> ±{TREND_WINDOW}R is each team's change in league "
-        f"position over the last {TREND_WINDOW} rounds — a quick read on who is climbing "
-        f"or sliding. The form chips are the last {FORM_WINDOW} results, oldest to newest. "
+        "<p><strong>The extras.</strong> "
+        + (f"±{TREND_WINDOW}R is each team's change in league position over the "
+           f"last {TREND_WINDOW} rounds — a quick read on who is climbing or "
+           "sliding. " if trend else "")
+        + f"The form chips are the last {FORM_WINDOW} results, oldest to newest. "
         "A blue stripe marks the top four (Champions League places), a red stripe the "
         "bottom three (relegation).</p>"
     )
@@ -5034,6 +5038,41 @@ def league_section(db, league):
     )
 
 
+FROZEN_RESULTS = 400   # every result of a finished season on one page; 30
+                       # rounds of a 16-club league is 240, so this is headroom
+
+
+def frozen_league_section(db, league, season):
+    """The League tab of a season that is over: how it finished, and every
+    result that got it there.
+
+    Deliberately not league_section(). Predictions, the season projection and
+    the report card are all statements about a campaign still being played,
+    and a frozen page carrying them would print a forecast directly above the
+    result it was forecasting.
+    """
+    past = f" ({season} final)"
+    return (
+        f"<h2>{escape(league)} <span class='dim'>{escape(str(season))}</span></h2>"
+        # no matchday numbers: FotMob's per-match feed has none, and deriving
+        # one from each club's match count gets 62 of 77 right when checked
+        # against the live 2026 feed -- an R14 that is wrong one time in five
+        # is worse than no R14 at all. The ±5R column goes with it, being
+        # computed from exactly that number
+        + standings_table(db, league, past, trend=False)
+        + home_away_table(db, league, past)
+        + block(
+            f"Every result{past}",
+            "<p class='meta team-hint' hidden>Click a club for its style "
+            "profile in Team analytics.</p>"
+            + matches_table(db, league, finished=True, limit=FROZEN_RESULTS),
+            "<p><strong>What it shows.</strong> Every "
+            f"{escape(league)} {escape(str(season))} match, newest first, as it "
+            "finished. The xG behind each of them is in Team analytics.</p>",
+        )
+    )
+
+
 # ------------------------------------------------------------ preseason tab
 
 PRESEASON_BACK_DAYS = 75    # friendlies played within this window count
@@ -5136,14 +5175,21 @@ def coverage_label(db, leagues):
 
 def sources_label(db, leagues):
     """Header suffix: which source covers what, e.g.
-    '2025/26, Understat · Allsvenskan 2026, FotMob'."""
-    label = f"{season_label(db)}, Understat"
-    if "Allsvenskan" in leagues and fotmob_available(db):
-        season = db.execute(
-            "SELECT MAX(season) FROM main.fotmob_team_matches"
-        ).fetchone()[0]
-        label += f" · Allsvenskan {season}, FotMob"
-    return label
+    '2025/26, Understat · Allsvenskan 2026, FotMob'.
+
+    Reads the scoped views rather than main., so an archive page names its own
+    season instead of the one currently being played, and drops a source
+    entirely when this page has no rows from it.
+    """
+    parts = []
+    if season_label(db):
+        parts.append(f"{season_label(db)}, Understat")
+    fm = [r for r in db.execute(
+        "SELECT league, MAX(season) FROM fotmob_team_matches GROUP BY league "
+        "ORDER BY league"
+    )] if fotmob_available(db) else []
+    parts += [f"{lg} {season}, FotMob" for lg, season in fm if lg in leagues]
+    return " · ".join(parts)
 
 
 def understat_available(db):
@@ -5531,12 +5577,12 @@ def scope_to_current_season(db):
             "WHERE f.season = (SELECT MAX(u.season) FROM main.fotmob_team_matches u "
             "WHERE u.league = f.league)"
         )
-        db.execute(
-            "CREATE TEMP VIEW fotmob_players AS "
-            "SELECT * FROM main.fotmob_players t "
-            "WHERE t.season = (SELECT MAX(u.season) FROM main.fotmob_players u "
-            "WHERE u.league = t.league)"
-        )
+        for table in ("fotmob_players", "fotmob_team_matches"):
+            db.execute(
+                f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} t "
+                f"WHERE t.season = (SELECT MAX(u.season) FROM main.{table} u "
+                "WHERE u.league = t.league)"
+            )
     else:
         db.execute("CREATE TEMP VIEW understat_team_matches AS " + understat_current)
 
@@ -5547,9 +5593,10 @@ def scope_to_archive_season(db, season):
     db.execute("CREATE TEMP VIEW matches AS SELECT * FROM main.matches WHERE 0")
     db.execute("CREATE TEMP VIEW standings AS SELECT * FROM main.standings WHERE 0")
     if fotmob_available(db):
-        db.execute(
-            "CREATE TEMP VIEW fotmob_players AS SELECT * FROM main.fotmob_players WHERE 0"
-        )
+        for table in ("fotmob_players", "fotmob_team_matches"):
+            db.execute(
+                f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} WHERE 0"
+            )
     for table in ("understat_players", "understat_team_matches"):
         db.execute(
             f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} "
@@ -5557,35 +5604,135 @@ def scope_to_archive_season(db, season):
         )
 
 
+def _sqlq(value):
+    """A literal for a CREATE VIEW body. SQLite will not bind parameters into
+    a view definition -- the SQL is stored, not executed -- so the season and
+    league have to be inlined, and inlining is only safe if it is quoted."""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def scope_to_fotmob_season(db, league, season):
+    """Freeze the whole report on one finished season of a FotMob-backed
+    league.
+
+    scope_to_current_season already teaches the report to read Allsvenskan by
+    projecting FotMob's rows into the Understat shape, so every xG block just
+    works. This does the same for a season that is over, and supplies the one
+    thing the live page gets from TheSportsDB instead -- the match list --
+    from those same FotMob rows, which carry both clubs and the scoreline.
+    That is why these pages need no new data and no new fetch: everything the
+    League tab reads is already stored, just under different column names.
+    """
+    where = f"league = {_sqlq(league)} AND season = {_sqlq(season)}"
+    # TheSportsDB only ever serves the current season, so a finished one has
+    # no matches rows at all. round stays NULL because FotMob has no matchday
+    # number and guessing one is wrong often enough to notice.
+    db.execute(
+        "CREATE TEMP VIEW matches AS SELECT "
+        "'fm-' || match_id AS event_id, league, season, NULL AS round, "
+        "match_date, NULL AS match_time, team AS home_team, "
+        "opponent AS away_team, scored AS home_score, missed AS away_score, "
+        "'Match Finished' AS status, fetched_at "
+        f"FROM main.fotmob_team_matches WHERE {where} AND home_away = 'h'"
+    )
+    db.execute("CREATE TEMP VIEW standings AS SELECT * FROM main.standings WHERE 0")
+    # no Understat rows at all for these leagues, so the tables that feed off
+    # understat_players (its explorer, the creators board) empty themselves
+    db.execute(
+        "CREATE TEMP VIEW understat_players AS "
+        "SELECT * FROM main.understat_players WHERE 0"
+    )
+    db.execute(
+        "CREATE TEMP VIEW understat_team_matches AS "
+        "SELECT season, league, team, match_date, home_away, xg, xga, npxg, npxga, "
+        "       NULL AS ppda, NULL AS ppda_allowed, NULL AS deep, "
+        "       NULL AS deep_allowed, scored, missed, xpts, result, pts, npxgd, "
+        "       fetched_at "
+        f"FROM main.fotmob_team_matches WHERE {where}"
+    )
+    for table in ("fotmob_players", "fotmob_team_matches"):
+        db.execute(f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} "
+                   f"WHERE {where}")
+
+
+def fotmob_archive_seasons(db):
+    """(league, season) for every FotMob season that is finished.
+
+    "Finished" is simply "not the newest stored": the fetchers only ever add
+    to the season being played, so every older one is final and will not
+    change again.
+    """
+    if not fotmob_available(db):
+        return []
+    return [(r[0], r[1]) for r in db.execute(
+        "SELECT league, season FROM main.fotmob_team_matches t "
+        "WHERE t.season < (SELECT MAX(u.season) FROM main.fotmob_team_matches u "
+        "                  WHERE u.league = t.league) "
+        "GROUP BY t.league, t.season ORDER BY t.league, t.season DESC"
+    )]
+
+
+def fotmob_slug(league, season):
+    """'Allsvenskan', '2024' -> 'allsvenskan-2024', the archive file stem.
+
+    Kept apart from the big five's '2024-25' stems on purpose: a calendar-year
+    league's 2024 is not the same stretch of football as 2024/25, and sharing
+    a file would have to pretend one of them is the other.
+    """
+    stem = re.sub(r"[^a-z0-9]+", "-", league.lower()).strip("-")
+    return f"{stem}-{season}"
+
+
 def season_slug(season):
     """Understat starting year -> archive file stem, '2018' -> '2018-19'."""
     return f"{season}-{(int(season) + 1) % 100:02d}"
 
 
-def season_nav(db, current_page_season=None):
-    """Dropdown linking the current dashboard and the archive pages.
-    current_page_season is None on the live dashboard, else the archive season."""
+def season_nav(db, current=None):
+    """Dropdown linking the live dashboard and every archive page.
+
+    `current` is the archive file stem of the page being built, or None on the
+    live dashboard itself.
+
+    The big five and a calendar-year league cannot share one flat list without
+    misfiling one of them -- Allsvenskan's 2024 is not the big five's 2024/25 --
+    so each gets an optgroup, and the season now being played, which is both at
+    once, sits above them as the single entry that leads back to the dashboard.
+    """
     seasons = [r[0] for r in db.execute(
         "SELECT DISTINCT season FROM main.understat_players ORDER BY season DESC"
     )]
-    if len(seasons) < 2:
+    frozen = fotmob_archive_seasons(db)
+    if len(seasons) < 2 and not frozen:
         return ""
-    current = seasons[0]
-    options = []
-    for s in seasons:
-        label = f"{s}/{int(s) % 100 + 1}" + (" (current)" if s == current else "")
-        if s == current_page_season or (current_page_season is None and s == current):
-            href = ""  # this page
-        elif s == current:
-            href = "../index.html"
-        elif current_page_season is None:
-            href = f"archive/{season_slug(s)}.html"
+
+    def option(label, slug):
+        here = slug == current
+        if here:
+            href = ""                       # this page
+        elif slug is None:
+            href = "index.html" if current is None else "../index.html"
+        elif current is None:
+            href = f"archive/{slug}.html"
         else:
-            href = f"{season_slug(s)}.html"
-        options.append(
-            f"<option value='{escape(href)}'{' selected' if not href else ''}>"
-            f"{escape(label)}</option>"
-        )
+            href = f"{slug}.html"
+        return (f"<option value='{escape(href)}'{' selected' if here else ''}>"
+                f"{escape(label)}</option>")
+
+    live = (f"{seasons[0]}/{int(seasons[0]) % 100 + 1}" if seasons else "Latest")
+    options = [option(f"{live} (current)", None)]
+    if len(seasons) > 1:
+        options.append("<optgroup label='Big five'>")
+        options += [option(f"{s}/{int(s) % 100 + 1}", season_slug(s))
+                    for s in seasons[1:]]
+        options.append("</optgroup>")
+    by_league = {}
+    for league, season in frozen:
+        by_league.setdefault(league, []).append(season)
+    for league, past in by_league.items():
+        options.append(f"<optgroup label='{escape(league)}'>")
+        options += [option(str(s), fotmob_slug(league, s)) for s in past]
+        options.append("</optgroup>")
     return (
         "<nav class='seasonnav'><label for='season-select'>Season</label>"
         "<select id='season-select' "
@@ -5630,12 +5777,19 @@ def nightly_start(now=None):
     return f"{moment:%H:%M} " + ("Stockholm time" if zone == "Stockholm" else "UTC")
 
 
-def build_page(db, nav, generated, archive_label=None):
+def build_page(db, nav, generated, archive_label=None, frozen=None):
     """The full dashboard HTML. archive_label (e.g. '2018/19') switches to the
-    archive layout: Understat tabs only, no volatile 'Updated' badge so the
-    file only changes when the code or data does."""
+    archive layout: no volatile 'Updated' badge, so the file only changes when
+    the code or data does.
+
+    frozen is (league, season) for a finished season that still has its full
+    results -- a FotMob-backed league, whose per-match feed keeps every
+    scoreline. Those pages get a League tab; the Understat archives cannot,
+    because Understat has no match feed behind it to rebuild one from."""
     archive = archive_label is not None
-    league_table = "understat_players" if archive else "matches"
+    # a frozen FotMob season names its leagues from its own synthesised match
+    # list, the Understat archives from the only table they have
+    league_table = "understat_players" if archive and not frozen else "matches"
     stored = [
         r[0] for r in db.execute(f"SELECT DISTINCT league FROM {league_table} ORDER BY league")
         if r[0] not in HIDDEN_LEAGUES
@@ -5644,7 +5798,12 @@ def build_page(db, nav, generated, archive_label=None):
     leagues += [lg for lg in stored if lg not in leagues]
 
     panels = []
-    if not archive:
+    if frozen:
+        panels.append(("league", "League", "".join(
+            lgview(lg, frozen_league_section(db, lg, frozen[1]), i == 0)
+            for i, lg in enumerate(leagues)
+        )))
+    elif not archive:
         panels.append(("league", "League", "".join(
             lgview(lg, league_section(db, lg), i == 0) for i, lg in enumerate(leagues)
         )))
@@ -5677,7 +5836,16 @@ def build_page(db, nav, generated, archive_label=None):
         for i, (pid, _, content) in enumerate(panels)
     )
 
-    if archive:
+    if frozen:
+        league, season = frozen
+        badge_texts = [f"{league} {season}", "Season archive", "FotMob"]
+        title = f"Football dashboard — {league} {season}"
+        tagline = (f"{league} {season}, complete — the final table, every result "
+                   "of the season, and the xG behind them.")
+        footer = (f"Season archive — {league} {season} exactly as it finished, "
+                  "computed from FotMob's per-match data rather than copied "
+                  "from a table. Rebuilt whenever the report generator changes.")
+    elif archive:
         badge_texts = [f"Big five leagues {archive_label}", "Season archive", "Understat"]
         title = f"Football dashboard — {archive_label}"
         tagline = (
@@ -5831,6 +5999,7 @@ def main() -> None:
         "WHERE season < (SELECT MAX(season) FROM main.understat_players) "
         "ORDER BY season DESC"
     )]
+    frozen_seasons = fotmob_archive_seasons(db)
     db.close()
     print(f"Report written to {REPORT_PATH}")
     print(f"Dashboard copy written to {DOCS_PATH} (commit it and it's served by GitHub Pages)")
@@ -5845,7 +6014,8 @@ def main() -> None:
         db = sqlite3.connect(DB_PATH)
         scope_to_archive_season(db, season)
         label = f"{season}/{int(season) % 100 + 1}"
-        html = build_page(db, season_nav(db, season), generated, archive_label=label)
+        html = build_page(db, season_nav(db, season_slug(season)), generated,
+                          archive_label=label)
         for target in (local_dir, docs_dir):
             (target / f"{season_slug(season)}.html").write_text(html, encoding="utf-8")
         db.close()
@@ -5853,6 +6023,22 @@ def main() -> None:
         print(f"Archive pages written for {len(archive_seasons)} seasons "
               f"({season_slug(archive_seasons[-1])} … {season_slug(archive_seasons[0])}) "
               f"to {docs_dir} and {local_dir}")
+
+    # ...and one per finished season of a FotMob-backed league, which unlike
+    # the Understat archives can carry its own results and final table
+    for league, season in frozen_seasons:
+        db = sqlite3.connect(DB_PATH)
+        scope_to_fotmob_season(db, league, season)
+        slug = fotmob_slug(league, season)
+        html = build_page(db, season_nav(db, slug), generated,
+                          archive_label=f"{league} {season}",
+                          frozen=(league, season))
+        for target in (local_dir, docs_dir):
+            (target / f"{slug}.html").write_text(html, encoding="utf-8")
+        db.close()
+    if frozen_seasons:
+        print(f"Season archives written for {len(frozen_seasons)} finished "
+              f"FotMob seasons ({', '.join(f'{lg} {s}' for lg, s in frozen_seasons)})")
 
 
 if __name__ == "__main__":

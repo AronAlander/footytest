@@ -33,13 +33,29 @@ and chart to each league's current season — older seasons stay in the database
 as history but never mix into the dashboard. No annual maintenance needed.
 
 Older seasons are browsable too: a **Season** dropdown in the header links to one
-frozen archive page per past season (`docs/archive/2014-15.html` …). Understat's
-history goes back to 2014/15, and `python fetch_understat.py --backfill` pulls
-all of it (~55 requests, a couple of minutes). Archive pages carry the four
-Understat tabs — team analytics, players, insights, Best of Europe — including
-the team head-to-head deep dive; matchday results and standings snapshots exist
-for the current season only (backfilling them from TheSportsDB would take
-~2,000 throttled requests, an hour+ — skipped for now).
+frozen archive page per past season. Understat's history goes back to 2014/15,
+and `python fetch_understat.py --backfill` pulls all of it (~55 requests, a
+couple of minutes). The dropdown groups them by competition, because a
+calendar-year league's 2024 is not the big five's 2024/25 and one flat list
+would have to misfile one of them:
+
+- **Big five** (`docs/archive/2014-15.html` …) carry the four Understat tabs —
+  team analytics, players, insights, Best of Europe — including the team
+  head-to-head deep dive, but no League tab: Understat serves no fixture list,
+  and TheSportsDB only serves the season being played, so there is nothing to
+  rebuild a table or a results list from (backfilling it would take ~2,000
+  throttled requests, an hour+ — skipped for now).
+- **Allsvenskan** (`docs/archive/allsvenskan-2024.html` …) does get a League
+  tab, because FotMob's per-match feed keeps both clubs and the scoreline: the
+  final table is computed from those results, alongside the home/away split and
+  every match of the season. Built entirely from rows already in the database —
+  `scope_to_fotmob_season` derives the match list from `fotmob_team_matches`,
+  so these pages need no extra fetch. What they leave out is the predictions,
+  the season projection and the report card, which are all forecasts of a
+  campaign still being played. Matchday numbers are left blank too: FotMob has
+  no round column, and deriving one from each club's match count gets 62 of 77
+  right against the live feed — an "R14" wrong one time in five is worse than
+  no R14 at all.
 
 `fetch_data.py` downloads league tables, results, and fixtures for all five leagues
 and stores them in `football.sqlite` (matches are upserted; standings are saved as dated
@@ -64,7 +80,8 @@ is what the prediction lookback window (`PREDICT_LOOKBACK_DAYS`, 1400 days)
 can actually reach: before that backfill the database held 2026 alone, so on
 the season's opening weekend the model had no history for any club, shrank
 every one of them to the league average, and projected the whole table to
-finish on the same ~38 points. FotMob has no PPDA, deep completions,
+finish on the same ~38 points. Those same three seasons are what the
+Allsvenskan archive pages are built from. FotMob has no PPDA, deep completions,
 xGChain/xGBuildup or xPts; xPts is computed here from each match's xG with a
 Poisson model. In the dashboard Allsvenskan therefore gets the League tab, the
 xG table, form curves, the team head-to-head deep dive (with a reduced radar)
@@ -344,6 +361,9 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
       to each league's current season, keeping old seasons as history)
 - [x] Season archive: Understat backfill to 2014/15 and one frozen archive page
       per past season, linked from a Season dropdown
-- [ ] Backfill matchday results for old seasons from TheSportsDB (works on the
-      test key but needs ~2,000 throttled requests; would enable the League tab
-      and meetings-by-round on archive pages)
+- [x] League tab on the Allsvenskan archive pages — final table, home/away
+      split and all 240 results per season, derived from the FotMob rows
+      already stored rather than fetched again
+- [ ] Backfill matchday results for old big-five seasons from TheSportsDB
+      (works on the test key but needs ~2,000 throttled requests; would give
+      those archive pages the League tab that Allsvenskan's already have)

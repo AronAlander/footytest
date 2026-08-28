@@ -73,6 +73,11 @@ jobs:
           # sanity: never publish a dashboard that lost the big five
           grep -q "data-lg='Serie A'" docs/index.html
           grep -q "data-lg='Allsvenskan'" docs/index.html
+          # the Allsvenskan season archives are derived from stored FotMob
+          # history, so they vanish quietly if the database ever comes back
+          # without it -- which is exactly what a cold start from a seed
+          # missing past seasons would do
+          grep -q "data-lg='Allsvenskan'" docs/archive/allsvenskan-2025.html
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # predictions/log.csv is the model's record of what it called before
