@@ -597,6 +597,19 @@ def _team_link_map(db, league):
     return {d: a for d, a in _predict_mapping(display, names).items() if a}
 
 
+def _analytics_label(name):
+    """A club's name as a link, for the tables built from the xG feed itself.
+
+    No name map, unlike the League tab: those tables come from TheSportsDB and
+    have to be bridged to the club card's names, while this one is already
+    reading the rows the card is built from. A club the card somehow does not
+    hold simply stays unmarked, because the marking is applied client-side
+    against the list the card actually has.
+    """
+    label = escape(name or "")
+    return f"<span data-team='{label}'>{label}</span>"
+
+
 def _team_label(name, tmap):
     """A club's name, wrapped in the link when Team analytics covers it.
 
@@ -2292,7 +2305,8 @@ def xg_table(db, league):
     for rank, (team, games, pts, xpts, gf, ga, xg, xga, npxgd) in enumerate(rows, 1):
         luck = pts - xpts
         body += (
-            f"<tr><td class='num'>{rank}</td><td>{escape(team)}</td>"
+            f"<tr><td class='num'>{rank}</td>"
+            f"<td>{_analytics_label(team)}</td>"
             f"<td class='num'>{games}</td><td class='num score'>{pts}</td>"
             f"<td class='num'>{xpts:.1f}</td><td class='num'>{fmt_delta_html(luck)}</td>"
             f"<td class='num'>{gf}–{ga}</td><td class='num'>{xg:.1f}</td>"
@@ -2319,7 +2333,9 @@ def xg_table(db, league):
         "<p><strong>Caveat.</strong> xG is a model of chance quality, not truth — elite "
         "finishers beat it consistently, and one season is a small sample.</p>"
     )
-    return block("xG table — results vs expected", card, about)
+    hint = ("<p class='meta team-hint' hidden>Click a club to load it in the "
+            "comparison below.</p>")
+    return block("xG table — results vs expected", hint + card, about)
 
 
 def nice_ticks(lo, hi, count=5):
