@@ -367,6 +367,9 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
 - [x] Club history strip: one row per season for any club, back to 2014/15,
       with the finish, the record and points against expected points — the
       first thing on the site that reads across seasons rather than within one
+- [x] Career strip on the player profile card: every season Understat has
+      stored for that player, across clubs and leagues, so transfers and a
+      finisher's good and bad years read as one line rather than twelve pages
 - [ ] Backfill matchday results for old big-five seasons from TheSportsDB
       (works on the test key but needs ~2,000 throttled requests; would give
       those archive pages the League tab that Allsvenskan's already have)

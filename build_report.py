@@ -428,6 +428,16 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .hist-n { display: inline-block; min-width: 46px; text-align: right; }
 .hist-n.over { color: var(--win); }
 .hist-n.under { color: var(--loss); }
+.pd-career { margin-top: 14px; }
+.pd-career table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pd-career td, .pd-career th { padding: 3px 6px; white-space: nowrap;
+                               border-bottom: 1px solid var(--border); }
+.pd-career th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+                text-align: left; color: var(--muted); }
+.pd-career tr:last-child td { border-bottom: 0; }
+.pd-career .car-grow { width: 100%; white-space: normal; }
+.pd-career .car-gap td { opacity: .5; font-style: italic; }
+.pd-career .car-away { opacity: .78; }
 /* the one column carrying a name absorbs the slack; everything else is a
    chip, a date or a number and stays as narrow as its content */
 .fx-form td, .fx-form th { width: 1%; }
@@ -3022,7 +3032,8 @@ def creators_table(db, league, limit=8, min_minutes=900):
 def load_players(db, league):
     rows = db.execute(
         """SELECT player_name, team, position, games, minutes, goals, xg,
-                  assists, xa, shots, key_passes, npg, npxg, xg_chain, xg_buildup
+                  assists, xa, shots, key_passes, npg, npxg, xg_chain, xg_buildup,
+                  player_id
            FROM understat_players WHERE league = ?
            ORDER BY xg DESC, player_name, team""",
         (league,),
@@ -3031,6 +3042,7 @@ def load_players(db, league):
         {
             # Understat stores some names entity-encoded ("M&#039;Bala Nzola")
             "name": unescape(r[0]), "team": unescape(r[1]), "pos": r[2] or "", "games": r[3],
+            "id": r[15],
             "min": r[4], "goals": r[5], "xg": round(r[6], 2),
             "assists": r[7], "xa": round(r[8], 2), "shots": r[9], "kp": r[10],
             "npg": r[11], "npxg": round(r[12], 2),
@@ -3041,11 +3053,75 @@ def load_players(db, league):
     ]
 
 
-def player_explorer(players_by_lg):
+def load_player_careers(db, players_by_lg):
+    """Every stored season of every player the explorer can open, as one blob.
+
+    Not per league, unlike the other payloads: a career crosses leagues, and
+    Salah's Roma seasons belong on his card whichever league you opened it
+    from. Keyed by Understat's player_id rather than by name -- names collide,
+    and the feed stores some of them entity-encoded.
+
+    Capped at the newest season the scoped view can see, like the club history
+    strip, so an archive page shows a career as it stood that year and not a
+    line about a club the player had yet to join.
+
+    Seasons and club names are interned into shared tables. Spelling them out
+    per row costs about 180 KB on a page that is already large, and the same
+    two hundred club names repeat seven thousand times.
+    """
+    ids = {p["id"] for ps in players_by_lg.values() for p in ps if p.get("id")}
+    if not ids:
+        return {}
+    cap = db.execute("SELECT MAX(season) FROM understat_players").fetchone()[0]
+    rows = db.execute(
+        """SELECT player_id, season, league, team, games, minutes, goals, xg,
+                  assists, xa
+           FROM main.understat_players WHERE season <= ?""",
+        (cap,),
+    ).fetchall()
+    careers = {}
+    for r in rows:
+        if r[0] in ids:
+            careers.setdefault(r[0], []).append(r)
+
+    # the season table is filled in order before anything else is interned:
+    # the client walks it by index to find the years a player is missing from,
+    # so an index that is not chronological silently mislabels every gap
+    seasons = {s: i for i, (s,) in enumerate(db.execute(
+        "SELECT DISTINCT season FROM main.understat_players WHERE season <= ? "
+        "ORDER BY season", (cap,)))}
+    leagues, clubs = {}, {}
+
+    def intern(table, value):
+        return table.setdefault(value, len(table))
+
+    out = {}
+    for pid, rs in careers.items():
+        # one season is the row the card already shows; a career needs two
+        if len({r[1] for r in rs}) < 2:
+            continue
+        # within a season, clubs are ordered by minutes: a mid-season move
+        # leaves two rows and the feed carries no dates to order them by
+        rs.sort(key=lambda r: (r[1], -r[5]))
+        out[pid] = [
+            [intern(seasons, r[1]), intern(leagues, r[2]), intern(clubs, unescape(r[3])),
+             r[4], r[5], r[6], round(r[7], 1), r[8], round(r[9], 1)]
+            for r in rs
+        ]
+    if not out:
+        return {}
+    return {"s": [_season_label("Premier League", s) for s in seasons],
+            "l": list(leagues), "c": list(clubs), "p": out}
+
+
+def player_explorer(players_by_lg, careers=None):
     if not any(players_by_lg.values()):
         return ""
     # team filter and datalist options are (re)built client-side per league
     payload = json.dumps(players_by_lg, ensure_ascii=False).replace("</", "<\\/")
+    career_payload = json.dumps(
+        careers or {}, ensure_ascii=False, separators=(",", ":")
+    ).replace("</", "<\\/")
 
     body = (
         "<div class='controls'>"
@@ -3062,7 +3138,8 @@ def player_explorer(players_by_lg):
         "<tbody></tbody></table></div>"
         "<div class='show-more' id='pe-more'></div>"
         "<div id='pd-overlay' hidden><div id='pd-modal' role='dialog' aria-modal='true'></div></div>"
-        f"<script>const PLAYERS_BY_LG = {payload};</script>"
+        f"<script>const PLAYERS_BY_LG = {payload};\n"
+        f"const CAREERS = {career_payload};</script>"
     )
     total = sum(len(v) for v in players_by_lg.values())
     about = (
@@ -3072,7 +3149,19 @@ def player_explorer(players_by_lg):
         "the buttons under it to load more. Search by name or club, filter by position "
         "and minutes, and click any column header to sort (click again to flip direction). "
         "<strong>Click a row</strong> to open that player's profile card, with season "
-        "totals and percentile bars against players of the same position.</p>"
+        "totals, percentile bars against players of the same position, and the whole "
+        "career Understat has stored underneath.</p>"
+        "<p><strong>The career strip.</strong> One row per season on the profile card, "
+        "back to 2014/15, with the club, the minutes, goals against xG and assists "
+        "against xA \u2014 so a season reads against the rest of the player's career "
+        "rather than on its own. Moves draw themselves: a club in another league is "
+        "labelled and dimmed, and a mid-season transfer leaves two rows under one "
+        "season, ordered by minutes because the feed carries no dates to order them "
+        "by. A season with no row is one Understat did not cover \u2014 it tracks the "
+        "big five only, so a gap means a spell outside them (a second division, a "
+        "league elsewhere), not a year out of football. The bar is goals minus xG, "
+        "which over a career is the difference between a finisher having one hot "
+        "season and being a good finisher.</p>"
         "<p><strong>The columns.</strong> xG and xA are expected goals and expected "
         "assists — the value of the chances a player took or created. G−xG above zero "
         "means finishing better than the chances deserved; A−xA above zero means "
@@ -4076,6 +4165,67 @@ EXPLORER_JS = """
            cands.find((q) => q.lg === window.CUR_LG) || cands[0];
   };
 
+  /* ---- career strip ---- */
+  function careerBlock(p) {
+    const C = (typeof CAREERS === 'undefined' ? null : CAREERS);
+    const rows = C && C.p ? C.p[p.id] : null;
+    if (!rows || !rows.length) return '';
+    const seasons = C.s, leagues = C.l, clubs = C.c;
+    const played = {};
+    rows.forEach((r) => { (played[r[0]] = played[r[0]] || []).push(r); });
+    let maxAbs = 3;
+    rows.forEach((r) => { maxAbs = Math.max(maxAbs, Math.abs(r[5] - r[6])); });
+    // the strip runs from the player's first stored season to the newest the
+    // page can see, so the seasons he was elsewhere are a row rather than a
+    // silence -- Understat covers the big five only, and a gap is that, not
+    // a year out of football
+    let first = seasons.length;
+    rows.forEach((r) => { first = Math.min(first, r[0]); });
+    let body = '';
+    let gap = [];
+    const flushGap = () => {
+      if (!gap.length) return;
+      const span = gap.length === 1 ? seasons[gap[0]]
+        : seasons[gap[0]] + '\u2013' + seasons[gap[gap.length - 1]];
+      body += "<tr class='car-gap'><td>" + esc(span) + "</td><td colspan='7'>not in " +
+        'the big five' + (gap.length > 1 ? ' (' + gap.length + ' seasons)' : '') +
+        '</td></tr>';
+      gap = [];
+    };
+    for (let s = first; s < seasons.length; s++) {
+      const stints = played[s];
+      if (!stints) { gap.push(s); continue; }
+      flushGap();
+      stints.forEach((r, i) => {
+        const lg = leagues[r[1]], gdiff = Math.round((r[5] - r[6]) * 10) / 10;
+        const wide = Math.round(38 * Math.min(1, Math.abs(gdiff) / maxAbs));
+        const side = gdiff >= 0 ? 'over' : 'under';
+        // a mid-season move repeats the season, so only the first row names it
+        body += "<tr" + (lg === p.lg ? '' : " class='car-away'") + '>' +
+          '<td>' + (i ? '' : esc(seasons[s])) + '</td>' +
+          "<td class='car-grow'>" + esc(clubs[r[2]]) +
+          (lg === p.lg ? '' : " <span class='dim'>" + esc(lg) + '</span>') + '</td>' +
+          "<td class='num dim'>" + r[3] + '</td>' +
+          "<td class='num dim'>" + r[4] + '</td>' +
+          "<td class='num score'>" + r[5] + '</td>' +
+          "<td class='num dim'>" + r[6].toFixed(1) + '</td>' +
+          "<td class='num'>" + r[7] + "<span class='dim'>/" + r[8].toFixed(1) + '</span></td>' +
+          "<td class='num'><span class='hist-bar' style='width:80px'><i class='" + side +
+          "' style='" + (gdiff >= 0 ? 'left:50%;width:' : 'right:50%;width:') + wide +
+          "px'></i></span><span class='hist-n " + side + "'>" + signed(gdiff) +
+          '</span></td></tr>';
+      });
+    }
+    flushGap();
+    return "<div class='pd-career'><div class='h2h-h'>Career " +
+      "<span class='dim'>\u00b7 every season Understat has stored</span></div>" +
+      "<div style='overflow-x:auto'><table><thead><tr><th>Season</th><th>Club</th>" +
+      "<th class='num'>Apps</th><th class='num'>Min</th><th class='num'>G</th>" +
+      "<th class='num'>xG</th><th class='num'>A/xA</th>" +
+      "<th class='num'>G \u2212 xG</th></tr></thead><tbody>" + body +
+      '</tbody></table></div></div>';
+  }
+
   /* ---- profile card ---- */
   const overlay = $('pd-overlay');
   function closeDetail() { overlay.hidden = true; }
@@ -4102,7 +4252,7 @@ EXPLORER_JS = """
       "<div class='pd-totals'>" + totals + "</div>" +
       "<p class='meta'>Season totals above; bars below are per-90 rates as percentiles vs " +
       esc(p.lg) + " " + (POS_NAME[posOf(p)] || 'players') + " with " + MIN_PEER + "+ minutes.</p>" +
-      bars +
+      bars + careerBlock(p) +
       "<button id='pd-compare' type='button'>Add to comparison</button>";
     overlay.hidden = false;
     $('pd-close').onclick = closeDetail;
@@ -5688,7 +5838,7 @@ def players_panel(db, leagues):
     return (
         f"<h2>Players <span class='dim'>({sources_label(db, leagues)})</span></h2>"
         + metric_glossary()
-        + player_explorer(players_by_lg)
+        + player_explorer(players_by_lg, load_player_careers(db, players_by_lg))
         + player_compare()
         + views
     )
