@@ -3053,6 +3053,45 @@ def load_players(db, league):
     ]
 
 
+def pack_by_league(by_lg, intern=()):
+    """A per-league list of uniform dicts, re-encoded as arrays plus one key
+    list, with the named fields interned into a shared table.
+
+    Every row of these payloads carries the same keys, so shipping them as
+    objects spells each key name out once per row -- fifteen of them per
+    player, across sixteen hundred players -- and repeats a club name once per
+    squad member. The client rehydrates this straight back into the same
+    objects, so nothing downstream changes; what changes is the wire.
+    """
+    sample = next((v for v in by_lg.values() if v), None)
+    if sample is None:
+        return {"k": [], "c": [], "i": [], "d": {lg: [] for lg in by_lg}}
+    keys = list(sample[0].keys())
+    idx = [keys.index(k) for k in intern if k in keys]
+    table = {}
+
+    def cell(j, value):
+        if j not in idx:
+            return value
+        return table.setdefault(value, len(table))
+
+    # the rows are built before the string table is read out of the closure
+    data = {lg: [[cell(j, r[k]) for j, k in enumerate(keys)] for r in rs]
+            for lg, rs in by_lg.items()}
+    return {"k": keys, "c": list(table), "i": idx, "d": data}
+
+
+# the client half of pack_by_league, emitted once and shared by every payload
+# that uses it. Assigned onto window rather than declared, so the second script
+# tag reuses it instead of redeclaring a const in the same global scope.
+UNPACK_JS = (
+    "window.UNPACK=window.UNPACK||function(b){var o={},k=b.k,c=b.c||[],"
+    "s=new Set(b.i||[]);Object.keys(b.d).forEach(function(lg){"
+    "o[lg]=b.d[lg].map(function(r){var x={};for(var j=0;j<k.length;j++)"
+    "x[k[j]]=s.has(j)?c[r[j]]:r[j];return x;});});return o;};"
+)
+
+
 def load_player_careers(db, players_by_lg):
     """Every stored season of every player the explorer can open, as one blob.
 
@@ -3117,8 +3156,14 @@ def load_player_careers(db, players_by_lg):
 def player_explorer(players_by_lg, careers=None):
     if not any(players_by_lg.values()):
         return ""
-    # team filter and datalist options are (re)built client-side per league
-    payload = json.dumps(players_by_lg, ensure_ascii=False).replace("</", "<\\/")
+    # team filter and datalist options are (re)built client-side per league.
+    # Packed rather than sent as objects: this is the heaviest payload on the
+    # page by some way, and every player carries the same fifteen key names
+    # and one of two hundred club names
+    payload = json.dumps(
+        pack_by_league(players_by_lg, intern=("team", "pos")),
+        ensure_ascii=False, separators=(",", ":"),
+    ).replace("</", "<\\/")
     career_payload = json.dumps(
         careers or {}, ensure_ascii=False, separators=(",", ":")
     ).replace("</", "<\\/")
@@ -3138,7 +3183,7 @@ def player_explorer(players_by_lg, careers=None):
         "<tbody></tbody></table></div>"
         "<div class='show-more' id='pe-more'></div>"
         "<div id='pd-overlay' hidden><div id='pd-modal' role='dialog' aria-modal='true'></div></div>"
-        f"<script>const PLAYERS_BY_LG = {payload};\n"
+        f"<script>{UNPACK_JS}\nconst PLAYERS_BY_LG = UNPACK({payload});\n"
         f"const CAREERS = {career_payload};</script>"
     )
     total = sum(len(v) for v in players_by_lg.values())
@@ -3709,7 +3754,11 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None):
         f"<select id='tc-{i}'><option value=''>Team {i}…</option></select>"
         for i in (1, 2, 3)
     )
-    payload = json.dumps(teams_by_lg, ensure_ascii=False).replace("</", "<\\/")
+    # club names are unique per row here, so there is nothing to intern --
+    # the saving is the fourteen repeated key names
+    payload = json.dumps(
+        pack_by_league(teams_by_lg), ensure_ascii=False, separators=(",", ":"),
+    ).replace("</", "<\\/")
     tm_payload = json.dumps(
         tm_by_lg, ensure_ascii=False, separators=(",", ":")
     ).replace("</", "<\\/")
@@ -3731,7 +3780,8 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None):
         "season's meetings, a tale-of-the-tape bar duel, recent form, home/away splits "
         "and overlaid form curves.</p></div>"
         "<div class='chart-card' id='tc-card' hidden></div>"
-        f"<script>const TEAMS_BY_LG = {payload};\nconst TM_BY_LG = {tm_payload};\n"
+        f"<script>{UNPACK_JS}\nconst TEAMS_BY_LG = UNPACK({payload});\n"
+        f"const TM_BY_LG = {tm_payload};\n"
         f"const FORM_BY_LG = {form_payload};\n"
         f"const HIST_BY_LG = {hist_payload};</script>"
     )
