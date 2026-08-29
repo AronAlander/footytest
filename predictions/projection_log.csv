@@ -2105,7 +2105,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Arsenal,82.0,0.6298,0.9910,0.0000
 2026-08-27,Premier League,2026-2027,Arsenal,82.0,0.6298,0.9910,0.0000
 2026-08-28,Premier League,2026-2027,Arsenal,82.0,0.6298,0.9910,0.0000
-2026-08-29,Premier League,2026-2027,Arsenal,82.1,0.5710,0.9926,0.0000
+2026-08-29,Premier League,2026-2027,Arsenal,82.1,0.5758,0.9926,0.0000
 2026-08-10,Premier League,2026-2027,Aston Villa,56.3,0.0018,0.1422,0.0124
 2026-08-11,Premier League,2026-2027,Aston Villa,56.3,0.0018,0.1422,0.0124
 2026-08-12,Premier League,2026-2027,Aston Villa,56.3,0.0018,0.1422,0.0124
@@ -2124,7 +2124,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Aston Villa,49.8,0.0000,0.0336,0.0618
 2026-08-27,Premier League,2026-2027,Aston Villa,49.8,0.0000,0.0336,0.0618
 2026-08-28,Premier League,2026-2027,Aston Villa,49.8,0.0000,0.0336,0.0618
-2026-08-29,Premier League,2026-2027,Aston Villa,50.2,0.0000,0.0372,0.0584
+2026-08-29,Premier League,2026-2027,Aston Villa,50.0,0.0000,0.0390,0.0622
 2026-08-10,Premier League,2026-2027,Bournemouth,58.7,0.0062,0.2224,0.0042
 2026-08-11,Premier League,2026-2027,Bournemouth,58.7,0.0062,0.2224,0.0042
 2026-08-12,Premier League,2026-2027,Bournemouth,58.7,0.0062,0.2224,0.0042
@@ -2143,7 +2143,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Bournemouth,55.1,0.0006,0.1242,0.0154
 2026-08-27,Premier League,2026-2027,Bournemouth,55.1,0.0006,0.1242,0.0154
 2026-08-28,Premier League,2026-2027,Bournemouth,55.1,0.0006,0.1242,0.0154
-2026-08-29,Premier League,2026-2027,Bournemouth,55.2,0.0002,0.1190,0.0120
+2026-08-29,Premier League,2026-2027,Bournemouth,55.4,0.0012,0.1364,0.0134
 2026-08-10,Premier League,2026-2027,Brentford,54.2,0.0008,0.0862,0.0190
 2026-08-11,Premier League,2026-2027,Brentford,54.2,0.0008,0.0862,0.0190
 2026-08-12,Premier League,2026-2027,Brentford,54.2,0.0008,0.0862,0.0190
@@ -2162,7 +2162,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Brentford,57.5,0.0024,0.1930,0.0060
 2026-08-27,Premier League,2026-2027,Brentford,57.5,0.0024,0.1930,0.0060
 2026-08-28,Premier League,2026-2027,Brentford,57.5,0.0024,0.1930,0.0060
-2026-08-29,Premier League,2026-2027,Brentford,57.6,0.0026,0.1804,0.0052
+2026-08-29,Premier League,2026-2027,Brentford,57.6,0.0014,0.2046,0.0068
 2026-08-10,Premier League,2026-2027,Brighton and Hove Albion,57.3,0.0022,0.1772,0.0066
 2026-08-11,Premier League,2026-2027,Brighton and Hove Albion,57.3,0.0022,0.1772,0.0066
 2026-08-12,Premier League,2026-2027,Brighton and Hove Albion,57.3,0.0022,0.1772,0.0066
@@ -2181,7 +2181,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Brighton and Hove Albion,61.8,0.0074,0.3750,0.0014
 2026-08-27,Premier League,2026-2027,Brighton and Hove Albion,61.8,0.0074,0.3750,0.0014
 2026-08-28,Premier League,2026-2027,Brighton and Hove Albion,61.8,0.0074,0.3750,0.0014
-2026-08-29,Premier League,2026-2027,Brighton and Hove Albion,62.0,0.0056,0.3848,0.0008
+2026-08-29,Premier League,2026-2027,Brighton and Hove Albion,62.2,0.0080,0.4182,0.0012
 2026-08-10,Premier League,2026-2027,Chelsea,56.7,0.0022,0.1538,0.0066
 2026-08-11,Premier League,2026-2027,Chelsea,56.7,0.0022,0.1538,0.0066
 2026-08-12,Premier League,2026-2027,Chelsea,56.7,0.0022,0.1538,0.0066
@@ -2200,7 +2200,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Chelsea,58.9,0.0040,0.2334,0.0038
 2026-08-27,Premier League,2026-2027,Chelsea,58.9,0.0040,0.2334,0.0038
 2026-08-28,Premier League,2026-2027,Chelsea,58.9,0.0040,0.2334,0.0038
-2026-08-29,Premier League,2026-2027,Chelsea,58.8,0.0026,0.2294,0.0028
+2026-08-29,Premier League,2026-2027,Chelsea,58.6,0.0030,0.2384,0.0048
 2026-08-10,Premier League,2026-2027,Coventry City,37.5,0.0000,0.0006,0.5296
 2026-08-11,Premier League,2026-2027,Coventry City,37.5,0.0000,0.0006,0.5296
 2026-08-12,Premier League,2026-2027,Coventry City,37.5,0.0000,0.0006,0.5296
@@ -2219,7 +2219,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Coventry City,37.5,0.0000,0.0008,0.5390
 2026-08-27,Premier League,2026-2027,Coventry City,37.5,0.0000,0.0008,0.5390
 2026-08-28,Premier League,2026-2027,Coventry City,37.5,0.0000,0.0008,0.5390
-2026-08-29,Premier League,2026-2027,Coventry City,37.6,0.0000,0.0004,0.5182
+2026-08-29,Premier League,2026-2027,Coventry City,37.4,0.0000,0.0004,0.5384
 2026-08-10,Premier League,2026-2027,Crystal Palace,49.7,0.0002,0.0316,0.0624
 2026-08-11,Premier League,2026-2027,Crystal Palace,49.7,0.0002,0.0316,0.0624
 2026-08-12,Premier League,2026-2027,Crystal Palace,49.7,0.0002,0.0316,0.0624
@@ -2238,7 +2238,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Crystal Palace,48.0,0.0002,0.0198,0.0910
 2026-08-27,Premier League,2026-2027,Crystal Palace,48.0,0.0002,0.0198,0.0910
 2026-08-28,Premier League,2026-2027,Crystal Palace,48.0,0.0002,0.0198,0.0910
-2026-08-29,Premier League,2026-2027,Crystal Palace,44.9,0.0000,0.0072,0.1718
+2026-08-29,Premier League,2026-2027,Crystal Palace,45.1,0.0000,0.0076,0.1682
 2026-08-10,Premier League,2026-2027,Everton,46.2,0.0000,0.0106,0.1318
 2026-08-11,Premier League,2026-2027,Everton,46.2,0.0000,0.0106,0.1320
 2026-08-12,Premier League,2026-2027,Everton,46.2,0.0000,0.0106,0.1320
@@ -2257,7 +2257,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Everton,47.2,0.0000,0.0152,0.1044
 2026-08-27,Premier League,2026-2027,Everton,47.2,0.0000,0.0152,0.1044
 2026-08-28,Premier League,2026-2027,Everton,47.2,0.0000,0.0152,0.1044
-2026-08-29,Premier League,2026-2027,Everton,47.3,0.0000,0.0158,0.0948
+2026-08-29,Premier League,2026-2027,Everton,47.2,0.0000,0.0132,0.1056
 2026-08-10,Premier League,2026-2027,Fulham,47.2,0.0000,0.0162,0.1054
 2026-08-11,Premier League,2026-2027,Fulham,47.2,0.0000,0.0162,0.1054
 2026-08-12,Premier League,2026-2027,Fulham,47.2,0.0000,0.0162,0.1054
@@ -2276,7 +2276,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Fulham,44.5,0.0000,0.0068,0.1904
 2026-08-27,Premier League,2026-2027,Fulham,44.5,0.0000,0.0068,0.1904
 2026-08-28,Premier League,2026-2027,Fulham,44.5,0.0000,0.0068,0.1904
-2026-08-29,Premier League,2026-2027,Fulham,44.5,0.0000,0.0056,0.1866
+2026-08-29,Premier League,2026-2027,Fulham,44.4,0.0000,0.0066,0.1922
 2026-08-10,Premier League,2026-2027,Hull City,37.3,0.0000,0.0004,0.5410
 2026-08-11,Premier League,2026-2027,Hull City,37.3,0.0000,0.0004,0.5410
 2026-08-12,Premier League,2026-2027,Hull City,37.3,0.0000,0.0004,0.5410
@@ -2295,7 +2295,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Hull City,44.9,0.0002,0.0078,0.1808
 2026-08-27,Premier League,2026-2027,Hull City,44.9,0.0002,0.0078,0.1808
 2026-08-28,Premier League,2026-2027,Hull City,44.9,0.0002,0.0078,0.1808
-2026-08-29,Premier League,2026-2027,Hull City,44.9,0.0000,0.0052,0.1634
+2026-08-29,Premier League,2026-2027,Hull City,45.0,0.0000,0.0062,0.1680
 2026-08-10,Premier League,2026-2027,Ipswich Town,24.8,0.0000,0.0000,0.9708
 2026-08-11,Premier League,2026-2027,Ipswich Town,24.8,0.0000,0.0000,0.9708
 2026-08-12,Premier League,2026-2027,Ipswich Town,24.8,0.0000,0.0000,0.9708
@@ -2314,7 +2314,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Ipswich Town,32.1,0.0000,0.0000,0.8202
 2026-08-27,Premier League,2026-2027,Ipswich Town,32.1,0.0000,0.0000,0.8202
 2026-08-28,Premier League,2026-2027,Ipswich Town,32.1,0.0000,0.0000,0.8202
-2026-08-29,Premier League,2026-2027,Ipswich Town,32.1,0.0000,0.0000,0.8168
+2026-08-29,Premier League,2026-2027,Ipswich Town,32.3,0.0000,0.0000,0.8118
 2026-08-10,Premier League,2026-2027,Leeds United,50.8,0.0004,0.0396,0.0404
 2026-08-11,Premier League,2026-2027,Leeds United,50.8,0.0004,0.0396,0.0404
 2026-08-12,Premier League,2026-2027,Leeds United,50.8,0.0004,0.0396,0.0404
@@ -2333,7 +2333,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Leeds United,51.6,0.0002,0.0520,0.0368
 2026-08-27,Premier League,2026-2027,Leeds United,51.6,0.0002,0.0520,0.0368
 2026-08-28,Premier League,2026-2027,Leeds United,51.6,0.0002,0.0520,0.0368
-2026-08-29,Premier League,2026-2027,Leeds United,51.7,0.0002,0.0544,0.0352
+2026-08-29,Premier League,2026-2027,Leeds United,51.8,0.0004,0.0546,0.0370
 2026-08-10,Premier League,2026-2027,Liverpool,66.9,0.0448,0.6316,0.0000
 2026-08-11,Premier League,2026-2027,Liverpool,66.9,0.0448,0.6316,0.0000
 2026-08-12,Premier League,2026-2027,Liverpool,66.9,0.0448,0.6316,0.0000
@@ -2352,7 +2352,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Liverpool,65.9,0.0290,0.6036,0.0000
 2026-08-27,Premier League,2026-2027,Liverpool,65.9,0.0290,0.6036,0.0000
 2026-08-28,Premier League,2026-2027,Liverpool,65.9,0.0290,0.6036,0.0000
-2026-08-29,Premier League,2026-2027,Liverpool,66.0,0.0220,0.6048,0.0002
+2026-08-29,Premier League,2026-2027,Liverpool,63.6,0.0112,0.4968,0.0006
 2026-08-10,Premier League,2026-2027,Manchester City,76.3,0.3082,0.9384,0.0000
 2026-08-11,Premier League,2026-2027,Manchester City,76.3,0.3082,0.9384,0.0000
 2026-08-12,Premier League,2026-2027,Manchester City,76.3,0.3082,0.9384,0.0000
@@ -2371,7 +2371,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Manchester City,77.6,0.3186,0.9628,0.0000
 2026-08-27,Premier League,2026-2027,Manchester City,77.6,0.3186,0.9628,0.0000
 2026-08-28,Premier League,2026-2027,Manchester City,77.6,0.3186,0.9628,0.0000
-2026-08-29,Premier League,2026-2027,Manchester City,79.6,0.3910,0.9778,0.0000
+2026-08-29,Premier League,2026-2027,Manchester City,79.7,0.3942,0.9822,0.0000
 2026-08-10,Premier League,2026-2027,Manchester United,62.9,0.0180,0.4174,0.0004
 2026-08-11,Premier League,2026-2027,Manchester United,62.9,0.0180,0.4174,0.0004
 2026-08-12,Premier League,2026-2027,Manchester United,62.9,0.0180,0.4174,0.0004
@@ -2390,7 +2390,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Manchester United,59.9,0.0070,0.2854,0.0024
 2026-08-27,Premier League,2026-2027,Manchester United,59.9,0.0070,0.2854,0.0024
 2026-08-28,Premier League,2026-2027,Manchester United,59.9,0.0070,0.2854,0.0024
-2026-08-29,Premier League,2026-2027,Manchester United,59.9,0.0044,0.2856,0.0026
+2026-08-29,Premier League,2026-2027,Manchester United,59.9,0.0048,0.2928,0.0030
 2026-08-10,Premier League,2026-2027,Newcastle United,55.3,0.0018,0.1174,0.0146
 2026-08-11,Premier League,2026-2027,Newcastle United,55.3,0.0018,0.1174,0.0146
 2026-08-12,Premier League,2026-2027,Newcastle United,55.3,0.0018,0.1174,0.0146
@@ -2409,7 +2409,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Newcastle United,53.9,0.0006,0.0866,0.0198
 2026-08-27,Premier League,2026-2027,Newcastle United,53.9,0.0006,0.0866,0.0198
 2026-08-28,Premier League,2026-2027,Newcastle United,53.9,0.0006,0.0866,0.0198
-2026-08-29,Premier League,2026-2027,Newcastle United,53.7,0.0002,0.0884,0.0192
+2026-08-29,Premier League,2026-2027,Newcastle United,53.7,0.0000,0.0930,0.0234
 2026-08-10,Premier League,2026-2027,Nottingham Forest,46.7,0.0000,0.0126,0.1184
 2026-08-11,Premier League,2026-2027,Nottingham Forest,46.7,0.0000,0.0126,0.1184
 2026-08-12,Premier League,2026-2027,Nottingham Forest,46.7,0.0000,0.0126,0.1184
@@ -2428,7 +2428,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Nottingham Forest,44.3,0.0000,0.0054,0.1990
 2026-08-27,Premier League,2026-2027,Nottingham Forest,44.3,0.0000,0.0054,0.1990
 2026-08-28,Premier League,2026-2027,Nottingham Forest,44.3,0.0000,0.0054,0.1990
-2026-08-29,Premier League,2026-2027,Nottingham Forest,44.5,0.0000,0.0080,0.1872
+2026-08-29,Premier League,2026-2027,Nottingham Forest,46.7,0.0000,0.0122,0.1162
 2026-08-10,Premier League,2026-2027,Sunderland,41.3,0.0000,0.0022,0.3210
 2026-08-11,Premier League,2026-2027,Sunderland,41.3,0.0000,0.0022,0.3208
 2026-08-12,Premier League,2026-2027,Sunderland,41.3,0.0000,0.0022,0.3208
@@ -2447,7 +2447,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Sunderland,38.7,0.0000,0.0004,0.4646
 2026-08-27,Premier League,2026-2027,Sunderland,38.7,0.0000,0.0004,0.4646
 2026-08-28,Premier League,2026-2027,Sunderland,38.7,0.0000,0.0004,0.4646
-2026-08-29,Premier League,2026-2027,Sunderland,38.8,0.0000,0.0004,0.4582
+2026-08-29,Premier League,2026-2027,Sunderland,38.8,0.0000,0.0012,0.4668
 2026-08-10,Premier League,2026-2027,Tottenham Hotspur,46.5,0.0000,0.0132,0.1154
 2026-08-11,Premier League,2026-2027,Tottenham Hotspur,46.5,0.0000,0.0132,0.1154
 2026-08-12,Premier League,2026-2027,Tottenham Hotspur,46.5,0.0000,0.0132,0.1154
@@ -2466,7 +2466,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-08-26,Premier League,2026-2027,Tottenham Hotspur,42.5,0.0000,0.0032,0.2632
 2026-08-27,Premier League,2026-2027,Tottenham Hotspur,42.5,0.0000,0.0032,0.2632
 2026-08-28,Premier League,2026-2027,Tottenham Hotspur,42.5,0.0000,0.0032,0.2632
-2026-08-29,Premier League,2026-2027,Tottenham Hotspur,42.4,0.0002,0.0030,0.2666
+2026-08-29,Premier League,2026-2027,Tottenham Hotspur,42.4,0.0000,0.0040,0.2804
 2026-08-10,Serie A,2026-2027,AC Milan,63.0,0.0062,0.1910,0.0000
 2026-08-11,Serie A,2026-2027,AC Milan,63.0,0.0062,0.1910,0.0000
 2026-08-12,Serie A,2026-2027,AC Milan,63.0,0.0062,0.1910,0.0000

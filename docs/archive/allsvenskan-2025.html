@@ -379,6 +379,16 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .hist-n { display: inline-block; min-width: 46px; text-align: right; }
 .hist-n.over { color: var(--win); }
 .hist-n.under { color: var(--loss); }
+.pd-career { margin-top: 14px; }
+.pd-career table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pd-career td, .pd-career th { padding: 3px 6px; white-space: nowrap;
+                               border-bottom: 1px solid var(--border); }
+.pd-career th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+                text-align: left; color: var(--muted); }
+.pd-career tr:last-child td { border-bottom: 0; }
+.pd-career .car-grow { width: 100%; white-space: normal; }
+.pd-career .car-gap td { opacity: .5; font-style: italic; }
+.pd-career .car-away { opacity: .78; }
 /* the one column carrying a name absorbs the slack; everything else is a
    chip, a date or a number and stays as narrow as its content */
 .fx-form td, .fx-form th { width: 1%; }
@@ -779,6 +789,67 @@ const HIST_BY_LG = {"Allsvenskan":{"seasons":["2023","2024","2025"],"clubs":{"Ma
            cands.find((q) => q.lg === window.CUR_LG) || cands[0];
   };
 
+  /* ---- career strip ---- */
+  function careerBlock(p) {
+    const C = (typeof CAREERS === 'undefined' ? null : CAREERS);
+    const rows = C && C.p ? C.p[p.id] : null;
+    if (!rows || !rows.length) return '';
+    const seasons = C.s, leagues = C.l, clubs = C.c;
+    const played = {};
+    rows.forEach((r) => { (played[r[0]] = played[r[0]] || []).push(r); });
+    let maxAbs = 3;
+    rows.forEach((r) => { maxAbs = Math.max(maxAbs, Math.abs(r[5] - r[6])); });
+    // the strip runs from the player's first stored season to the newest the
+    // page can see, so the seasons he was elsewhere are a row rather than a
+    // silence -- Understat covers the big five only, and a gap is that, not
+    // a year out of football
+    let first = seasons.length;
+    rows.forEach((r) => { first = Math.min(first, r[0]); });
+    let body = '';
+    let gap = [];
+    const flushGap = () => {
+      if (!gap.length) return;
+      const span = gap.length === 1 ? seasons[gap[0]]
+        : seasons[gap[0]] + '–' + seasons[gap[gap.length - 1]];
+      body += "<tr class='car-gap'><td>" + esc(span) + "</td><td colspan='7'>not in " +
+        'the big five' + (gap.length > 1 ? ' (' + gap.length + ' seasons)' : '') +
+        '</td></tr>';
+      gap = [];
+    };
+    for (let s = first; s < seasons.length; s++) {
+      const stints = played[s];
+      if (!stints) { gap.push(s); continue; }
+      flushGap();
+      stints.forEach((r, i) => {
+        const lg = leagues[r[1]], gdiff = Math.round((r[5] - r[6]) * 10) / 10;
+        const wide = Math.round(38 * Math.min(1, Math.abs(gdiff) / maxAbs));
+        const side = gdiff >= 0 ? 'over' : 'under';
+        // a mid-season move repeats the season, so only the first row names it
+        body += "<tr" + (lg === p.lg ? '' : " class='car-away'") + '>' +
+          '<td>' + (i ? '' : esc(seasons[s])) + '</td>' +
+          "<td class='car-grow'>" + esc(clubs[r[2]]) +
+          (lg === p.lg ? '' : " <span class='dim'>" + esc(lg) + '</span>') + '</td>' +
+          "<td class='num dim'>" + r[3] + '</td>' +
+          "<td class='num dim'>" + r[4] + '</td>' +
+          "<td class='num score'>" + r[5] + '</td>' +
+          "<td class='num dim'>" + r[6].toFixed(1) + '</td>' +
+          "<td class='num'>" + r[7] + "<span class='dim'>/" + r[8].toFixed(1) + '</span></td>' +
+          "<td class='num'><span class='hist-bar' style='width:80px'><i class='" + side +
+          "' style='" + (gdiff >= 0 ? 'left:50%;width:' : 'right:50%;width:') + wide +
+          "px'></i></span><span class='hist-n " + side + "'>" + signed(gdiff) +
+          '</span></td></tr>';
+      });
+    }
+    flushGap();
+    return "<div class='pd-career'><div class='h2h-h'>Career " +
+      "<span class='dim'>· every season Understat has stored</span></div>" +
+      "<div style='overflow-x:auto'><table><thead><tr><th>Season</th><th>Club</th>" +
+      "<th class='num'>Apps</th><th class='num'>Min</th><th class='num'>G</th>" +
+      "<th class='num'>xG</th><th class='num'>A/xA</th>" +
+      "<th class='num'>G − xG</th></tr></thead><tbody>" + body +
+      '</tbody></table></div></div>';
+  }
+
   /* ---- profile card ---- */
   const overlay = $('pd-overlay');
   function closeDetail() { overlay.hidden = true; }
@@ -805,7 +876,7 @@ const HIST_BY_LG = {"Allsvenskan":{"seasons":["2023","2024","2025"],"clubs":{"Ma
       "<div class='pd-totals'>" + totals + "</div>" +
       "<p class='meta'>Season totals above; bars below are per-90 rates as percentiles vs " +
       esc(p.lg) + " " + (POS_NAME[posOf(p)] || 'players') + " with " + MIN_PEER + "+ minutes.</p>" +
-      bars +
+      bars + careerBlock(p) +
       "<button id='pd-compare' type='button'>Add to comparison</button>";
     overlay.hidden = false;
     $('pd-close').onclick = closeDetail;
