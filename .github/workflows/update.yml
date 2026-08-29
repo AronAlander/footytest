@@ -33,6 +33,14 @@ jobs:
           # messages, and the default shallow checkout has no history to read
           # them from -- the build would quietly render an empty panel
           fetch-depth: 0
+          # build the branch tip, not the sha that triggered this run. The
+          # concurrency group queues a second run rather than cancelling it,
+          # but checkout still pins to the trigger sha -- so a queued nightly
+          # would rebuild the tree as it was before the run ahead of it
+          # published, and its commit would then hit a content conflict in
+          # docs/index.html at git pull --rebase (exactly how the 2026-08-28
+          # nightly failed, queued behind this workflow's own self-test)
+          ref: ${{ github.ref_name }}
 
       - uses: actions/setup-python@v5
         with:
