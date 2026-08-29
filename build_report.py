@@ -597,17 +597,22 @@ def _team_link_map(db, league):
     return {d: a for d, a in _predict_mapping(display, names).items() if a}
 
 
-def _analytics_label(name):
+def _analytics_label(name, league=None):
     """A club's name as a link, for the tables built from the xG feed itself.
 
     No name map, unlike the League tab: those tables come from TheSportsDB and
-    have to be bridged to the club card's names, while this one is already
+    have to be bridged to the club card's names, while these are already
     reading the rows the card is built from. A club the card somehow does not
     hold simply stays unmarked, because the marking is applied client-side
     against the list the card actually has.
+
+    league is only needed where a table mixes them -- Best of Europe ranks all
+    five at once, and a row there has to say which one it belongs to or the
+    click resolves against whichever league the page happens to be showing.
     """
     label = escape(name or "")
-    return f"<span data-team='{label}'>{label}</span>"
+    lg = f" data-lg='{escape(league)}'" if league else ""
+    return f"<span data-team='{label}'{lg}>{label}</span>"
 
 
 def _team_label(name, tmap):
@@ -2610,7 +2615,8 @@ def justice_table(db, league):
         moved = xrank - actual_rank[team]  # >0: finished above what chances deserved
         zone = " class='zone-cl'" if xrank <= 4 else " class='zone-rel'" if xrank > len(rows) - 3 else ""
         body += (
-            f"<tr{zone}><td class='num'>{xrank}</td><td>{escape(team)}</td>"
+            f"<tr{zone}><td class='num'>{xrank}</td>"
+            f"<td>{_analytics_label(team)}</td>"
             f"<td class='num score'>{xpts:.1f}</td><td class='num'>{pts}</td>"
             f"<td class='num'>{actual_rank[team]}</td>"
             f"<td class='num'>{trend_arrow(moved)}</td></tr>"
@@ -2634,7 +2640,10 @@ def justice_table(db, league):
         "them; those teams are the classic bounce-back picks for next season, and where "
         "the value hides in pre-season betting markets and predictions.</p>"
     )
-    return block("The justice table — where the chances say you belonged", card, about)
+    hint = ("<p class='meta team-hint' hidden>Click a club to open it in "
+            "Team analytics.</p>")
+    return block("The justice table — where the chances say you belonged",
+                 hint + card, about)
 
 
 def fortune_scatter(db, league):
@@ -2741,7 +2750,8 @@ def venue_split_table(db, league, limit=8):
     body = ""
     for team, home, away in shown:
         body += (
-            f"<tr><td>{escape(team)}</td><td class='num'>{fmt_delta_html(home, 2)}</td>"
+            f"<tr><td>{_analytics_label(team)}</td>"
+            f"<td class='num'>{fmt_delta_html(home, 2)}</td>"
             f"<td class='num'>{fmt_delta_html(away, 2)}</td>"
             f"<td class='num score'>{fmt_delta_html(home - away, 2)}</td></tr>"
         )
@@ -2764,7 +2774,10 @@ def venue_split_table(db, league, limit=8):
         "mentally robust, system-driven side. Useful for match predictions: venue matters "
         "much more for some teams than others.</p>"
     )
-    return block("Venue dependence — who's a different team on the road", card, about)
+    hint = ("<p class='meta team-hint' hidden>Click a club to open it in "
+            "Team analytics.</p>")
+    return block("Venue dependence — who's a different team on the road",
+                 hint + card, about)
 
 
 def shot_diet_scatter(db, league, top_shooters=30, min_minutes=900):
@@ -2968,7 +2981,8 @@ def europe_justice_table(db, limit=20):
     body = ""
     for rank, (team, lg, games, pts, xpts, npxgd) in enumerate(rows, 1):
         body += (
-            f"<tr><td class='num'>{rank}</td><td>{escape(team)}</td>"
+            f"<tr><td class='num'>{rank}</td>"
+            f"<td>{_analytics_label(team, lg)}</td>"
             f"<td class='dim'>{escape(lg)}</td><td class='num'>{games}</td>"
             f"<td class='num score'>{xpts / games:.2f}</td>"
             f"<td class='num'>{pts / games:.2f}</td>"
@@ -2994,7 +3008,12 @@ def europe_justice_table(db, limit=20):
         "these numbers against its own league's opposition, so this ranks domestic "
         "dominance, not head-to-head strength.</p>"
     )
-    return block("Continental justice table — xPts per match", card, about)
+    # says "opens" rather than "loads below": this table is on another tab,
+    # so the click moves the page to Team analytics in the club's own league
+    hint = ("<p class='meta team-hint' hidden>Click a club to open it in "
+            "Team analytics.</p>")
+    return block("Continental justice table — xPts per match",
+                 hint + card, about)
 
 
 def europe_panel(db):
@@ -5440,6 +5459,9 @@ EXPLORER_JS = """
   // sits inside a clickable fixture row, and two independent listeners would
   // race for the same click. Here the more specific target simply wins.
   function lgOf(el) {
+    // a row that names its own league wins: the Best of Europe tables rank
+    // all five at once, so the panel they sit in cannot answer this
+    if (el.dataset && el.dataset.lg) return el.dataset.lg;
     const view = el.closest('.lgview');
     return view ? view.dataset.lg : window.CUR_LG;
   }
