@@ -13,7 +13,14 @@ on:
   workflow_dispatch:      # manual "Run workflow" button in the Actions tab
   push:
     paths:
-      - ".github/workflows/update.yml"  # a change to this file test-runs it once
+      # a change to either of these test-runs the workflow once. The generator
+      # is here because a change to it changes every page on the site, and
+      # waiting for the next cron to publish that leaves the code and the
+      # site disagreeing for a day -- longer, given how late the schedule can
+      # be. The fetchers are not: their output is data, not layout, and the
+      # nightly is already the right time to go and get it.
+      - ".github/workflows/update.yml"
+      - "build_report.py"
 
 permissions:
   contents: write

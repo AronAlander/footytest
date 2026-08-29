@@ -364,6 +364,9 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
 - [x] League tab on the Allsvenskan archive pages — final table, home/away
       split and all 240 results per season, derived from the FotMob rows
       already stored rather than fetched again
+- [x] Club history strip: one row per season for any club, back to 2014/15,
+      with the finish, the record and points against expected points — the
+      first thing on the site that reads across seasons rather than within one
 - [ ] Backfill matchday results for old big-five seasons from TheSportsDB
       (works on the test key but needs ~2,000 throttled requests; would give
       those archive pages the League tab that Allsvenskan's already have)

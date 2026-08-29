@@ -415,6 +415,19 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .fx-form th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
   color: var(--text-secondary); text-align: left; }
 .fx-form tr:last-child td { border-bottom: 0; }
+.tc-hist { margin-top: 10px; }
+.hist-gap td { opacity: .5; font-style: italic; }
+.hist-now td { background: rgba(127, 127, 127, .10); }
+.hist-bar { position: relative; display: inline-block; width: 96px; height: 10px;
+            vertical-align: middle; }
+.hist-bar::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0;
+                    width: 1px; background: var(--border); }
+.hist-bar i { position: absolute; top: 2px; bottom: 2px; border-radius: 2px; }
+.hist-bar i.over { background: var(--win); }
+.hist-bar i.under { background: var(--loss); }
+.hist-n { display: inline-block; min-width: 46px; text-align: right; }
+.hist-n.over { color: var(--win); }
+.hist-n.under { color: var(--loss); }
 /* the one column carrying a name absorbs the slack; everything else is a
    chip, a date or a number and stays as narrow as its content */
 .fx-form td, .fx-form th { width: 1%; }
@@ -3139,6 +3152,66 @@ def load_teams(db, league):
     ]
 
 
+def load_club_history(db, league, names):
+    """One row per season for each club on this page, read deliberately across
+    seasons.
+
+    Every other query in this file is season-scoped -- that is what the temp
+    views are for -- so this one reads main. on purpose. A club's history is
+    the one question a single-season page cannot answer out of its own rows,
+    and twelve seasons of it were already stored and unread.
+
+    The cap is the newest season the *scoped* view can see, not MAX(season) in
+    the table. On the live dashboard those are the same thing; on an archive
+    page they are not, and reading past the cap would print a club's future on
+    a page dated years earlier. It also keeps the archives deterministic: a
+    finished season's history cannot change, so those files still only churn
+    when the code does.
+    """
+    cap = db.execute(
+        "SELECT MAX(season) FROM understat_team_matches WHERE league = ?", (league,)
+    ).fetchone()[0]
+    if cap is None or not names:
+        return {}
+    table = ("main.understat_team_matches" if league in UNDERSTAT_LEAGUES
+             else "main.fotmob_team_matches")
+    if not fotmob_available(db) and table.endswith("fotmob_team_matches"):
+        return {}
+    rows = db.execute(
+        f"""SELECT season, team, COUNT(*), SUM(pts), SUM(xpts),
+                   SUM(scored), SUM(missed), SUM(xg), SUM(xga),
+                   SUM(pts = 3), SUM(pts = 1), SUM(pts = 0)
+            FROM {table} WHERE league = ? AND season <= ?
+            GROUP BY season, team""",
+        (league, cap),
+    ).fetchall()
+    if not rows:
+        return {}
+    # every club that played, not just the selectable ones: a position is only
+    # right if it is computed against the whole division
+    by_season = {}
+    for r in rows:
+        by_season.setdefault(r[0], []).append(r)
+    wanted = set(names)
+    clubs, seasons = {}, []
+    for season in sorted(by_season):
+        seasons.append(_season_label(league, season))
+        table_rows = sorted(
+            by_season[season],
+            key=lambda r: (-r[3], -(r[5] - r[6]), -r[5]),   # pts, GD, GF
+        )
+        for pos, r in enumerate(table_rows, 1):
+            team = unescape(r[1])
+            if team not in wanted:
+                continue
+            clubs.setdefault(team, []).append([
+                _season_label(league, season), pos, len(table_rows), r[2],
+                r[9], r[10], r[11], r[5] - r[6], round(r[7] - r[8], 1),
+                r[3], round(r[4], 1),
+            ])
+    return {"seasons": seasons, "clubs": clubs}
+
+
 def load_team_matches(db, league):
     # per-team chronological match lists power the head-to-head deep dive:
     # each entry is [date, home_away, goals_for, goals_against, xg, xga, npxgd, pts]
@@ -3539,7 +3612,7 @@ def load_fixture_data(db, league):
             "venue": venue, "players": players, "h2h": h2h}
 
 
-def team_compare(teams_by_lg, tm_by_lg, form_by_lg):
+def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None):
     if not any(teams_by_lg.values()):
         return ""
     # select options are (re)built client-side per league
@@ -3554,6 +3627,9 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg):
     form_payload = json.dumps(
         form_by_lg, ensure_ascii=False, separators=(",", ":")
     ).replace("</", "<\\/")
+    hist_payload = json.dumps(
+        hist_by_lg or {}, ensure_ascii=False, separators=(",", ":")
+    ).replace("</", "<\\/")
     # empty on the archive pages, where cross-season form has no business being
     has_form = any(form_by_lg.values())
     body = (
@@ -3567,7 +3643,8 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg):
         "and overlaid form curves.</p></div>"
         "<div class='chart-card' id='tc-card' hidden></div>"
         f"<script>const TEAMS_BY_LG = {payload};\nconst TM_BY_LG = {tm_payload};\n"
-        f"const FORM_BY_LG = {form_payload};</script>"
+        f"const FORM_BY_LG = {form_payload};\n"
+        f"const HIST_BY_LG = {hist_payload};</script>"
     )
     about = (
         "<p><strong>What it shows.</strong> One to three teams overlaid on a radar of six "
@@ -3592,6 +3669,18 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg):
         "vs expected points. Shots on target aren't in the data — Understat's team feed "
         "doesn't publish them — so chance <em>quality</em> (xG) stands in for shot "
         "accuracy.</p>"
+        "<p><strong>Season by season.</strong> Under a single club, one row per season "
+        "as far back as the data goes \u2014 where they finished, the record, goal "
+        "difference, xG difference, and points against expected points. The bar is the "
+        "gap between those last two: right and green means the club banked more than its "
+        "chances deserved, left and red means it banked fewer. It is the luck quadrant "
+        "from the Insights tab asked of a decade instead of a season, and it is what "
+        "says whether a good year was a step up or a hot streak. A season spent in a "
+        "lower division shows as a gap rather than being skipped, so the relegations "
+        "are visible too. One caveat: the position is computed from the stored results, "
+        "so it does not know about points deductions \u2014 Everton and Nottingham "
+        "Forest in 2023/24, and Juventus in 2022/23, finished lower than this table "
+        "puts them.</p>"
         "<p><strong>Head-to-head mode.</strong> With exactly two teams picked, the card "
         "goes deeper: a tale-of-the-tape strip where each bar is split by the two sides' "
         "league-percentile share (the longer half leads, the number in brackets is the "
@@ -4125,6 +4214,7 @@ EXPLORER_JS = """
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   let TEAMS = TEAMS_BY_LG[window.CUR_LG] || [];
+  let HIST = (typeof HIST_BY_LG === 'undefined' ? {} : HIST_BY_LG)[window.CUR_LG] || {};
   let TM = TM_BY_LG[window.CUR_LG] || {};
   let FORM = (typeof FORM_BY_LG === 'undefined' ? {} : FORM_BY_LG)[window.CUR_LG] || {};
 
@@ -4169,6 +4259,79 @@ EXPLORER_JS = """
       "<div class='tc-chips'>" + chips + "<span class='dim'>oldest to newest " +
       '\\u00b7 ' + pts + ' of ' + rows.length * 3 + ' points</span></div>' +
       body + '</tbody></table></div>';
+  }
+
+  // signed, with a real minus sign: a column of these is read by shape as
+  // much as by value, and a hyphen next to a digit does not read as negative
+  function hSig(v, dec) {
+    const s = v > 0 ? '+' : v < 0 ? '\u2212' : '';
+    return s + Math.abs(v).toFixed(dec);
+  }
+
+  function historyBlock(name) {
+    const seasons = HIST.seasons || [];
+    const rows = (HIST.clubs || {})[name] || [];
+    // one season is not a history, and the strip would just restate the radar
+    if (rows.length < 2) return '';
+    const by = {};
+    rows.forEach((r) => { by[r[0]] = r; });
+    // scaled to this club's own biggest gap, with a floor so a steady side
+    // does not get a row of dramatic-looking bars over three points
+    let maxAbs = 8;
+    rows.forEach((r) => { maxAbs = Math.max(maxAbs, Math.abs(r[9] - r[10])); });
+    const last = seasons[seasons.length - 1];
+    let body = '';
+    // a run of absent seasons collapses to one row: a club promoted in 2020
+    // would otherwise open its history with six identical empty lines, which
+    // buries the seasons it did play without saying anything six times over
+    let gap = [];
+    const flushGap = () => {
+      if (!gap.length) return;
+      const span = gap.length === 1 ? gap[0] : gap[0] + '\u2013' + gap[gap.length - 1];
+      body += "<tr class='hist-gap'><td>" + esc(span) + "</td><td colspan='8'>not in " +
+        'this division' + (gap.length > 1 ? ' (' + gap.length + ' seasons)' : '') +
+        '</td></tr>';
+      gap = [];
+    };
+    seasons.forEach((s) => {
+      const r = by[s];
+      if (!r) { gap.push(s); return; }
+      flushGap();
+      const pos = r[1], of = r[2], mp = r[3], w = r[4], d = r[5], l = r[6];
+      const gd = r[7], xgd = r[8], pts = r[9], xpts = r[10];
+      // a full campaign is a double round robin; short of that, on the newest
+      // season a page can see, the row is a season in progress rather than a
+      // finished one. Only the newest: 2019/20 Ligue 1 was abandoned at 28
+      // rounds and is finished all the same
+      const live = s === last && mp < (of - 1) * 2;
+      const delta = Math.round((pts - xpts) * 10) / 10;
+      const wide = Math.round(46 * Math.min(1, Math.abs(delta) / maxAbs));
+      const side = delta >= 0 ? 'over' : 'under';
+      const bar = "<span class='hist-bar'><i class='" + side + "' style='" +
+        (delta >= 0 ? 'left:50%;width:' : 'right:50%;width:') + wide + "px'></i></span>";
+      body += '<tr' + (live ? " class='hist-now'" : '') + '>' +
+        '<td>' + esc(s) + (live ? " <span class='dim'>so far</span>" : '') + '</td>' +
+        "<td class='num'>" + pos + "<span class='dim'>/" + of + '</span></td>' +
+        "<td class='num dim'>" + mp + '</td>' +
+        "<td class='num dim'>" + w + '\u2013' + d + '\u2013' + l + '</td>' +
+        "<td class='num'>" + hSig(gd, 0) + '</td>' +
+        "<td class='num dim'>" + hSig(xgd, 1) + '</td>' +
+        "<td class='num score'>" + pts + '</td>' +
+        "<td class='num dim'>" + xpts.toFixed(1) + '</td>' +
+        "<td class='num'>" + bar + "<span class='hist-n " + side + "'>" +
+        hSig(delta, 1) + '</span></td></tr>';
+    });
+    flushGap();
+    return "<div class='tc-hist'><div class='h2h-h'>Season by season " +
+      "<span class='dim'>\u00b7 points against expected points, oldest first" +
+      '</span></div>' +
+      "<div style='overflow-x:auto'><table class='fx-form'><thead><tr>" +
+      "<th>Season</th><th class='num'>Pos</th><th class='num'>P</th>" +
+      "<th class='num'>W\u2013D\u2013L</th><th class='num'>GD</th>" +
+      "<th class='num' title='expected goal difference'>xGD</th>" +
+      "<th class='num'>Pts</th><th class='num' title='expected points'>xPts</th>" +
+      "<th class='num'>Pts \u2212 xPts</th></tr></thead><tbody>" +
+      body + '</tbody></table></div></div>';
   }
 
   function rebuildSelects() {
@@ -4402,7 +4565,7 @@ EXPLORER_JS = """
       (ts.length === 2 ? h2hHtml(ts[0], ts[1]) : compareTable(ts)) +
       // only on a single club: two teams already get recent form inside the
       // head-to-head, and three stacked form tables would bury the radar
-      (ts.length === 1 ? formBlock(ts[0].team) : '');
+      (ts.length === 1 ? formBlock(ts[0].team) + historyBlock(ts[0].team) : '');
   }
   // entry point for a click on a club name over on the League tab
   window.showTeam = function (league, name) {
@@ -4434,6 +4597,7 @@ EXPLORER_JS = """
     TEAMS = TEAMS_BY_LG[window.CUR_LG] || [];
     TM = TM_BY_LG[window.CUR_LG] || {};
     FORM = (typeof FORM_BY_LG === 'undefined' ? {} : FORM_BY_LG)[window.CUR_LG] || {};
+    HIST = (typeof HIST_BY_LG === 'undefined' ? {} : HIST_BY_LG)[window.CUR_LG] || {};
     rebuildSelects();
     renderTC();
   });
@@ -5392,6 +5556,7 @@ def teams_panel(db, leagues, archive=False):
         lgview(lg, style_scatter(db, lg) + rolling_sparklines(db, lg), i == 0)
         for i, lg in enumerate(leagues)
     )
+    teams_by_lg = {lg: load_teams(db, lg) for lg in leagues}
     return (
         f"<h2>Team analytics <span class='dim'>({sources_label(db, leagues)})</span></h2>"
         + metric_glossary() + tables
@@ -5399,9 +5564,14 @@ def teams_panel(db, leagues, archive=False):
         # dashboard and wrong on a frozen one: an archive page would show a
         # club's 2026 results under a 2018/19 heading, and every archive file
         # would churn each time anybody played
-        + team_compare({lg: load_teams(db, lg) for lg in leagues},
+        + team_compare(teams_by_lg,
                        {lg: load_team_matches(db, lg) for lg in leagues},
-                       {} if archive else {lg: load_team_form(db, lg) for lg in leagues})
+                       {} if archive else {lg: load_team_form(db, lg) for lg in leagues},
+                       # club history is cross-season too, but capped at the
+                       # season each page is about, so an archive page shows
+                       # the run-up to its own season and nothing after it
+                       {lg: load_club_history(db, lg, [t["team"] for t in teams_by_lg[lg]])
+                        for lg in leagues})
         + charts
     )
 
