@@ -367,9 +367,16 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 .cl-list { margin: 0; padding-left: 18px; }
 .cl-list li { margin: 3px 0; font-size: 13.5px; color: var(--text-secondary); }
 .cl-list strong { color: var(--text-primary); }
-.team-link { cursor: pointer; }
-.team-link:hover { color: var(--accent); text-decoration: underline;
-  text-underline-offset: 2px; }
+/* a club link says so at rest, not only under the cursor: the trouble with
+   these tables was never that the link failed, it was not being able to tell
+   which part of a row led where before clicking it */
+.team-link { cursor: pointer; text-decoration: underline dotted;
+  text-decoration-color: var(--border); text-underline-offset: 3px; }
+.team-link:hover { color: var(--accent); text-decoration: underline solid;
+  text-decoration-color: currentColor; text-underline-offset: 2px; }
+/* the same marking, inert: an example of a club link inside a hint */
+.link-eg { text-decoration: underline dotted;
+  text-decoration-color: var(--border); text-underline-offset: 3px; }
 .team-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
   border-radius: 3px; }
 tr.fx-link { cursor: pointer; }
@@ -583,10 +590,19 @@ def _team_link_map(db, league):
     return {d: a for d, a in _predict_mapping(display, names).items() if a}
 
 
-def _team_attr(name, tmap):
-    """data-team on a club's cell, or nothing when that club is not covered."""
+def _team_label(name, tmap):
+    """A club's name, wrapped in the link when Team analytics covers it.
+
+    The name, not the cell it sits in. In a results row the whole row already
+    opens the match, so a cell-wide club link puts two targets in one
+    rectangle with nothing to mark the border: click an inch to the right of
+    "Arsenal" and you get the match instead of the club, having had no way to
+    know. Wrapping the text makes the hit area exactly the part that
+    underlines, and leaves the rest of the cell to the row.
+    """
     target = tmap.get(name)
-    return f" data-team='{escape(target)}'" if target else ""
+    label = escape(name or "")
+    return f"<span data-team='{escape(target)}'>{label}</span>" if target else label
 
 
 # ---------------------------------------------------------------- standings
@@ -749,7 +765,7 @@ def standings_table(db, league, title_suffix="", trend=True):
         zone = " class='zone-cl'" if rank <= 4 else " class='zone-rel'" if rank > len(table) - 3 else ""
         body += (
             f"<tr{zone}><td class='num'>{rank}</td>"
-            f"<td{_team_attr(team, tmap)}>{escape(team)}</td>"
+            f"<td>{_team_label(team, tmap)}</td>"
             f"<td class='num'>{t['p']}</td><td class='num'>{t['w']}</td>"
             f"<td class='num'>{t['d']}</td><td class='num'>{t['l']}</td>"
             f"<td class='num'>{t['gf']}–{t['ga']}</td>"
@@ -792,7 +808,7 @@ def home_away_table(db, league, title_suffix=""):
     for team, t in compute_table(matches):
         h, a = t["home"], t["away"]
         body += (
-            f"<tr><td{_team_attr(team, tmap)}>{escape(team)}</td>"
+            f"<tr><td>{_team_label(team, tmap)}</td>"
             f"<td class='num'>{h['w']}-{h['d']}-{h['l']}</td>"
             f"<td class='num'>{h['gf']}–{h['ga']}</td><td class='num score'>{h['pts']}</td>"
             f"<td class='num'>{a['w']}-{a['d']}-{a['l']}</td>"
@@ -850,9 +866,9 @@ def matches_table(db, league, finished, limit=10):
         fx = f" data-fx='{escape(str(event_id))}'"
         body += (
             f"<tr{fx}><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
-            f"<td style='text-align:right'{_team_attr(home, tmap)}>{escape(home or '')}</td>"
+            f"<td style='text-align:right'>{_team_label(home, tmap)}</td>"
             f"<td style='text-align:center'>{score}</td>"
-            f"<td{_team_attr(away, tmap)}>{escape(away or '')}</td></tr>"
+            f"<td>{_team_label(away, tmap)}</td></tr>"
         )
     return f"<div class='card'><table><tbody>{body}</tbody></table></div>"
 
@@ -1102,9 +1118,9 @@ def predictions_block(db, league):
             missing = home if not mapped_home else away
             body += (
                 f"<tr{fx}><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
-                f"<td style='text-align:right'{_team_attr(home, tmap)}>{escape(home)}</td>"
+                f"<td style='text-align:right'>{_team_label(home, tmap)}</td>"
                 f"<td class='dim' style='text-align:center'>no xG history for {escape(missing)}</td>"
-                f"<td{_team_attr(away, tmap)}>{escape(away)}</td><td class='num dim'>–</td></tr>"
+                f"<td>{_team_label(away, tmap)}</td><td class='num dim'>–</td></tr>"
             )
             continue
         lam_home, lam_away, n_min = _fixture_lambdas(
@@ -1119,9 +1135,9 @@ def predictions_block(db, league):
                + seg("h", p_home) + seg("d", p_draw) + seg("a", p_away) + "</div>")
         body += (
             f"<tr{fx}><td class='dim'>{escape(match_date or '')}</td><td class='dim'>{rnd_label}</td>"
-            f"<td style='text-align:right'{_team_attr(home, tmap)}>{escape(home)}</td>"
+            f"<td style='text-align:right'>{_team_label(home, tmap)}</td>"
             f"<td style='min-width:180px'>{bar}</td>"
-            f"<td{_team_attr(away, tmap)}>{escape(away)}</td>"
+            f"<td>{_team_label(away, tmap)}</td>"
             f"<td class='num dim'>{lam_home:.1f}–{lam_away:.1f}</td></tr>"
         )
     prediction_log.save(logged)
@@ -5385,13 +5401,17 @@ def league_section(db, league):
         + home_away_table(db, league, past)
         + block("Recent results" + past,
                 "<p class='meta fx-hint' hidden>Click a result to see the xG "
-                "behind it — and what the model said before kickoff.</p>"
+                "behind it — and what the model said before kickoff. The "
+                "<span class='link-eg'>underlined club names</span> go to that "
+                "club's profile instead.</p>"
                 + matches_table(db, league, finished=True))
         + block("Upcoming fixtures" + ahead,
                 # revealed client-side only where rows really are clickable,
                 # so it never promises a link the explorer cannot open
                 "<p class='meta fx-hint' hidden>Click a fixture for the full "
-                "breakdown — form, head-to-head and the model's call.</p>"
+                "breakdown — form, head-to-head and the model's call. The "
+                "<span class='link-eg'>underlined club names</span> go to that "
+                "club's profile instead.</p>"
                 + matches_table(db, league, finished=False))
         + predictions_block(db, league)
         + season_projection_block(db, league)
