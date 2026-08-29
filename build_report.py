@@ -3889,7 +3889,11 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None,
         "puts them.</p>"
         "<p><strong>The squad.</strong> Under a single club, everyone who has "
         "played a minute for it in the season the page is about, most minutes "
-        "first, with goals against xG and assists against xA. In the big five a "
+        "first, with goals against xG and assists against xA. It lists players "
+        "<em>used</em>, not a registered squad \u2014 neither feed carries a "
+        "player until they have appeared \u2014 so a club one matchday into a "
+        "season shows the eleven and its substitutes and grows to the "
+        "mid-twenties by May. In the big five a "
         "name opens that player's profile card and career underneath; "
         "Allsvenskan's squads come from FotMob, which publishes no positions "
         "and nothing the player explorer is built on, so those names are listed "
@@ -4639,6 +4643,12 @@ EXPLORER_JS = """
   function squadBlock(name) {
     const rows = squadRows(name);
     if (!rows.length) return '';
+    // the count is players who have *appeared*, not a registered squad: neither
+    // feed carries a player until they have played. One matchday in, that is
+    // the eleven and its substitutes, which reads like missing data unless the
+    // heading says what it is counting
+    const t = byTeam(name), n = t ? t.mp : 0;
+    const mp = n ? n + (n === 1 ? ' match' : ' matches') : 'the season';
     const live = rows.some((r) => r[8] != null);
     let body = '';
     rows.forEach((r) => {
@@ -4658,7 +4668,7 @@ EXPLORER_JS = """
         "<td class='num hist-n " + side + "'>" + hSig(gdiff, 1) + '</td></tr>';
     });
     return "<div class='tc-squad'><div class='h2h-h'>Squad " +
-      "<span class='dim'>\u00b7 " + rows.length + ' players, most minutes first' +
+      "<span class='dim'>\u00b7 " + rows.length + ' players used in ' + mp + ', most minutes first' +
       (live ? ' \u00b7 click a name for their profile and career' : '') +
       '</span></div>' +
       "<div style='overflow-x:auto'><table class='fx-form'><thead><tr>" +
