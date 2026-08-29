@@ -377,6 +377,13 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 /* the same marking, inert: an example of a club link inside a hint */
 .link-eg { text-decoration: underline dotted;
   text-decoration-color: var(--border); text-underline-offset: 3px; }
+.tc-squad { margin-top: 12px; }
+/* a squad name leads to the player card exactly the way a club name leads to
+   the club card, so it is marked the same way */
+.squad-link { cursor: pointer; text-decoration: underline dotted;
+  text-decoration-color: var(--border); text-underline-offset: 3px; }
+.squad-link:hover { color: var(--accent); text-decoration: underline solid;
+  text-decoration-color: currentColor; text-underline-offset: 2px; }
 .team-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
   border-radius: 3px; }
 tr.fx-link { cursor: pointer; }
@@ -3362,6 +3369,45 @@ def load_club_history(db, league, names):
     return {"seasons": seasons, "clubs": clubs}
 
 
+def load_squads(db, league, names):
+    """Squads for the leagues the player explorer does not cover.
+
+    The big five need nothing here: their players are already on the page in
+    PLAYERS_BY_LG, carrying the club each one plays for, so the club card
+    filters that list rather than being sent a second copy of it. This exists
+    for a FotMob-backed league, whose players never reach the explorer.
+
+    Those two feeds also disagree about club names -- FotMob's player table
+    says "Hammarby IF" where its match table says "Hammarby" -- so the same
+    normaliser the predictions use bridges them. It maps all sixteen
+    Allsvenskan clubs with no new aliases.
+    """
+    if league in UNDERSTAT_LEAGUES or not fotmob_available(db) or not names:
+        return {}
+    rows = db.execute(
+        """SELECT team, player_name, matches, minutes, goals, xg, assists, xa
+           FROM fotmob_players WHERE league = ? AND minutes > 0
+           ORDER BY minutes DESC""",
+        (league,),
+    ).fetchall()
+    if not rows:
+        return {}
+    bridge = _predict_mapping(sorted({unescape(r[0]) for r in rows}), list(names))
+    squads = {}
+    for team, name, apps, minutes, goals, xg, assists, xa in rows:
+        club = bridge.get(unescape(team))
+        if not club:
+            continue
+        # the same row shape the client derives for the big five, minus the
+        # two things FotMob's player feed has no column for: a position, and
+        # an id the profile card could be opened from
+        squads.setdefault(club, []).append(
+            [unescape(name), "", apps, minutes, goals, round(xg, 2),
+             assists, round(xa, 2), None]
+        )
+    return squads
+
+
 def load_team_matches(db, league):
     # per-team chronological match lists power the head-to-head deep dive:
     # each entry is [date, home_away, goals_for, goals_against, xg, xga, npxgd, pts]
@@ -3762,7 +3808,8 @@ def load_fixture_data(db, league):
             "venue": venue, "players": players, "h2h": h2h}
 
 
-def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None):
+def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None,
+                 squads_by_lg=None):
     if not any(teams_by_lg.values()):
         return ""
     # select options are (re)built client-side per league
@@ -3784,6 +3831,9 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None):
     hist_payload = json.dumps(
         hist_by_lg or {}, ensure_ascii=False, separators=(",", ":")
     ).replace("</", "<\\/")
+    squad_payload = json.dumps(
+        squads_by_lg or {}, ensure_ascii=False, separators=(",", ":")
+    ).replace("</", "<\\/")
     # empty on the archive pages, where cross-season form has no business being
     has_form = any(form_by_lg.values())
     body = (
@@ -3799,7 +3849,8 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None):
         f"<script>{UNPACK_JS}\nconst TEAMS_BY_LG = UNPACK({payload});\n"
         f"const TM_BY_LG = {tm_payload};\n"
         f"const FORM_BY_LG = {form_payload};\n"
-        f"const HIST_BY_LG = {hist_payload};</script>"
+        f"const HIST_BY_LG = {hist_payload};\n"
+        f"const SQUADS_BY_LG = {squad_payload};</script>"
     )
     about = (
         "<p><strong>What it shows.</strong> One to three teams overlaid on a radar of six "
@@ -3836,6 +3887,15 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None):
         "so it does not know about points deductions \u2014 Everton and Nottingham "
         "Forest in 2023/24, and Juventus in 2022/23, finished lower than this table "
         "puts them.</p>"
+        "<p><strong>The squad.</strong> Under a single club, everyone who has "
+        "played a minute for it in the season the page is about, most minutes "
+        "first, with goals against xG and assists against xA. In the big five a "
+        "name opens that player's profile card and career underneath; "
+        "Allsvenskan's squads come from FotMob, which publishes no positions "
+        "and nothing the player explorer is built on, so those names are listed "
+        "rather than linked. It costs the page nothing in the big five \u2014 "
+        "those players are already loaded for the Players tab, so the squad is "
+        "a filter over them rather than a second copy.</p>"
         "<p><strong>Head-to-head mode.</strong> With exactly two teams picked, the card "
         "goes deeper: a tale-of-the-tape strip where each bar is split by the two sides' "
         "league-percentile share (the longer half leads, the number in brackets is the "
@@ -4324,6 +4384,15 @@ EXPLORER_JS = """
     $('pd-close').onclick = closeDetail;
     $('pd-compare').onclick = () => { addToCompare(p); closeDetail(); };
   }
+  // the club card's squad list lives in another closure and holds ids, not
+  // player objects; this is the only way in
+  window.showPlayer = function (league, id) {
+    const pool = PLAYERS_BY_LG[league] || [];
+    const p = pool.find((q) => String(q.id) === String(id));
+    if (!p) return false;
+    openDetail(p);
+    return true;
+  };
   overlay.addEventListener('click', (e) => { if (e.target === overlay) closeDetail(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDetail(); });
   document.querySelector('#player-table tbody').addEventListener('click', (e) => {
@@ -4431,6 +4500,7 @@ EXPLORER_JS = """
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   let TEAMS = TEAMS_BY_LG[window.CUR_LG] || [];
   let HIST = (typeof HIST_BY_LG === 'undefined' ? {} : HIST_BY_LG)[window.CUR_LG] || {};
+  let SQUADS = (typeof SQUADS_BY_LG === 'undefined' ? {} : SQUADS_BY_LG)[window.CUR_LG] || {};
   let TM = TM_BY_LG[window.CUR_LG] || {};
   let FORM = (typeof FORM_BY_LG === 'undefined' ? {} : FORM_BY_LG)[window.CUR_LG] || {};
 
@@ -4548,6 +4618,54 @@ EXPLORER_JS = """
       "<th class='num'>Pts</th><th class='num' title='expected points'>xPts</th>" +
       "<th class='num'>Pts \u2212 xPts</th></tr></thead><tbody>" +
       body + '</tbody></table></div></div>';
+  }
+
+  function squadRows(name) {
+    // the big five are already on the page as PLAYERS_BY_LG, one entry per
+    // player with the club they play for, so the squad is a filter rather
+    // than a second copy of the same data. Only a league the explorer does
+    // not cover needs rows shipped for it
+    const pool = (typeof PLAYERS_BY_LG === 'undefined'
+      ? null : PLAYERS_BY_LG[window.CUR_LG]);
+    if (pool && pool.length) {
+      return pool.filter((p) => p.team === name && p.min > 0)
+        .map((p) => [p.name, p.pos || '', p.games, p.min, p.goals, p.xg,
+                     p.assists, p.xa, p.id])
+        .sort((a, b) => b[3] - a[3]);
+    }
+    return (SQUADS[name] || []).slice();
+  }
+
+  function squadBlock(name) {
+    const rows = squadRows(name);
+    if (!rows.length) return '';
+    const live = rows.some((r) => r[8] != null);
+    let body = '';
+    rows.forEach((r) => {
+      const gdiff = Math.round((r[4] - r[5]) * 10) / 10;
+      const side = gdiff >= 0 ? 'over' : 'under';
+      body += '<tr>' +
+        "<td class='fx-grow'>" + (r[8] == null ? esc(r[0])
+          : "<span class='squad-link' data-pid='" + esc(r[8]) + "'>" +
+            esc(r[0]) + '</span>') + '</td>' +
+        "<td class='dim'>" + esc(r[1] || '\u2013') + '</td>' +
+        "<td class='num dim'>" + r[2] + '</td>' +
+        "<td class='num dim'>" + r[3] + '</td>' +
+        "<td class='num score'>" + r[4] + '</td>' +
+        "<td class='num dim'>" + r[5].toFixed(1) + '</td>' +
+        "<td class='num'>" + r[6] + "<span class='dim'>/" + r[7].toFixed(1) +
+        '</span></td>' +
+        "<td class='num hist-n " + side + "'>" + hSig(gdiff, 1) + '</td></tr>';
+    });
+    return "<div class='tc-squad'><div class='h2h-h'>Squad " +
+      "<span class='dim'>\u00b7 " + rows.length + ' players, most minutes first' +
+      (live ? ' \u00b7 click a name for their profile and career' : '') +
+      '</span></div>' +
+      "<div style='overflow-x:auto'><table class='fx-form'><thead><tr>" +
+      "<th>Player</th><th>Pos</th><th class='num'>Apps</th>" +
+      "<th class='num'>Min</th><th class='num'>G</th><th class='num'>xG</th>" +
+      "<th class='num'>A/xA</th><th class='num'>G \u2212 xG</th>" +
+      '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
   }
 
   function rebuildSelects() {
@@ -4781,7 +4899,9 @@ EXPLORER_JS = """
       (ts.length === 2 ? h2hHtml(ts[0], ts[1]) : compareTable(ts)) +
       // only on a single club: two teams already get recent form inside the
       // head-to-head, and three stacked form tables would bury the radar
-      (ts.length === 1 ? formBlock(ts[0].team) + historyBlock(ts[0].team) : '');
+      (ts.length === 1
+        ? formBlock(ts[0].team) + historyBlock(ts[0].team) + squadBlock(ts[0].team)
+        : '');
   }
   // entry point for a click on a club name over on the League tab
   window.showTeam = function (league, name) {
@@ -4804,6 +4924,10 @@ EXPLORER_JS = """
   window.hasTeam = (league, name) =>
     (TEAMS_BY_LG[league] || []).some((t) => t.team === name);
 
+  $('tc-card').addEventListener('click', (e) => {
+    const el = e.target.closest('.squad-link');
+    if (el && window.showPlayer) window.showPlayer(window.CUR_LG, el.dataset.pid);
+  });
   [1, 2, 3].forEach((i) => $('tc-' + i).addEventListener('change', renderTC));
   $('tc-clear').addEventListener('click', () => {
     [1, 2, 3].forEach((i) => { $('tc-' + i).value = ''; });
@@ -4814,6 +4938,7 @@ EXPLORER_JS = """
     TM = TM_BY_LG[window.CUR_LG] || {};
     FORM = (typeof FORM_BY_LG === 'undefined' ? {} : FORM_BY_LG)[window.CUR_LG] || {};
     HIST = (typeof HIST_BY_LG === 'undefined' ? {} : HIST_BY_LG)[window.CUR_LG] || {};
+    SQUADS = (typeof SQUADS_BY_LG === 'undefined' ? {} : SQUADS_BY_LG)[window.CUR_LG] || {};
     rebuildSelects();
     renderTC();
   });
@@ -5791,6 +5916,10 @@ def teams_panel(db, leagues, archive=False):
                        # season each page is about, so an archive page shows
                        # the run-up to its own season and nothing after it
                        {lg: load_club_history(db, lg, [t["team"] for t in teams_by_lg[lg]])
+                        for lg in leagues},
+                       # only the leagues the explorer cannot reach; the rest
+                       # is filtered out of the player list already on the page
+                       {lg: load_squads(db, lg, [t["team"] for t in teams_by_lg[lg]])
                         for lg in leagues})
         + charts
     )
