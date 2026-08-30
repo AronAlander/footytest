@@ -3478,7 +3478,8 @@ def load_squads(db, league, names):
     if league in UNDERSTAT_LEAGUES or not fotmob_available(db) or not names:
         return {}
     rows = db.execute(
-        """SELECT team, player_name, matches, minutes, goals, xg, assists, xa
+        """SELECT team, player_name, matches, minutes, goals, xg, assists, xa,
+                  player_id, shots, shots_on_target, chances_created, xgot
            FROM fotmob_players WHERE league = ? AND minutes > 0
            ORDER BY minutes DESC""",
         (league,),
@@ -3487,16 +3488,20 @@ def load_squads(db, league, names):
         return {}
     bridge = _predict_mapping(sorted({unescape(r[0]) for r in rows}), list(names))
     squads = {}
-    for team, name, apps, minutes, goals, xg, assists, xa in rows:
-        club = bridge.get(unescape(team))
+    for r in rows:
+        club = bridge.get(unescape(r[0]))
         if not club:
             continue
-        # the same row shape the client derives for the big five, minus the
-        # two things FotMob's player feed has no column for: a position, and
-        # an id the profile card could be opened from
+        # the first nine columns are the row shape the client derives for the
+        # big five, so the club card renders both the same way. Position is
+        # blank because FotMob's player feed has no column for it. The four
+        # after the id are what a reduced profile card can be built from:
+        # xGChain, xGBuildup and non-penalty xG are not published here, which
+        # is why this league has curated boards rather than the full explorer
         squads.setdefault(club, []).append(
-            [unescape(name), "", apps, minutes, goals, round(xg, 2),
-             assists, round(xa, 2), None]
+            [unescape(r[1]), "", r[2], r[3], r[4], round(r[5], 2),
+             r[6], round(r[7], 2), r[8], r[9], r[10], r[11],
+             round(r[12], 2) if r[12] is not None else 0]
         )
     return squads
 
@@ -4340,6 +4345,17 @@ EXPLORER_JS = """
   const posOf = (p) => p.pos.includes('GK') ? 'GK' : ((p.pos.match(/[DMF]/) || ['F'])[0]);
   const POS_NAME = { GK: 'goalkeepers', D: 'defenders', M: 'midfielders', F: 'forwards' };
   const MIN_PEER = 450;
+  // the reduced set for a feed without xGChain, xGBuildup or a penalty split
+  const FOTMOB_METRICS = [
+    { key: 'xg',      label: 'xG' },
+    { key: 'goals',   label: 'Goals' },
+    { key: 'shots',   label: 'Shots' },
+    { key: 'sot',     label: 'On target' },
+    { key: 'xgot',    label: 'xGOT' },
+    { key: 'xa',      label: 'xA' },
+    { key: 'assists', label: 'Assists' },
+    { key: 'kp',      label: 'Chances created' }
+  ];
   const METRICS = [
     { key: 'npxg',    label: 'npxG' },
     { key: 'goals',   label: 'Goals' },
@@ -4359,15 +4375,60 @@ EXPLORER_JS = """
     { key: 'buildup', label: 'xGBuildup' }
   ];
 
+  // 450 minutes is five full matches, and in August nobody has played five
+  // matches: the filter then returns nobody, every percentile divides by zero,
+  // and the card reads "NaNth" with empty bars. Hold the bar at 450 once the
+  // season is old enough to clear it, and before that scale it to how much
+  // football has actually been played
+  // a league the explorer does not cover still ships its players, for the
+  // club card's squad list. That is enough for a reduced profile, so a name
+  // there is not dead text -- which is exactly how it read before: underlined
+  // like every other link on the page, and inert.
+  const FM_POOL = {};
+  function fotmobPool(league) {
+    if (FM_POOL[league]) return FM_POOL[league];
+    const byClub = (typeof SQUADS_BY_LG === 'undefined' ? {} : SQUADS_BY_LG[league]) || {};
+    const out = [];
+    Object.keys(byClub).forEach((club) => {
+      byClub[club].forEach((r) => {
+        if (r[8] != null) out.push(fotmobRow(r, club, league));
+      });
+    });
+    FM_POOL[league] = out;
+    return out;
+  }
+  function fotmobRow(r, club, league) {
+    return {
+      feed: 'fotmob', name: r[0], pos: '', team: club, lg: league,
+      games: r[2], min: r[3], goals: r[4], xg: r[5], assists: r[6], xa: r[7],
+      id: r[8], shots: r[9], sot: r[10], kp: r[11], xgot: r[12],
+      gdiff: Math.round((r[4] - r[5]) * 100) / 100,
+      adiff: Math.round((r[6] - r[7]) * 100) / 100
+    };
+  }
+  function poolOf(p) {
+    if (p.feed === 'fotmob') return fotmobPool(p.lg);
+    return PLAYERS_BY_LG[p.lg] || PLAYERS;
+  }
+  function peerFloor(pool) {
+    let most = 0;
+    pool.forEach((q) => { if (q.min > most) most = q.min; });
+    return most >= MIN_PEER ? MIN_PEER : Math.max(45, Math.round(most * 0.5));
+  }
   function peersOf(p) {
-    // percentiles are always vs same-position peers in the player's own league,
-    // so a profile reads the same here as on the player's card
-    const pool = PLAYERS_BY_LG[p.lg] || PLAYERS;
-    let peers = pool.filter((q) => q.min >= MIN_PEER && posOf(q) === posOf(p));
-    if (peers.length < 10) peers = pool.filter((q) => q.min >= MIN_PEER && posOf(q) !== 'GK');
+    // percentiles are always vs peers in the player's own league, so a profile
+    // reads the same here as on the player's card
+    const pool = poolOf(p);
+    const floor = peerFloor(pool);
+    // a feed with no position column ranks against everyone who has played
+    // enough, which is the honest reading of what it can support
+    if (!p.pos) return pool.filter((q) => q.min >= floor);
+    let peers = pool.filter((q) => q.min >= floor && posOf(q) === posOf(p));
+    if (peers.length < 10) peers = pool.filter((q) => q.min >= floor && posOf(q) !== 'GK');
     return peers;
   }
   function percentile(p, key, peers) {
+    if (!peers.length) return null;      // nothing to rank against, so say so
     const v = per90(p, key);
     const below = peers.filter((q) => per90(q, key) <= v).length;
     return Math.round(100 * below / peers.length);
@@ -4451,41 +4512,68 @@ EXPLORER_JS = """
 
   /* ---- profile card ---- */
   const overlay = $('pd-overlay');
+  // it is authored inside the Players panel, and every other panel hides that
+  // one with display:none -- which stops a fixed-position descendant being
+  // rendered at all. Opening a card from the club card's squad list or from
+  // search then set hidden=false on an element with no box: nothing appeared,
+  // and nothing in the console said why. Lift it to the body, where a modal
+  // belongs, so it is visible from whichever tab opened it
+  document.body.appendChild(overlay);
   function closeDetail() { overlay.hidden = true; }
   function openDetail(p) {
+    const fm = p.feed === 'fotmob';
     const peers = peersOf(p);
-    const bars = METRICS.map((m) => {
+    const bars = (fm ? FOTMOB_METRICS : METRICS).map((m) => {
       const pct = percentile(p, m.key, peers);
       const cls = pct >= 70 ? 'hi' : pct >= 40 ? 'mid' : 'lo';
       return "<div class='pd-row'><span class='pd-label'>" + m.label + " /90</span>" +
-        "<div class='pd-track'><div class='pd-fill " + cls + "' style='width:" + pct + "%'></div></div>" +
-        "<span class='pd-val'>" + per90(p, m.key).toFixed(2) + " <em>" + ord(pct) + "</em></span></div>";
+        "<div class='pd-track'><div class='pd-fill " + cls + "' style='width:" +
+        (pct == null ? 0 : pct) + "%'></div></div>" +
+        "<span class='pd-val'>" + per90(p, m.key).toFixed(2) + " <em>" +
+        (pct == null ? '\u2013' : ord(pct)) + "</em></span></div>";
     }).join('');
-    const totals = [
-      ['Goals', p.goals], ['Assists', p.assists], ['Shots', p.shots],
-      ['Key passes', p.kp], ['G\\u2212xG', signed(p.gdiff)], ['A\\u2212xA', signed(p.adiff)]
-    ].map(([l, v]) =>
+    const totals = (fm
+      ? [['Goals', p.goals], ['Assists', p.assists], ['Shots', p.shots],
+         ['Chances created', p.kp], ['G\\u2212xG', signed(p.gdiff)],
+         ['A\\u2212xA', signed(p.adiff)]]
+      : [['Goals', p.goals], ['Assists', p.assists], ['Shots', p.shots],
+         ['Key passes', p.kp], ['G\\u2212xG', signed(p.gdiff)],
+         ['A\\u2212xA', signed(p.adiff)]]
+    ).map(([l, v]) =>
       "<div><span class='pd-tv'>" + v + "</span><span class='pd-tl'>" + l + "</span></div>"
     ).join('');
     $('pd-modal').innerHTML =
       "<div class='pd-head'><div><h4>" + esc(p.name) + "</h4>" +
-      "<p class='meta'>" + esc(p.team) + " \\u00b7 " + esc(p.lg) + " \\u00b7 " + esc(p.pos) + " \\u00b7 " +
+      "<p class='meta'>" + esc(p.team) + " \\u00b7 " + esc(p.lg) +
+      (p.pos ? " \\u00b7 " + esc(p.pos) : '') + " \\u00b7 " +
       p.games + " apps, " + p.min + " min</p></div>" +
       "<button id='pd-close' aria-label='Close'>\\u2715</button></div>" +
       "<div class='pd-totals'>" + totals + "</div>" +
-      "<p class='meta'>Season totals above; bars below are per-90 rates as percentiles vs " +
-      esc(p.lg) + " " + (POS_NAME[posOf(p)] || 'players') + " with " + MIN_PEER + "+ minutes.</p>" +
-      bars + careerBlock(p) +
-      "<button id='pd-compare' type='button'>Add to comparison</button>";
+      "<p class='meta'>Season totals above; bars below are per-90 rates as percentiles vs the " +
+      peers.length + ' ' + esc(p.lg) + " " +
+      (p.pos ? (POS_NAME[posOf(p)] || 'players') : 'players') + " with " +
+      peerFloor(poolOf(p)) + "+ minutes this season.</p>" +
+      bars + (fm
+        // no career strip and no radar: both need the columns this feed does
+        // not publish, and a card that says so beats one that invents them
+        ? "<p class='meta'>FotMob publishes no position, xGChain, xGBuildup or " +
+          'non-penalty split for this league, so the radar comparison and the ' +
+          'career strip stay on the big five.</p>'
+        : careerBlock(p) +
+          "<button id='pd-compare' type='button'>Add to comparison</button>");
     overlay.hidden = false;
     $('pd-close').onclick = closeDetail;
-    $('pd-compare').onclick = () => { addToCompare(p); closeDetail(); };
+    if ($('pd-compare')) $('pd-compare').onclick = () => { addToCompare(p); closeDetail(); };
   }
   // the club card's squad list lives in another closure and holds ids, not
   // player objects; this is the only way in
   window.showPlayer = function (league, id) {
     const pool = PLAYERS_BY_LG[league] || [];
-    const p = pool.find((q) => String(q.id) === String(id));
+    let p = pool.find((q) => String(q.id) === String(id));
+    // the explorer first, then the squad rows shipped for leagues it does not
+    // cover -- ids from the two feeds never meet, since a league is in one or
+    // the other
+    if (!p) p = fotmobPool(league).find((q) => String(q.id) === String(id));
     if (!p) return false;
     openDetail(p);
     return true;
@@ -4520,7 +4608,8 @@ EXPLORER_JS = """
     });
     ps.forEach((p, i) => {
       const peers = peersOf(p);
-      const pts = RADAR.map((m, j) => pt(j, R * percentile(p, m.key, peers) / 100)).join(' ');
+      const pts = RADAR.map((m, j) =>
+        pt(j, R * (percentile(p, m.key, peers) || 0) / 100)).join(' ');
       parts += "<polygon class='radar-poly pc" + i + "' points='" + pts + "'><title>" +
         esc(p.name) + "</title></polygon>";
     });
@@ -4534,7 +4623,9 @@ EXPLORER_JS = """
       '<tr><td>' + m.label + '</td>' + ps.map((p) => {
         const peers = peersOf(p);
         return "<td class='num'>" + per90(p, m.key).toFixed(2) +
-          " <span class='dim'>(" + ord(percentile(p, m.key, peers)) + ")</span></td>";
+          " <span class='dim'>(" +
+          (percentile(p, m.key, peers) == null ? '\u2013'
+            : ord(percentile(p, m.key, peers))) + ')</span></td>';
       }).join('') + '</tr>'
     ).join('');
     const info = "<tr><td class='dim'>Team \\u00b7 league \\u00b7 pos \\u00b7 minutes</td>" + ps.map((p) =>
@@ -4742,13 +4833,17 @@ EXPLORER_JS = """
     // heading says what it is counting
     const t = byTeam(name), n = t ? t.mp : 0;
     const mp = n ? n + (n === 1 ? ' match' : ' matches') : 'the season';
-    const live = rows.some((r) => r[8] != null);
+    // an id is necessary but not sufficient: the frozen season pages ship
+    // squads without the player explorer that owns the profile card, and an
+    // underlined name that answers nothing is worse than plain text
+    const live = rows.some((r) => r[8] != null) &&
+      typeof window.showPlayer === 'function';
     let body = '';
     rows.forEach((r) => {
       const gdiff = Math.round((r[4] - r[5]) * 10) / 10;
       const side = gdiff >= 0 ? 'over' : 'under';
       body += '<tr>' +
-        "<td class='fx-grow'>" + (r[8] == null ? esc(r[0])
+        "<td class='fx-grow'>" + (!live || r[8] == null ? esc(r[0])
           : "<span class='squad-link' data-pid='" + esc(r[8]) + "'>" +
             esc(r[0]) + '</span>') + '</td>' +
         "<td class='dim'>" + esc(r[1] || '\u2013') + '</td>' +
@@ -4762,7 +4857,8 @@ EXPLORER_JS = """
     });
     return "<div class='tc-squad'><div class='h2h-h'>Squad " +
       "<span class='dim'>\u00b7 " + rows.length + ' players used in ' + mp + ', most minutes first' +
-      (live ? ' \u00b7 click a name for their profile and career' : '') +
+      (live ? ' \u00b7 click a name for their profile' +
+        (rows[0].length > 9 ? '' : ' and career') : '') +
       '</span></div>' +
       "<div style='overflow-x:auto'><table class='fx-form'><thead><tr>" +
       "<th>Player</th><th>Pos</th><th class='num'>Apps</th>" +
