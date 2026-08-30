@@ -428,20 +428,26 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 /* a club link says so at rest, not only under the cursor: the trouble with
    these tables was never that the link failed, it was not being able to tell
    which part of a row led where before clicking it */
-.team-link { cursor: pointer; text-decoration: underline dotted;
-  text-decoration-color: var(--border); text-underline-offset: 3px; }
-.team-link:hover { color: var(--accent); text-decoration: underline solid;
-  text-decoration-color: currentColor; text-underline-offset: 2px; }
+.team-link, .squad-link, .row-link, .link-eg {
+  text-decoration: underline dotted; text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.team-link, .squad-link, .row-link { cursor: pointer; }
+.team-link:hover, .squad-link:hover, .row-link:hover,
+#player-table tbody tr:hover .row-link {
+  color: var(--accent); text-decoration: underline solid;
+  text-decoration-color: currentColor; text-underline-offset: 2px;
+}
 /* the same marking, inert: an example of a club link inside a hint */
-.link-eg { text-decoration: underline dotted;
-  text-decoration-color: var(--border); text-underline-offset: 3px; }
+/* the convention, stated once under the search box */
+.hint-legend { margin: 8px 0 0; font-size: 12.5px; }
+#pd-copy {
+  appearance: none; background: none; border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text-secondary); font: inherit;
+  font-size: 12.5px; padding: 4px 10px; cursor: pointer; margin-right: 6px;
+}
+#pd-copy:hover { color: var(--accent); border-color: var(--accent); }
 .tc-squad { margin-top: 12px; }
-/* a squad name leads to the player card exactly the way a club name leads to
-   the club card, so it is marked the same way */
-.squad-link { cursor: pointer; text-decoration: underline dotted;
-  text-decoration-color: var(--border); text-underline-offset: 3px; }
-.squad-link:hover { color: var(--accent); text-decoration: underline solid;
-  text-decoration-color: currentColor; text-underline-offset: 2px; }
 .team-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
   border-radius: 3px; }
 tr.fx-link { cursor: pointer; }
@@ -3295,6 +3301,9 @@ def player_explorer(players_by_lg, careers=None):
         "<label><input type='checkbox' id='pe-per90'> per 90</label>"
         "<span class='count' id='pe-count'></span>"
         "</div>"
+        "<p class='meta'>Click a row for that player's profile card \u2014 season "
+        "totals, per-90 percentiles against their peers, and every season "
+        "stored for them.</p>"
         "<div class='card'><table id='player-table'><thead><tr></tr></thead>"
         "<tbody></tbody></table></div>"
         "<div class='show-more' id='pe-more'></div>"
@@ -4088,6 +4097,13 @@ def fixtures_panel(db, leagues):
 
 
 EXPLORER_JS = """
+// Applying a deep link is a restore, not a move. Every panel reads the hash
+// for its own part of it, and the first to open something would otherwise
+// call syncHash and rewrite the hash from a page that has not read the rest
+// yet -- which is how "&club=Arsenal&player=Ben White" lost the club. Hold
+// the writes until they have all had their turn.
+window.__navRestoring = true;
+
 (function () {  // league switcher: sets window.CUR_LG, toggles .lgview blocks
   const btns = document.querySelectorAll('nav.lgswitch button');
   if (!btns.length) {
@@ -4176,6 +4192,9 @@ EXPLORER_JS = """
 
   function display(p, col) {
     const v = value(p, col);
+    // the row opens the profile card, so the name carries the same mark every
+    // other name on the site that opens something carries
+    if (col.key === 'name') return "<span class='row-link'>" + esc(v) + '</span>';
     if (!col.num) return esc(v);
     let dec = col.dec || 0;
     if (state.per90 && col.per90) dec = 2;
@@ -4285,6 +4304,23 @@ EXPLORER_JS = """
   // push=true records a step the reader took, so Back returns to it. Anything
   // the page does to itself -- normalising on load, resettling after a league
   // change -- replaces instead, or Back would walk through states nobody chose
+  // every reader used to pick the hash apart its own way -- one sliced at the
+  // first "teams=", another filtered out "lg=" and rejoined the rest -- which
+  // is why a club name could swallow a parameter that trailed it. Parse once,
+  // properly, and let the readers ask for what they want
+  window.hashState = function () {
+    const out = { panel: null, params: {} };
+    location.hash.slice(1).split('&').forEach((part) => {
+      if (!part) return;
+      const eq = part.indexOf('=');
+      if (eq < 0) {
+        if (!out.panel) out.panel = decodeURIComponent(part);
+        return;
+      }
+      out.params[part.slice(0, eq)] = decodeURIComponent(part.slice(eq + 1));
+    });
+    return out;
+  };
   window.syncHash = function (push) {
     if (window.__navRestoring) return;   // mid-popstate: the hash is the target
     const parts = [];
@@ -4298,6 +4334,18 @@ EXPLORER_JS = """
     if (active && active.dataset.panel === 'fixtures' && window.currentMatch) {
       const id = window.currentMatch();
       if (id) parts.push('m=' + id);
+    }
+    // the club comparison and the open profile card, so a link carries what
+    // the reader is actually looking at rather than the tab it sits on
+    if (active && active.dataset.panel === 'teams' && window.currentTeams) {
+      const names = window.currentTeams();
+      // club=, not teams=: the panel is itself called teams, and
+      // "#teams&teams=Arsenal" reads like a stutter
+      if (names.length) parts.push('club=' + names.map(encodeURIComponent).join(','));
+    }
+    if (window.currentPlayer) {
+      const who = window.currentPlayer();
+      if (who) parts.push('player=' + encodeURIComponent(who));
     }
     const url = '#' + parts.join('&');
     if (url === decodeURIComponent(location.hash)) return;  // no history churn
@@ -4511,6 +4559,7 @@ EXPLORER_JS = """
   }
 
   /* ---- profile card ---- */
+  let OPEN = null;      // whose card is on screen, for the hash
   const overlay = $('pd-overlay');
   // it is authored inside the Players panel, and every other panel hides that
   // one with display:none -- which stops a fixed-position descendant being
@@ -4519,7 +4568,11 @@ EXPLORER_JS = """
   // and nothing in the console said why. Lift it to the body, where a modal
   // belongs, so it is visible from whichever tab opened it
   document.body.appendChild(overlay);
-  function closeDetail() { overlay.hidden = true; }
+  function closeDetail() {
+    overlay.hidden = true;
+    OPEN = null;
+    window.syncHash(true);
+  }
   function openDetail(p) {
     const fm = p.feed === 'fotmob';
     const peers = peersOf(p);
@@ -4547,6 +4600,7 @@ EXPLORER_JS = """
       "<p class='meta'>" + esc(p.team) + " \\u00b7 " + esc(p.lg) +
       (p.pos ? " \\u00b7 " + esc(p.pos) : '') + " \\u00b7 " +
       p.games + " apps, " + p.min + " min</p></div>" +
+      "<button id='pd-copy' type='button'>Copy link</button>" +
       "<button id='pd-close' aria-label='Close'>\\u2715</button></div>" +
       "<div class='pd-totals'>" + totals + "</div>" +
       "<p class='meta'>Season totals above; bars below are per-90 rates as percentiles vs the " +
@@ -4562,7 +4616,34 @@ EXPLORER_JS = """
         : careerBlock(p) +
           "<button id='pd-compare' type='button'>Add to comparison</button>");
     overlay.hidden = false;
+    OPEN = p;
+    window.syncHash(true);
     $('pd-close').onclick = closeDetail;
+    // the hash already names this card; the button saves the reader from
+    // going up to the address bar to find that out
+    $('pd-copy').onclick = () => {
+      const url = location.href;
+      const done = () => {
+        $('pd-copy').textContent = 'Copied';
+        setTimeout(() => { if ($('pd-copy')) $('pd-copy').textContent = 'Copy link'; }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(done, fallback);
+      } else {
+        fallback();
+      }
+      function fallback() {
+        // a page opened straight off disk has no clipboard API
+        const box = document.createElement('textarea');
+        box.value = url;
+        box.style.position = 'fixed';
+        box.style.opacity = '0';
+        document.body.appendChild(box);
+        box.select();
+        try { document.execCommand('copy'); done(); } catch (e) { /* nothing to do */ }
+        document.body.removeChild(box);
+      }
+    };
     if ($('pd-compare')) $('pd-compare').onclick = () => { addToCompare(p); closeDetail(); };
   }
   // the club card's squad list lives in another closure and holds ids, not
@@ -4666,18 +4747,32 @@ EXPLORER_JS = """
   });
   rebuildList();
 
-  /* ---- deep links: #player=Name and #compare=Name,Name[,Name],
-         optionally prefixed with lg=League_Name& ---- */
-  const hash = decodeURIComponent(location.hash.slice(1)).split('&')
-    .filter((s) => !s.startsWith('lg=')).join('&');
-  const showPlayersTab = () => document.querySelector("nav.tabs button[data-panel='players']").click();
-  if (hash.startsWith('player=')) {
-    showPlayersTab();
-    const p = byName(hash.slice(7));
+  window.currentPlayer = () => (OPEN ? OPEN.name : null);
+  // a name resolves in the explorer first, then among the players shipped for
+  // a league it does not cover, so a link to an Allsvenskan card also comes back
+  function findPlayer(name) {
+    return byName(name) ||
+      fotmobPool(window.CUR_LG).find((q) => q.name === name) || null;
+  }
+  window.applyPlayer = function (name) {
+    if (!name) { if (!overlay.hidden) { overlay.hidden = true; OPEN = null; } return; }
+    if (OPEN && OPEN.name === name) return;
+    const p = findPlayer(name);
     if (p) openDetail(p);
-  } else if (hash.startsWith('compare=')) {
+  };
+
+  /* deep links: #player=Name and #compare=Name,Name[,Name] */
+  const params = window.hashState().params;
+  const showPlayersTab = () => document.querySelector("nav.tabs button[data-panel='players']").click();
+  if (params.player) {
+    const p = findPlayer(params.player);
+    // a card opens over whichever tab the link named; only send the reader to
+    // the explorer when the link says nothing else about where to be
+    if (!window.hashState().panel) showPlayersTab();
+    if (p) openDetail(p);
+  } else if (params.compare) {
     showPlayersTab();
-    hash.slice(8).split(',').slice(0, 3).forEach((n, i) => { $('pc-' + (i + 1)).value = n.trim(); });
+    params.compare.split(',').slice(0, 3).forEach((n, i) => { $('pc-' + (i + 1)).value = n.trim(); });
     renderCompare();
   }
 })();
@@ -5117,6 +5212,7 @@ EXPLORER_JS = """
     $('tc-2').value = '';
     $('tc-3').value = '';
     renderTC();
+    window.syncHash(true);
     $('tc-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
     return true;
   };
@@ -5127,10 +5223,20 @@ EXPLORER_JS = """
     const el = e.target.closest('.squad-link');
     if (el && window.showPlayer) window.showPlayer(window.CUR_LG, el.dataset.pid);
   });
-  [1, 2, 3].forEach((i) => $('tc-' + i).addEventListener('change', renderTC));
+  window.currentTeams = () =>
+    [1, 2, 3].map((i) => $('tc-' + i).value).filter(Boolean);
+  window.applyTeams = function (names) {
+    [1, 2, 3].forEach((i) => { $('tc-' + i).value = names[i - 1] || ''; });
+    renderTC();
+  };
+  [1, 2, 3].forEach((i) => $('tc-' + i).addEventListener('change', () => {
+    renderTC();
+    window.syncHash(true);
+  }));
   $('tc-clear').addEventListener('click', () => {
     [1, 2, 3].forEach((i) => { $('tc-' + i).value = ''; });
     renderTC();
+    window.syncHash(true);
   });
   document.addEventListener('leaguechange', () => {
     TEAMS = TEAMS_BY_LG[window.CUR_LG] || [];
@@ -5143,12 +5249,14 @@ EXPLORER_JS = """
   });
   rebuildSelects();
 
-  /* deep link: #teams=Name,Name[,Name], optionally prefixed with lg=League_Name& */
-  const hash = decodeURIComponent(location.hash.slice(1)).split('&')
-    .filter((s) => !s.startsWith('lg=')).join('&');
-  if (hash.startsWith('teams=')) {
+  /* deep link: #club=Name,Name[,Name], in any order among the other keys.
+     teams= is the name this link had before the panel started writing its own
+     state, and links to it are out in the world, so it still resolves */
+  const hp = window.hashState().params;
+  const wanted = hp.club || hp.teams;
+  if (wanted) {
     document.querySelector("nav.tabs button[data-panel='teams']").click();
-    hash.slice(6).split(',').slice(0, 3).forEach((n, i) => { $('tc-' + (i + 1)).value = n.trim(); });
+    wanted.split(',').slice(0, 3).forEach((n, i) => { $('tc-' + (i + 1)).value = n.trim(); });
     renderTC();
   }
 })();
@@ -5681,15 +5789,18 @@ EXPLORER_JS = """
   // the panels resettle, and each of them would otherwise sync the hash
   // mid-restore and overwrite the very state being restored.
   function restore() {
-    const hash = decodeURIComponent(location.hash.slice(1));
+    const state = window.hashState();
+    const p = state.params;
     window.__navRestoring = true;
     try {
-      const lg = (/(?:^|&)lg=([^&]+)/.exec(hash) || [])[1];
-      if (lg && window.applyLeague) window.applyLeague(lg.replace(/_/g, ' '));
-      const panel = hash.split('&').filter((s) => s && !s.includes('='))[0];
-      if (panel && window.showPanel) window.showPanel(panel, true);
-      const m = (/(?:^|&)m=([^&]+)/.exec(hash) || [])[1];
-      if (m && window.selectMatch) window.selectMatch(m);
+      if (p.lg && window.applyLeague) window.applyLeague(p.lg.replace(/_/g, ' '));
+      if (state.panel && window.showPanel) window.showPanel(state.panel, true);
+      if (p.m && window.selectMatch) window.selectMatch(p.m);
+      // both cards restore, including to empty: going Back out of a card has
+      // to close it again, or Back looks broken on the one thing it opened
+      const clubs = p.club || p.teams;
+      if (window.applyTeams) window.applyTeams(clubs ? clubs.split(',') : []);
+      if (window.applyPlayer) window.applyPlayer(p.player || null);
     } finally {
       window.__navRestoring = false;
     }
@@ -5919,6 +6030,11 @@ EXPLORER_JS = """
   window.addEventListener('scroll', () => {
     fab.classList.toggle('show', window.scrollY > 500);
   }, { passive: true });
+})();
+
+(function () {  // deep link applied: writes are safe again
+  window.__navRestoring = false;
+  if (window.syncHash) window.syncHash(false);
 })();
 
 (function () {  // back-to-top button
@@ -6734,7 +6850,13 @@ SEARCH_ICON = (
 SEARCH_BAR = (
     "<div class='gs-bar'><button id='gs-open' type='button'>" + SEARCH_ICON +
     "<span class='gs-ph'>Search clubs, players and sections</span><kbd>/</kbd>"
-    "</button></div>"
+    "</button>"
+    # the site is full of things that open other things, and until now each
+    # block had to explain that for itself. Say the convention once, at the top
+    "<p class='meta hint-legend'>Names marked like "
+    "<span class='link-eg'>this</span> open something \u2014 a club, a player, "
+    "a match. The address bar follows you, so any card can be linked to."
+    "</p></div>"
 )
 
 SEARCH_HTML = (

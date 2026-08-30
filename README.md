@@ -102,6 +102,14 @@ be served as a web dashboard (see below). A league switcher at the top flips the
 whole dashboard between the five leagues (deep-linkable by prefixing any link with
 `#lg=Premier_League&…`); below it are five tabs.
 
+**The address bar follows you.** Every move writes itself into the hash —
+league, tab, the open match, the clubs in the comparison (`#club=`) and the open
+player card (`#player=`) — so any state on the site can be copied out of the
+address bar, pasted back, and reloaded into the same view. Back and Forward walk
+the same trail, and the player card has a **Copy link** button for the reader
+who never looks at the address bar. Names that open something carry a dotted
+underline, explained once under the search box rather than block by block.
+
 A **search box** sits under the badges, and `/` or `Ctrl`+`K` opens it from
 anywhere on the page (as does the floating button that appears once the header
 has scrolled away). It covers every club, every player and every section of the
@@ -256,7 +264,7 @@ Accents are folded, so "martinez" finds Martínez.
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw
-  per-match numbers underneath, deep-linkable via `#teams=A,B,C`),
+  per-match numbers underneath, deep-linkable via `#club=A,B,C`),
   pressing-vs-territory scatter (PPDA against deep completions), rolling
   xG-difference form curves. Picking exactly **two** teams turns the comparison
   into a head-to-head deep dive: a tale-of-the-tape bar duel across ten metrics
@@ -271,7 +279,10 @@ Accents are folded, so "martinez" finds Martínez.
   the rest, so the tab stays compact.
   Click any row for a profile card with season totals and per-90 percentile bars
   vs same-position peers; a comparison block overlays up to three players on a
-  percentile radar (deep-linkable via `#player=Name` / `#compare=A,B,C`). The
+  percentile radar (deep-linkable via `#player=Name` / `#compare=A,B,C`).
+  The peer group is players with 450+ minutes, or — early in a season, before
+  anyone has five matches — half the minutes of the league's busiest player, so
+  a card in August ranks against a real group instead of dividing by zero. The
   comparison search spans **all five leagues**, so cross-league match-ups work
   (Haaland vs Lautaro, say) — each player is ranked against same-position peers
   in their own league, and the pick survives switching leagues. Plus curated
