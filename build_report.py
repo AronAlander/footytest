@@ -143,6 +143,64 @@ nav.seasonnav select:hover { border-color: var(--accent); }
   padding: 4px 12px; cursor: pointer; user-select: none;
 }
 .subnav a:hover { color: var(--accent); border-color: var(--accent); }
+.gs-bar { margin: 14px 0 0; }
+#gs-open {
+  display: inline-flex; align-items: center; gap: 9px; width: min(400px, 100%);
+  font: inherit; font-size: 13px; color: var(--text-secondary); text-align: left;
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 8px 12px; cursor: pointer;
+}
+#gs-open:hover { border-color: var(--accent); color: var(--text-primary); }
+#gs-open .gs-ph { flex: 1; }
+#gs-open kbd {
+  font: inherit; font-size: 11px; font-weight: 600; color: var(--text-secondary);
+  background: var(--surface); border: 1px solid var(--border);
+  border-bottom-width: 2px; border-radius: 5px; padding: 0 5px;
+}
+#gs-fab {
+  position: fixed; right: 22px; bottom: 72px; z-index: 20;
+  width: 42px; height: 42px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--card); color: var(--text-secondary);
+  cursor: pointer; box-shadow: var(--shadow);
+  opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+#gs-fab.show { opacity: 1; pointer-events: auto; }
+#gs-fab:hover { color: var(--accent); border-color: var(--accent); }
+#gs-overlay {
+  position: fixed; inset: 0; background: rgba(10,10,10,.55); z-index: 40;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 9vh 16px 16px;
+}
+#gs-overlay[hidden] { display: none; }
+#gs-modal {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: var(--shadow); width: 100%; max-width: 560px; overflow: hidden;
+}
+#gs-input {
+  width: 100%; font: inherit; font-size: 16px; color: var(--text-primary);
+  background: none; border: none; border-bottom: 1px solid var(--border);
+  padding: 14px 16px; outline: none;
+}
+#gs-results { max-height: min(52vh, 430px); overflow-y: auto; }
+.gs-group {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-secondary); padding: 11px 16px 4px;
+}
+.gs-item {
+  display: flex; align-items: baseline; gap: 12px; padding: 7px 16px; cursor: pointer;
+}
+.gs-item[aria-selected="true"] { background: var(--row-hover); }
+.gs-name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.gs-name mark { background: none; color: var(--accent); }
+.gs-sub {
+  margin-left: auto; font-size: 12px; color: var(--text-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gs-empty { margin: 0; padding: 16px; font-size: 13px; color: var(--text-secondary); }
+.gs-foot {
+  margin: 0; padding: 8px 16px; font-size: 11.5px; color: var(--text-secondary);
+  border-top: 1px solid var(--border);
+}
 .block { margin: 26px 0 30px; scroll-margin-top: 84px; }
 .block-head {
   display: flex; gap: 8px 14px; align-items: baseline; flex-wrap: wrap;
@@ -5543,6 +5601,230 @@ EXPLORER_JS = """
   window.addEventListener('popstate', restore);
 })();
 
+(function () {  // global search: clubs, players, sections
+  const overlay = document.getElementById('gs-overlay');
+  if (!overlay) return;
+  const input = document.getElementById('gs-input');
+  const list = document.getElementById('gs-results');
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // accents folded, so a query never has to reproduce a name's diacritics:
+  // "hakimi" finds Hakimi, "guler" finds the spelling with the umlaut
+  const fold = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '');
+  // the folded name plus a map back to the real characters, so the match can
+  // be highlighted on the name as it is actually spelled
+  function foldMap(label) {
+    let n = '';
+    const map = [];
+    for (let i = 0; i < label.length; i++) {
+      const f = fold(label[i]);
+      for (let k = 0; k < f.length; k++) { n += f[k]; map.push(i); }
+    }
+    return { n: n, map: map };
+  }
+  const GROUPS = [['club', 'Clubs', 6], ['player', 'Players', 8], ['section', 'Sections', 5]];
+  let INDEX = null, shown = [], cur = 0;
+
+  function tabName(pid) {
+    const b = document.querySelector("nav.tabs button[data-panel='" + pid + "']");
+    return b ? b.textContent.trim() : pid;
+  }
+  // built once, on first open: the page already holds everything this needs,
+  // so the index costs nothing to ship and nothing until it is asked for
+  function build() {
+    const out = [];
+    if (typeof TEAMS_BY_LG !== 'undefined') {
+      Object.keys(TEAMS_BY_LG).forEach((lg) => {
+        TEAMS_BY_LG[lg].forEach((t) => out.push({
+          kind: 'club', label: t.team, sub: lg, lg: lg, name: t.team,
+          rank: -(t.pts || 0)     // the league leaders first among equal matches
+        }));
+      });
+    }
+    if (typeof PLAYERS_BY_LG !== 'undefined') {
+      Object.keys(PLAYERS_BY_LG).forEach((lg) => {
+        PLAYERS_BY_LG[lg].forEach((p) => out.push({
+          kind: 'player', label: p.name, sub: p.team + ' \\u00b7 ' + lg, lg: lg,
+          pid: p.id, rank: -(p.min || 0)   // and the players who actually play
+        }));
+      });
+    }
+    document.querySelectorAll('section.panel').forEach((panel) => {
+      const pid = panel.id.slice(6), tab = tabName(pid);
+      out.push({ kind: 'section', label: tab, sub: 'Tab', panel: pid, rank: 0 });
+      const seen = {};
+      // one entry per heading, not per league: the same block is repeated
+      // inside every .lgview, and the click resolves to the visible one
+      panel.querySelectorAll('section.block h3').forEach((h) => {
+        const title = h.textContent.trim();
+        if (!title || seen[title]) return;
+        seen[title] = 1;
+        out.push({ kind: 'section', label: title, sub: tab, panel: pid,
+                   head: title, rank: 1 });
+      });
+    });
+    out.forEach((r) => {
+      const f = foldMap(r.label);
+      r.n = f.n;
+      r.map = f.map;
+      r.w = r.n.split(/[^a-z0-9]+/).filter(Boolean);
+    });
+    return out;
+  }
+
+  // exact, then a prefix of the whole name, then of any word in it, then
+  // anywhere: "man" puts Manchester City above Emiliano Martinez
+  function tokenScore(r, t) {
+    if (r.n === t) return 0;
+    if (r.n.indexOf(t) === 0) return 1;
+    for (let i = 0; i < r.w.length; i++) if (r.w[i].indexOf(t) === 0) return 2;
+    return r.n.indexOf(t) >= 0 ? 3 : -1;
+  }
+  function score(r, toks) {
+    let s = 0;
+    for (let i = 0; i < toks.length; i++) {
+      const t = tokenScore(r, toks[i]);
+      if (t < 0) return -1;      // every word of the query has to land
+      s += t;
+    }
+    return s;
+  }
+  function mark(r, toks) {
+    const label = r.label, hits = [];
+    toks.forEach((t) => {
+      const at = r.n.indexOf(t);
+      if (at >= 0) hits.push([r.map[at], r.map[at + t.length - 1]]);
+    });
+    if (!hits.length) return esc(label);
+    let out = '', open = false;
+    for (let i = 0; i < label.length; i++) {
+      const on = hits.some((h) => i >= h[0] && i <= h[1]);
+      if (on && !open) { out += '<mark>'; open = true; }
+      if (!on && open) { out += '</mark>'; open = false; }
+      out += esc(label[i]);
+    }
+    return out + (open ? '</mark>' : '');
+  }
+
+  function paint() {
+    list.querySelectorAll('.gs-item').forEach((el, i) => {
+      const on = i === cur;
+      el.setAttribute('aria-selected', on ? 'true' : 'false');
+      if (on) el.scrollIntoView({ block: 'nearest' });
+    });
+  }
+  function render() {
+    const q = fold(input.value.trim());
+    const toks = q ? q.split(/\\s+/).filter(Boolean) : [];
+    shown = [];
+    cur = 0;
+    if (!toks.length) {
+      list.innerHTML = "<p class='gs-empty'>Clubs, players and the sections of " +
+        'this page \\u2014 try a club name, a player, or "justice".</p>';
+      return;
+    }
+    const hits = [];
+    // "justice" matches the Insights table and the continental one equally
+    // well; break that tie towards the tab the reader is already on
+    const tab = document.querySelector("nav.tabs button[aria-selected='true']");
+    const here = tab ? tab.dataset.panel : null;
+    INDEX.forEach((r) => {
+      const s = score(r, toks);
+      if (s >= 0) hits.push([s + (r.panel && r.panel !== here ? 0.5 : 0), r]);
+    });
+    hits.sort((a, b) => a[0] - b[0] || a[1].rank - b[1].rank ||
+      (a[1].label < b[1].label ? -1 : 1));
+    let html = '';
+    GROUPS.forEach((g) => {
+      const rows = hits.filter((h) => h[1].kind === g[0]).slice(0, g[2]);
+      if (!rows.length) return;
+      html += "<div class='gs-group'>" + g[1] + '</div>';
+      rows.forEach((h) => {
+        const i = shown.length;
+        shown.push(h[1]);
+        html += "<div class='gs-item' role='option' data-i='" + i +
+          "'><span class='gs-name'>" + mark(h[1], toks) + "</span>" +
+          "<span class='gs-sub'>" + esc(h[1].sub) + '</span></div>';
+      });
+    });
+    list.innerHTML = html || "<p class='gs-empty'>Nothing here matches \\u201c" +
+      esc(input.value.trim()) + '\\u201d.</p>';
+    paint();
+  }
+
+  function go(r) {
+    if (!r) return;
+    close();
+    if (r.kind === 'club') { window.showTeam(r.lg, r.name); return; }
+    // a player's card reads its peer group from the player's own league, so
+    // it opens correctly without dragging the whole page to that league
+    if (r.kind === 'player') { if (window.showPlayer) window.showPlayer(r.lg, r.pid); return; }
+    if (window.showPanel) window.showPanel(r.panel);
+    if (!r.head) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    let target = null;
+    document.getElementById('panel-' + r.panel)
+      .querySelectorAll('section.block').forEach((s) => {
+        const h = s.querySelector('h3'), view = s.closest('.lgview');
+        if (!target && h && h.textContent.trim() === r.head && (!view || !view.hidden))
+          target = s;
+      });
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function openSearch() {
+    if (!INDEX) INDEX = build();
+    overlay.hidden = false;
+    render();
+    input.focus();
+    input.select();
+  }
+  function close() { overlay.hidden = true; }
+
+  document.getElementById('gs-open').addEventListener('click', () => openSearch());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  input.addEventListener('input', render);
+  list.addEventListener('click', (e) => {
+    const el = e.target.closest('.gs-item');
+    if (el) go(shown[Number(el.dataset.i)]);
+  });
+  list.addEventListener('mousemove', (e) => {
+    const el = e.target.closest('.gs-item');
+    if (el && Number(el.dataset.i) !== cur) { cur = Number(el.dataset.i); paint(); }
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { cur = Math.min(cur + 1, shown.length - 1); paint(); }
+    else if (e.key === 'ArrowUp') { cur = Math.max(cur - 1, 0); paint(); }
+    else if (e.key === 'Enter') { go(shown[cur]); }
+    else if (e.key === 'Escape') { close(); }
+    else return;
+    e.preventDefault();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (!overlay.hidden) return;
+    const t = e.target, tag = (t.tagName || '').toLowerCase();
+    const typing = tag === 'input' || tag === 'select' || tag === 'textarea' ||
+      t.isContentEditable;
+    if ((e.key === 'k' || e.key === 'K') && (e.ctrlKey || e.metaKey)) openSearch();
+    else if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) openSearch();
+    else return;
+    e.preventDefault();
+  });
+
+  // the header trigger scrolls away; this one does not
+  const fab = document.createElement('button');
+  fab.id = 'gs-fab';
+  fab.title = 'Search (/)';
+  fab.setAttribute('aria-label', 'Search');
+  fab.innerHTML = "<svg viewBox='0 0 16 16' width='17' height='17' fill='none' " +
+    "stroke='currentColor' stroke-width='1.7' stroke-linecap='round' " +
+    "style='vertical-align:-3px'><circle cx='7' cy='7' r='4.5'/>" +
+    "<path d='M10.6 10.6 14 14'/></svg>";
+  document.body.appendChild(fab);
+  fab.addEventListener('click', () => openSearch());
+  window.addEventListener('scroll', () => {
+    fab.classList.toggle('show', window.scrollY > 500);
+  }, { passive: true });
+})();
+
 (function () {  // back-to-top button
   const btn = document.createElement('button');
   btn.id = 'to-top';
@@ -6344,6 +6626,33 @@ def nightly_start(now=None):
     return f"{moment:%H:%M} " + ("Stockholm time" if zone == "Stockholm" else "UTC")
 
 
+SEARCH_ICON = (
+    "<svg viewBox='0 0 16 16' width='14' height='14' aria-hidden='true' fill='none' "
+    "stroke='currentColor' stroke-width='1.7' stroke-linecap='round'>"
+    "<circle cx='7' cy='7' r='4.5'/><path d='M10.6 10.6 14 14'/></svg>"
+)
+
+# the trigger sits under the badges where the eye already is; the palette it
+# opens is reachable from anywhere by "/" or Ctrl-K, and by the floating button
+# that appears once the header has scrolled away
+SEARCH_BAR = (
+    "<div class='gs-bar'><button id='gs-open' type='button'>" + SEARCH_ICON +
+    "<span class='gs-ph'>Search clubs, players and sections</span><kbd>/</kbd>"
+    "</button></div>"
+)
+
+SEARCH_HTML = (
+    "<div id='gs-overlay' hidden><div id='gs-modal' role='dialog' aria-modal='true' "
+    "aria-label='Search'>"
+    "<input id='gs-input' type='search' autocomplete='off' spellcheck='false' "
+    "enterkeyhint='go' placeholder='Search clubs, players and sections' "
+    "aria-label='Search'>"
+    "<div id='gs-results'></div>"
+    "<p class='gs-foot'>↑↓ to move · Enter to open "
+    "· Esc to close</p></div></div>"
+)
+
+
 def build_page(db, nav, generated, archive_label=None, frozen=None):
     """The full dashboard HTML. archive_label (e.g. '2018/19') switches to the
     archive layout: no volatile 'Updated' badge, so the file only changes when
@@ -6451,9 +6760,9 @@ def build_page(db, nav, generated, archive_label=None, frozen=None):
         f"<title>{escape(title)}</title><style>{CSS}</style></head><body><div class='wrap'>"
         f"<header class='hero'><h1>Football dashboard</h1>"
         f"<p class='tagline'>{tagline}</p>"
-        f"<div class='badges'>{badges}</div>{whats_new}</header>"
+        f"<div class='badges'>{badges}</div>{SEARCH_BAR}{whats_new}</header>"
         + nav + lg_bar + tab_bar + panel_html
-        + f"<footer>{footer}</footer></div>"
+        + f"<footer>{footer}</footer></div>{SEARCH_HTML}"
         f"<script>{EXPLORER_JS}{_poisson_js()}</script></body></html>"
     )
 

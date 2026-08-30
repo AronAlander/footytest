@@ -100,7 +100,16 @@ in any browser (vanilla JavaScript, works offline from a double-click). It also
 writes an identical copy to `docs/index.html`, which is committed so the report can
 be served as a web dashboard (see below). A league switcher at the top flips the
 whole dashboard between the five leagues (deep-linkable by prefixing any link with
-`#lg=Premier_League&…`); below it are five tabs:
+`#lg=Premier_League&…`); below it are five tabs.
+
+A **search box** sits under the badges, and `/` or `Ctrl`+`K` opens it from
+anywhere on the page (as does the floating button that appears once the header
+has scrolled away). It covers every club, every player and every section of the
+page, across all five leagues at once: a club opens in Team analytics, a player
+opens their profile card, a section scrolls to itself in whichever league is on
+screen. The index is built in the browser on first use out of data the page
+already carries, so it costs nothing to ship and nothing to keep in step.
+Accents are folded, so "martinez" finds Martínez.
 
 - **League** — full standings computed from stored results (rank-trend arrows,
   W/D/L form chips), home/away split table, recent results, upcoming fixtures,
@@ -370,6 +379,9 @@ League IDs used: Allsvenskan `4347` (season = calendar year), Serie A `4332` (se
 - [x] Career strip on the player profile card: every season Understat has
       stored for that player, across clubs and leagues, so transfers and a
       finisher's good and bad years read as one line rather than twelve pages
+- [x] Search across the whole dashboard: clubs, players and sections in one
+      box, opened with `/` or `Ctrl`+`K`, ranked prefix-first and folded for
+      accents
 - [ ] Backfill matchday results for old big-five seasons from TheSportsDB
       (works on the test key but needs ~2,000 throttled requests; would give
       those archive pages the League tab that Allsvenskan's already have)
