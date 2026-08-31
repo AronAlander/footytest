@@ -433,6 +433,29 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .fx-noverdict { border: 1px solid var(--border); border-left: 3px solid var(--draw);
   background: var(--surface); border-radius: 6px; padding: 9px 12px; margin: 0 2px 6px;
   font-size: 13.5px; color: var(--text-secondary); }
+/* the stat line of a played match: the bar carries the comparison, the
+   numbers carry the detail, and the leading side's number is the bold one */
+.ms { margin: 2px 2px 0; }
+.ms-row {
+  display: grid; grid-template-columns: 64px 1fr 64px; gap: 10px;
+  align-items: center; margin-bottom: 9px;
+}
+/* the two club names sit at the edges the numbers occupy rather than inside
+   the 64px a number needs: "Manchester City" broke across two lines there */
+.ms-head { display: flex; justify-content: space-between; gap: 12px;
+  font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;
+  font-weight: 600; }
+.ms-head span:last-child { text-align: right; }
+.ms-n { font-variant-numeric: tabular-nums; font-size: 14.5px;
+  color: var(--text-secondary); font-weight: 500; }
+.ms-row > .ms-n:last-child { text-align: right; }
+.ms-hi { color: var(--text-primary); font-weight: 700; }
+.ms-lab { font-size: 12px; color: var(--text-secondary); text-align: center; }
+.ms-bar { display: flex; gap: 2px; height: 6px; margin-top: 4px; }
+.ms-bar i { border-radius: 3px; min-width: 1px; }
+.ms-bar i.h { background: var(--accent); }
+.ms-bar i.a { background: var(--away); }
+.ms-note { margin: 2px 2px 0; }
 .fx-names { font-weight: 600; margin: 16px 0 0; }
 .fx-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   color: var(--text-secondary); margin: 18px 2px 6px; font-weight: 600; }
@@ -2010,6 +2033,64 @@ window.__navRestoring = true;
     return "<div class='fx-luck'>" + s + '</div>';
   }
 
+  // ---- the stat line of the 90 minutes -------------------------------
+  // The bar is the point: a shots count means little until it is set against
+  // the other side's, and the eye reads the split before it reads either
+  // number. PPDA is the one where fewer is better, so its bar is drawn the
+  // other way round rather than quietly telling the opposite story.
+  function statsNote() {
+    const has = (n) => (D.scols || []).some((c) => c[0] === n);
+    const bits = [];
+    if (has('Deep completions')) {
+      bits.push('<b>Deep completions</b> are passes completed within about ' +
+        '20 metres of goal \u2014 territory, not chances.');
+    }
+    if (has('PPDA')) {
+      bits.push('<b>PPDA</b> is opposition passes allowed per defensive ' +
+        'action: lower means more pressing, so its bar favours the smaller ' +
+        'number.');
+    }
+    if (has('xG on target')) {
+      bits.push('<b>xG on target</b> counts only the shots that hit the ' +
+        'target, and where in the goal they went \u2014 xG rates the chance, ' +
+        'this rates the shot.');
+    }
+    bits.push('<b>Expected points</b> is what the chances were worth across ' +
+      'a season of replays of this one match.');
+    return "<p class='meta dim ms-note'>" + bits.join(' ') + '</p>';
+  }
+
+  function statsBlock(m) {
+    const cols = D.scols || [];
+    if (!m.st || !cols.length) return '';
+    let out = "<div class='ms'><div class='ms-head'><span>" + esc(m.home) +
+      '</span><span>' + esc(m.away) + '</span></div>';
+    let shown = 0;
+    cols.forEach((c, i) => {
+      const h = m.st[0][i], a = m.st[1][i];
+      if (h == null && a == null) return;   // the feed is missing this one
+      shown++;
+      const low = c[2], sfx = c[3] || '';
+      const fmt = (v) => num(v, c[1]) + (v == null ? '' : sfx);
+      const tot = (h || 0) + (a || 0);
+      // a side with nothing to compare against gets an even bar rather than
+      // a full one it has not earned
+      let share = (h == null || a == null) ? 0.5 : (tot > 0 ? h / tot : 0.5);
+      if (low) share = 1 - share;
+      const lead = (h == null || a == null || h === a) ? -1
+        : (low ? (h < a ? 0 : 1) : (h > a ? 0 : 1));
+      out += "<div class='ms-row'><b class='ms-n" +
+        (lead === 0 ? ' ms-hi' : '') + "'>" + fmt(h) + '</b>' +
+        "<div><div class='ms-lab'>" + esc(c[0]) + "</div><div class='ms-bar'>" +
+        "<i class='h' style='width:" + (share * 100).toFixed(1) + "%'></i>" +
+        "<i class='a' style='width:" + ((1 - share) * 100).toFixed(1) +
+        "%'></i></div></div><b class='ms-n" + (lead === 1 ? ' ms-hi' : '') +
+        "'>" + fmt(a) + '</b></div>';
+    });
+    if (!shown) return '';
+    return out + '</div>' + statsNote();
+  }
+
   function callBox(m) {
     if (!m.pct) {
       return "<p class='dim fx-none'>No published call for this one \u2014 it was " +
@@ -2036,6 +2117,7 @@ window.__navRestoring = true;
 
   function renderResult(m) {
     const when = shortDate(m.date) + (m.round ? ' \u00b7 Round ' + m.round : '');
+    const ms = statsBlock(m);
     const xg = (m.hxg != null && m.axg != null)
       ? "<div class='fx-xg'><span>Expected goals</span><b>" + num(m.hxg, 2) +
         ' \u2013 ' + num(m.axg, 2) + '</b></div>'
@@ -2045,7 +2127,9 @@ window.__navRestoring = true;
       "<div class='fx-head'><h4>" + esc(m.home) + " <span class='fx-score'>" +
         m.hg + ' \u2013 ' + m.ag + '</span> ' + esc(m.away) +
         "</h4><span class='dim'>" + esc(when) + '</span></div>' +
-      xg +
+      // the stat line opens with the same expected goals the headline
+      // carries, so only one of the two is ever shown
+      (ms ? "<h4 class='fx-h'>Match stats</h4>" + ms : xg) +
       // the forecast supersedes the xG-difference verdict rather than sitting
       // beside it: same question, and this one answers it properly
       (m.fc ? "<h4 class='fx-h'>What the chances deserved</h4>" + deservedBox(m)
