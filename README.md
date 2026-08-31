@@ -261,6 +261,23 @@ Accents are folded, so "martinez" finds Martínez.
   the first by keeping a full rank histogram per team instead of only the
   three cutoff counters, the second by keeping the per-fixture expected
   goals that used to be discarded after building the margin sampler.
+- **Matches** — one match at a time, in either tense, reachable by clicking any
+  row in Recent results or Upcoming fixtures. An upcoming fixture gets the
+  model's call, both sides' form and venue splits, the head-to-head and each
+  squad's leading attackers. A match already played gets a report: the score,
+  the **match stats** both feeds keep for those 90 minutes, what the chances
+  deserved (Understat's post-match rerun), and what this site said beforehand,
+  graded called it / missed. The stat rows differ by feed rather than being
+  padded with blanks — the big five get expected goals, non-penalty xG, deep
+  completions (passes completed within about 20 metres of goal), PPDA (lower is more
+  pressing, so that bar favours the smaller number) and expected points;
+  Allsvenskan gets possession, shots, shots on target, expected goals,
+  non-penalty xG, xG on target and expected points. Neither feed stores
+  anything player-level per match, so there are no individual match ratings;
+  the player numbers on this site are season totals. A stat line whose
+  scoreline disagrees with the fixture feed is dropped rather than shown, on
+  the same guard the xG headline uses: the two feeds would be describing
+  different matches.
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over six style dimensions —
   attack, defence, finishing, pressing, territory, box defence — with the raw

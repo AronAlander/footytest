@@ -482,6 +482,29 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .fx-noverdict { border: 1px solid var(--border); border-left: 3px solid var(--draw);
   background: var(--surface); border-radius: 6px; padding: 9px 12px; margin: 0 2px 6px;
   font-size: 13.5px; color: var(--text-secondary); }
+/* the stat line of a played match: the bar carries the comparison, the
+   numbers carry the detail, and the leading side's number is the bold one */
+.ms { margin: 2px 2px 0; }
+.ms-row {
+  display: grid; grid-template-columns: 64px 1fr 64px; gap: 10px;
+  align-items: center; margin-bottom: 9px;
+}
+/* the two club names sit at the edges the numbers occupy rather than inside
+   the 64px a number needs: "Manchester City" broke across two lines there */
+.ms-head { display: flex; justify-content: space-between; gap: 12px;
+  font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;
+  font-weight: 600; }
+.ms-head span:last-child { text-align: right; }
+.ms-n { font-variant-numeric: tabular-nums; font-size: 14.5px;
+  color: var(--text-secondary); font-weight: 500; }
+.ms-row > .ms-n:last-child { text-align: right; }
+.ms-hi { color: var(--text-primary); font-weight: 700; }
+.ms-lab { font-size: 12px; color: var(--text-secondary); text-align: center; }
+.ms-bar { display: flex; gap: 2px; height: 6px; margin-top: 4px; }
+.ms-bar i { border-radius: 3px; min-width: 1px; }
+.ms-bar i.h { background: var(--accent); }
+.ms-bar i.a { background: var(--away); }
+.ms-note { margin: 2px 2px 0; }
 .fx-names { font-weight: 600; margin: 16px 0 0; }
 .fx-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   color: var(--text-secondary); margin: 18px 2px 6px; font-weight: 600; }
@@ -3589,6 +3612,88 @@ def _resolved_matches(db, league):
     ]
 
 
+# What each feed stores per team per match, in the order it is shown:
+# label, decimal places, lower-is-better, suffix. Understat counts pressing
+# and territory; FotMob counts shots and possession. Neither stores anything
+# player-level per match, so a report is a team stat line and says so.
+UNDERSTAT_MATCH_STATS = [
+    ["Expected goals", 2, 0, ""],
+    ["Non-penalty xG", 2, 0, ""],
+    ["Deep completions", 0, 0, ""],
+    ["PPDA", 1, 1, ""],
+    ["Expected points", 2, 0, ""],
+]
+FOTMOB_MATCH_STATS = [
+    ["Expected goals", 2, 0, ""],
+    ["Non-penalty xG", 2, 0, ""],
+    ["xG on target", 2, 0, ""],
+    ["Shots", 0, 0, ""],
+    ["Shots on target", 0, 0, ""],
+    ["Possession", 0, 0, "%"],
+    ["Expected points", 2, 0, ""],
+]
+
+
+def _match_stats(db, league, since=None):
+    """The full stat line of every played match, keyed (date, home, away).
+
+    The report has been showing the xG and nothing else, while both feeds
+    store a whole line beside it: Understat adds non-penalty xG, deep
+    completions, PPDA and expected points; FotMob adds shots, shots on
+    target, xG on target and possession.
+
+    Each entry is (home goals, away goals, [[home values], [away values]]),
+    so the caller can refuse a line whose scoreline disagrees with the
+    fixture feed exactly as it does for the xG headline -- a stat line from a
+    different 90 minutes would read as fact.
+
+    Understat's pairing is the same mirror join _resolved_matches explains;
+    FotMob names both sides itself and joins on the match id.
+
+    Deliberately uncapped across seasons, unlike the other main.-qualified
+    reads: only the live page builds a Matches tab, and the (date, home,
+    away) key cannot collide between seasons anyway -- two clubs cannot meet
+    twice in a league on one day. `since` keeps the scan to the window the
+    explorer can actually show rather than pairing twelve seasons to serve
+    ten lookups.
+    """
+    if league in UNDERSTAT_LEAGUES:
+        rows = db.execute(
+            """SELECT h.match_date, h.team, a.team, h.scored, h.missed,
+                      h.xg, h.npxg, h.deep, h.ppda, h.xpts,
+                      a.xg, a.npxg, a.deep, a.ppda, a.xpts
+               FROM main.understat_team_matches h
+               JOIN main.understat_team_matches a
+                 ON h.league = a.league AND h.season = a.season
+                AND h.match_date = a.match_date
+                AND h.scored = a.missed AND h.missed = a.scored
+                AND ABS(h.xg - a.xga) < 0.0001 AND ABS(h.xga - a.xg) < 0.0001
+               WHERE h.league = ? AND h.home_away = 'h' AND a.home_away = 'a'
+                 AND h.team <> a.team AND h.match_date >= ?""",
+            (league, since or ""),
+        ).fetchall()
+        per_side = len(UNDERSTAT_MATCH_STATS)
+    else:
+        rows = db.execute(
+            """SELECT h.match_date, h.team, h.opponent, h.scored, h.missed,
+                      h.xg, h.npxg, h.xgot, h.shots, h.sot, h.possession, h.xpts,
+                      a.xg, a.npxg, a.xgot, a.shots, a.sot, a.possession, a.xpts
+               FROM main.fotmob_team_matches h
+               JOIN main.fotmob_team_matches a
+                 ON h.league = a.league AND h.season = a.season
+                AND h.match_id = a.match_id AND a.home_away = 'a'
+               WHERE h.league = ? AND h.home_away = 'h' AND h.match_date >= ?""",
+            (league, since or ""),
+        ).fetchall()
+        per_side = len(FOTMOB_MATCH_STATS)
+    out = {}
+    for r in rows:
+        vals = [round(v, 2) if isinstance(v, float) else v for v in r[5:]]
+        out[((r[0] or "")[:10], unescape(r[1]), unescape(r[2]))] = (
+            r[3], r[4], [vals[:per_side], vals[per_side:]])
+    return out
+
+
 def _forecasts_for(db, league, names):
     """Understat's post-match forecast, keyed by (date, home, away) using the
     caller's own club names.
@@ -3870,6 +3975,10 @@ def load_fixture_data(db, league):
     xg_by_match = {}
     for _, mdate, h, a, hg, ag, hxg, axg in played:
         xg_by_match[(mdate, h, a)] = (hg, ag, hxg, axg)
+    # the rest of the stat line, keyed the same way again, and only as far
+    # back as the oldest result the explorer holds
+    stats = _match_stats(
+        db, league, since=min(((r[1] or "")[:10] for r in results), default=""))
     # Understat's rerun of the same match, keyed the same way
     forecasts = _forecasts_for(db, league, fx_names)
 
@@ -3889,6 +3998,9 @@ def load_fixture_data(db, league):
             # are describing different matches and the xG is left off
             if hit[0] == hg and hit[1] == ag:
                 rec["hxg"], rec["axg"] = hit[2], hit[3]
+        line = stats.get((day, mapping.get(home), mapping.get(away)))
+        if line and line[0] == hg and line[1] == ag:
+            rec["st"] = line[2]
         # what the chances deserved: the same scoreline check applies, since a
         # forecast attached to the wrong match would read as a confident lie
         fc = forecasts.get((day, home, away))
@@ -3911,8 +4023,14 @@ def load_fixture_data(db, league):
         add_h2h(rec, home, away, before=day)
         out_results.append(rec)
 
-    return {"fixtures": out_fixtures, "results": out_results, "form": form,
-            "venue": venue, "players": players, "h2h": h2h}
+    out = {"fixtures": out_fixtures, "results": out_results, "form": form,
+           "venue": venue, "players": players, "h2h": h2h}
+    # the column definitions ride along only when a result actually carries a
+    # stat line, so a league whose feed is behind ships nothing to explain
+    if any("st" in r for r in out_results):
+        out["scols"] = (UNDERSTAT_MATCH_STATS if league in UNDERSTAT_LEAGUES
+                        else FOTMOB_MATCH_STATS)
+    return out
 
 
 def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None,
@@ -4051,6 +4169,26 @@ def fixtures_panel(db, leagues):
         "that is usually a promoted club with no top-flight xG history at the time. "
         "Form and squad lists are deliberately left off a report — they would "
         "describe the clubs now, not as they were then.</p>"
+        "<p><strong>Match stats</strong> on a report are the team stat line both "
+        "feeds keep for the 90 minutes, which is more than the xG the report used "
+        "to show on its own. In the big five that is expected goals, non-penalty "
+        "xG, <strong>deep completions</strong> (passes completed within about 20 "
+        "metres of goal \u2014 territory rather than chances), <strong>PPDA</strong> "
+        "(opposition passes allowed per defensive action: lower means more "
+        "pressing, so its bar deliberately favours the smaller number) and "
+        "<strong>expected points</strong>. Allsvenskan's feed keeps a different set "
+        "\u2014 possession, shots, shots on target, expected goals, non-penalty xG, "
+        "<strong>xG on target</strong> (which rates the shot rather than the "
+        "chance, counting where in the goal it went) and expected points \u2014 so "
+        "the rows differ by league rather than being padded with blanks. The bar "
+        "carries the comparison and the bolder number is the side ahead. Neither "
+        "feed stores anything player-level per match, so there are no individual "
+        "match ratings here; the player numbers on this site are season totals. A "
+        "measurement neither side has is left off rather than printed empty \u2014 "
+        "FotMob's xG on target is missing for whole matches at a time \u2014 and "
+        "one only the away side has shows the home side a dash. A stat line that "
+        "disagrees with the scoreline is dropped rather than shown: the two feeds "
+        "would be describing different 90 minutes.</p>"
         "<p>The head-to-head on a report stops <em>before</em> the match being "
         "reported, so it shows the history the two sides actually brought into it.</p>"
         "<p><strong>The verdict</strong> is the same Poisson model as the "
@@ -5541,6 +5679,64 @@ window.__navRestoring = true;
     return "<div class='fx-luck'>" + s + '</div>';
   }
 
+  // ---- the stat line of the 90 minutes -------------------------------
+  // The bar is the point: a shots count means little until it is set against
+  // the other side's, and the eye reads the split before it reads either
+  // number. PPDA is the one where fewer is better, so its bar is drawn the
+  // other way round rather than quietly telling the opposite story.
+  function statsNote() {
+    const has = (n) => (D.scols || []).some((c) => c[0] === n);
+    const bits = [];
+    if (has('Deep completions')) {
+      bits.push('<b>Deep completions</b> are passes completed within about ' +
+        '20 metres of goal \\u2014 territory, not chances.');
+    }
+    if (has('PPDA')) {
+      bits.push('<b>PPDA</b> is opposition passes allowed per defensive ' +
+        'action: lower means more pressing, so its bar favours the smaller ' +
+        'number.');
+    }
+    if (has('xG on target')) {
+      bits.push('<b>xG on target</b> counts only the shots that hit the ' +
+        'target, and where in the goal they went \\u2014 xG rates the chance, ' +
+        'this rates the shot.');
+    }
+    bits.push('<b>Expected points</b> is what the chances were worth across ' +
+      'a season of replays of this one match.');
+    return "<p class='meta dim ms-note'>" + bits.join(' ') + '</p>';
+  }
+
+  function statsBlock(m) {
+    const cols = D.scols || [];
+    if (!m.st || !cols.length) return '';
+    let out = "<div class='ms'><div class='ms-head'><span>" + esc(m.home) +
+      '</span><span>' + esc(m.away) + '</span></div>';
+    let shown = 0;
+    cols.forEach((c, i) => {
+      const h = m.st[0][i], a = m.st[1][i];
+      if (h == null && a == null) return;   // the feed is missing this one
+      shown++;
+      const low = c[2], sfx = c[3] || '';
+      const fmt = (v) => num(v, c[1]) + (v == null ? '' : sfx);
+      const tot = (h || 0) + (a || 0);
+      // a side with nothing to compare against gets an even bar rather than
+      // a full one it has not earned
+      let share = (h == null || a == null) ? 0.5 : (tot > 0 ? h / tot : 0.5);
+      if (low) share = 1 - share;
+      const lead = (h == null || a == null || h === a) ? -1
+        : (low ? (h < a ? 0 : 1) : (h > a ? 0 : 1));
+      out += "<div class='ms-row'><b class='ms-n" +
+        (lead === 0 ? ' ms-hi' : '') + "'>" + fmt(h) + '</b>' +
+        "<div><div class='ms-lab'>" + esc(c[0]) + "</div><div class='ms-bar'>" +
+        "<i class='h' style='width:" + (share * 100).toFixed(1) + "%'></i>" +
+        "<i class='a' style='width:" + ((1 - share) * 100).toFixed(1) +
+        "%'></i></div></div><b class='ms-n" + (lead === 1 ? ' ms-hi' : '') +
+        "'>" + fmt(a) + '</b></div>';
+    });
+    if (!shown) return '';
+    return out + '</div>' + statsNote();
+  }
+
   function callBox(m) {
     if (!m.pct) {
       return "<p class='dim fx-none'>No published call for this one \\u2014 it was " +
@@ -5567,6 +5763,7 @@ window.__navRestoring = true;
 
   function renderResult(m) {
     const when = shortDate(m.date) + (m.round ? ' \\u00b7 Round ' + m.round : '');
+    const ms = statsBlock(m);
     const xg = (m.hxg != null && m.axg != null)
       ? "<div class='fx-xg'><span>Expected goals</span><b>" + num(m.hxg, 2) +
         ' \\u2013 ' + num(m.axg, 2) + '</b></div>'
@@ -5576,7 +5773,9 @@ window.__navRestoring = true;
       "<div class='fx-head'><h4>" + esc(m.home) + " <span class='fx-score'>" +
         m.hg + ' \\u2013 ' + m.ag + '</span> ' + esc(m.away) +
         "</h4><span class='dim'>" + esc(when) + '</span></div>' +
-      xg +
+      // the stat line opens with the same expected goals the headline
+      // carries, so only one of the two is ever shown
+      (ms ? "<h4 class='fx-h'>Match stats</h4>" + ms : xg) +
       // the forecast supersedes the xG-difference verdict rather than sitting
       // beside it: same question, and this one answers it properly
       (m.fc ? "<h4 class='fx-h'>What the chances deserved</h4>" + deservedBox(m)
