@@ -271,10 +271,22 @@ Accents are folded, so "martinez" finds Martínez.
   padded with blanks — the big five get expected goals, non-penalty xG, deep
   completions (passes completed within about 20 metres of goal), PPDA (lower is more
   pressing, so that bar favours the smaller number) and expected points;
-  Allsvenskan gets possession, shots, shots on target, expected goals,
-  non-penalty xG, xG on target and expected points. Neither feed stores
-  anything player-level per match, so there are no individual match ratings;
-  the player numbers on this site are season totals. A stat line whose
+  Allsvenskan gets expected goals, non-penalty xG, xG on target, shots,
+  shots on target, possession and expected points as headline rows, and
+  everything else FotMob measured behind a disclosure: big chances and big
+  chances missed, touches in the opposition box, corners, xG split open play
+  / set play, shots inside and outside the box, the woodwork, passes, pass
+  accuracy, offsides, tackles, interceptions, blocks, clearances, keeper
+  saves, duels and aerial duels won, successful dribbles, fouls and cards.
+  Rows nobody wins — tackles, blocks, clearances, saves, fouls, cards — are
+  drawn faint and unbolded, because all of them climb with time spent
+  defending. Those extra columns are stored by `fetch_fotmob.py`, which keeps
+  a `stats_version` per match and re-fetches any match stored under an older
+  one, newest first and capped per run — the live database lives in the
+  Actions cache and is never rebuilt, so that is the only way a new column
+  reaches a match already on file. Unattended that covers the season being
+  played, which is the only one the Matches tab reads; older seasons need
+  `python fetch_fotmob.py --backfill --refresh-all` by hand. A stat line whose
   scoreline disagrees with the fixture feed is dropped rather than shown, on
   the same guard the xG headline uses: the two feeds would be describing
   different matches.

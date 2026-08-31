@@ -22,7 +22,13 @@ Usage:
     python fetch_fotmob.py --backfill    # every season with stats (2017+)
 
 Matches already stored are skipped, so re-runs only fetch new results
-(~2 s per new match; a full season is ~240 matches, roughly 8 minutes).
+(~2 s per new match; a full season is ~240 matches, roughly 8 minutes) --
+except that a match stored before the current stat set (STATS_VERSION) is
+re-fetched newest first, up to REFRESH_PER_RUN per run, so new columns fill
+in over a few nights instead of blowing the workflow's time budget. That
+applies to the seasons being fetched, which unattended means the current one:
+`python fetch_fotmob.py --backfill --refresh-all` is how every stored season
+gets there, and it has to be run by hand.
 """
 
 import gzip
@@ -67,6 +73,53 @@ STAT_FILES = {
     "ontarget_scoring_att": "sot_per90",
     "total_att_assist": "chances_created",
 }
+
+# Everything else FotMob measures for a match, as
+# (database column, payload key, kind). Kind picks the parse: "n" is a plain
+# number, "pct" the percentage inside a string like "338 (80%)" -- the count
+# in front of it comes from its own column.
+#
+# One row per team holds that team's own figures only. The opponent's are in
+# the opponent's row, which every reader of this table already joins to; the
+# older xga/shots_allowed mirror columns predate that and are not extended.
+MATCH_STATS = [
+    ("big_chances",        "big_chance",                 "n"),
+    ("big_chances_missed", "big_chance_missed_title",    "n"),
+    ("touches_opp_box",    "touches_opp_box",            "n"),
+    ("corners",            "corners",                    "n"),
+    ("shots_inside_box",   "shots_inside_box",           "n"),
+    ("shots_outside_box",  "shots_outside_box",          "n"),
+    ("blocked_shots",      "blocked_shots",              "n"),
+    ("woodwork",           "shots_woodwork",             "n"),
+    ("xg_open_play",       "expected_goals_open_play",   "n"),
+    ("xg_set_play",        "expected_goals_set_play",    "n"),
+    ("passes",             "passes",                     "n"),
+    ("accurate_passes",    "accurate_passes",            "n"),
+    ("pass_pct",           "accurate_passes",            "pct"),
+    ("offsides",           "Offsides",                   "n"),
+    ("tackles",            "matchstats.headers.tackles", "n"),
+    ("interceptions",      "interceptions",              "n"),
+    ("blocks",             "shot_blocks",                "n"),
+    ("clearances",         "clearances",                 "n"),
+    ("keeper_saves",       "keeper_saves",               "n"),
+    ("duels_won",          "duel_won",                   "n"),
+    ("aerials_won",        "aerials_won",                "n"),
+    ("dribbles",           "dribbles_succeeded",         "n"),
+    ("fouls",              "fouls",                      "n"),
+    ("yellow_cards",       "yellow_cards",               "n"),
+    ("red_cards",          "red_cards",                  "n"),
+]
+
+# Bumped when the set above changes: a stored match carrying an older number
+# is re-fetched, newest first, so new columns fill in without a cold start.
+# (The database lives in the Actions cache and the nightly run only asks for
+# matches it has never seen, so nothing else would ever revisit them.)
+STATS_VERSION = 2
+REFRESH_PER_RUN = 120   # ...but only this many per run: re-fetching every
+                        # stored season at once is half an hour of requests
+                        # and the workflow has 45 minutes for everything
+FAIL_STREAK = 8         # consecutive match failures that mean the feed has
+                        # changed rather than one match being odd
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS fotmob_players (
@@ -119,6 +172,32 @@ CREATE TABLE IF NOT EXISTS fotmob_team_matches (
 """
 
 
+# sqlite has no ADD COLUMN IF NOT EXISTS, and executescript would abort the
+# whole SCHEMA the second time an ALTER ran, so these live outside it and are
+# applied one at a time against what the database actually has.
+MIGRATIONS = [(column, f"ALTER TABLE fotmob_team_matches ADD COLUMN {column} REAL")
+              for column, _, _ in MATCH_STATS]
+MIGRATIONS.append(
+    ("stats_version",
+     "ALTER TABLE fotmob_team_matches ADD COLUMN stats_version INTEGER"))
+
+
+def migrate(db):
+    """Add any column this code expects and the database lacks.
+
+    The live database is never recreated -- it is restored from the Actions
+    cache every night -- so this is the only way a new column ever reaches
+    production.
+    """
+    have = {row[1] for row in db.execute("PRAGMA table_info(fotmob_team_matches)")}
+    added = [statement for column, statement in MIGRATIONS if column not in have]
+    for statement in added:
+        db.execute(statement)
+    if added:
+        db.commit()
+        print(f"  schema: {len(added)} new column(s) on fotmob_team_matches")
+
+
 def get_json(url):
     request = urllib.request.Request(url, headers=HEADERS)
     raw = urllib.request.urlopen(request, timeout=40).read()
@@ -135,6 +214,19 @@ def poisson_xpts(xg_for, xg_against, max_goals=10):
     win = sum(pf[i] * pa[j] for i in range(len(pf)) for j in range(len(pa)) if i > j)
     draw = sum(pf[i] * pa[i] for i in range(len(pf)))
     return round(3 * win + draw, 2)
+
+
+def pct(value):
+    """The percentage inside '264 (71%)'. None when there is no bracket."""
+    if value is None or isinstance(value, (int, float)):
+        return None
+    text = str(value)
+    if "(" not in text or "%" not in text:
+        return None
+    try:
+        return float(text.split("(", 1)[1].split("%", 1)[0].strip().replace(",", "."))
+    except ValueError:
+        return None
 
 
 def num(value):
@@ -229,6 +321,14 @@ def fetch_match(db, season, match_id, fetched_at):
             return None, None
         return num(values[0]), num(values[1])
 
+    # A re-fetch replaces a row that is already published, so anything the
+    # row is built from has to be present -- not defaulted. Refusing leaves
+    # the stored match exactly as it was, which is the safe failure.
+    if not match_date:
+        raise ValueError(f"match {match_id}: no kickoff date in match details")
+    if any(t.get("score") is None for t in header_teams):
+        raise ValueError(f"match {match_id}: no score in match details")
+
     xg = side_values("expected_goals")
     npxg = side_values("expected_goals_non_penalty")
     xgot = side_values("expected_goals_on_target")
@@ -240,14 +340,30 @@ def fetch_match(db, season, match_id, fetched_at):
     if npxg[0] is None:
         npxg = xg
 
+    # the rest of the payload's stat groups, one value per side. A key the
+    # feed did not report for this match stores NULL rather than a zero it
+    # would be read as having measured
+    def extra(side):
+        out = []
+        for _, key, kind in MATCH_STATS:
+            values = stats.get(key)
+            raw = values[side] if values else None
+            out.append(pct(raw) if kind == "pct" else num(raw))
+        return out
+
     for side in (0, 1):
         opp = 1 - side
         own_goals = int(header_teams[side].get("score") or 0)
         opp_goals = int(header_teams[opp].get("score") or 0)
         result = "w" if own_goals > opp_goals else "d" if own_goals == opp_goals else "l"
         db.execute(
-            "INSERT OR REPLACE INTO fotmob_team_matches VALUES "
-            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO fotmob_team_matches "
+            "(season, league, match_id, team, opponent, match_date, home_away,"
+            " xg, xga, npxg, npxga, xgot, xgota, shots, shots_allowed, sot,"
+            " sot_allowed, possession, scored, missed, result, pts, npxgd,"
+            " xpts, fetched_at, stats_version" +
+            "".join(f", {column}" for column, _, _ in MATCH_STATS) +
+            ") VALUES (" + ",".join("?" * (26 + len(MATCH_STATS))) + ")",
             (
                 season, LEAGUE, str(match_id),
                 header_teams[side].get("name"), header_teams[opp].get("name"),
@@ -264,12 +380,13 @@ def fetch_match(db, season, match_id, fetched_at):
                 3 if result == "w" else 1 if result == "d" else 0,
                 round(npxg[side] - npxg[opp], 2),
                 poisson_xpts(xg[side], xg[opp]),
-                fetched_at,
+                fetched_at, STATS_VERSION,
+                *extra(side),
             ),
         )
 
 
-def fetch_season(db, season, fetched_at):
+def fetch_season(db, season, fetched_at, refresh_budget=REFRESH_PER_RUN):
     print(f"--- {LEAGUE} {season} ---")
     league_json = get_json(f"{BASE}/leagues?id={LEAGUE_ID}&season={season}")
     (DATA_DIR / f"fotmob_allsvenskan_{season}.json").write_text(
@@ -284,22 +401,52 @@ def fetch_season(db, season, fetched_at):
         print(f"  ! no player stat link for {season} - match data only")
 
     fixtures = (league_json.get("fixtures") or {}).get("allMatches") or []
-    finished = [m for m in fixtures if (m.get("status") or {}).get("finished")]
+    finished = sorted(
+        (m for m in fixtures if (m.get("status") or {}).get("finished")),
+        key=lambda m: str((m.get("status") or {}).get("utcTime") or ""),
+    )
     stored = {r[0] for r in db.execute(
         "SELECT DISTINCT match_id FROM fotmob_team_matches WHERE season = ? AND league = ?",
         (season, LEAGUE),
     )}
-    todo = [m for m in finished if str(m.get("id")) not in stored]
-    print(f"  matches: {len(finished)} finished, {len(stored)} stored, {len(todo)} to fetch")
+    # a match stored before the current stat set existed is worth revisiting:
+    # it is the same one request, and it is the only way the new columns ever
+    # get filled for a match already on file
+    stale = {r[0] for r in db.execute(
+        "SELECT DISTINCT match_id FROM fotmob_team_matches "
+        "WHERE season = ? AND league = ? "
+        "AND (stats_version IS NULL OR stats_version < ?)",
+        (season, LEAGUE, STATS_VERSION),
+    )}
+    new = [m for m in finished if str(m.get("id")) not in stored]
+    # newest first, because the site only shows the last ten results and a
+    # part-done refresh should have covered every match anyone can see
+    refresh = [m for m in reversed(finished)
+               if str(m.get("id")) in stale][:max(0, refresh_budget)]
+    todo = new + refresh
+    print(f"  matches: {len(finished)} finished, {len(stored)} stored, "
+          f"{len(new)} new, {len(refresh)} of {len(stale)} to re-fetch for stats "
+          f"v{STATS_VERSION}")
+    misses = 0
     for i, m in enumerate(todo, 1):
         try:
             fetch_match(db, season, m["id"], fetched_at)
+            misses = 0
         except Exception as error:
+            misses += 1
             print(f"  ! match {m.get('id')} skipped: {error}")
+            # one bad match is a bad match; eight in a row is the feed having
+            # changed shape, and this script promises to fail loudly at that
+            # rather than let --strict publish on a quietly frozen dataset
+            if misses >= FAIL_STREAK:
+                raise RuntimeError(
+                    f"{misses} consecutive match fetches failed - "
+                    f"matchDetails has probably changed shape") from error
         db.commit()
         if i % 25 == 0:
             print(f"  ... {i}/{len(todo)}")
         time.sleep(REQUEST_PAUSE)
+    return len(refresh)
 
 
 def seasons_from_args(argv):
@@ -318,10 +465,14 @@ def main() -> None:
     DATA_DIR.mkdir(exist_ok=True)
     db = sqlite3.connect(DB_PATH)
     db.executescript(SCHEMA)
+    migrate(db)
     fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    for season in seasons_from_args(sys.argv[1:]):
-        fetch_season(db, season, fetched_at)
+    # the refresh budget is for the run, not for each season: newest season
+    # first, and whatever is left over goes to the older ones
+    budget = 10 ** 6 if "--refresh-all" in sys.argv[1:] else REFRESH_PER_RUN
+    for season in sorted(seasons_from_args(sys.argv[1:]), reverse=True):
+        budget -= fetch_season(db, season, fetched_at, refresh_budget=budget) or 0
 
     print(f"\nDatabase: {DB_PATH.name}")
     for row in db.execute(

@@ -505,6 +505,23 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .ms-bar i.h { background: var(--accent); }
 .ms-bar i.a { background: var(--away); }
 .ms-note { margin: 2px 2px 0; }
+/* the rest of the stat line: everything the feed measured that does not
+   answer "who was better", which is most of it */
+.ms-more { margin: 10px 2px 0; }
+.ms-more > summary { cursor: pointer; font-size: 12.5px; font-weight: 600;
+  color: var(--accent); list-style: none; padding: 4px 0; }
+.ms-more > summary::-webkit-details-marker { display: none; }
+.ms-more > summary::before { content: '\\203A'; display: inline-block;
+  margin-right: 6px; transition: transform .12s; font-weight: 700; }
+.ms-more[open] > summary::before { transform: rotate(90deg); }
+.ms-group { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); font-weight: 600; margin: 14px 0 7px; }
+/* :first-of-type would match nothing here -- the names header is the
+   first div of its type inside the block */
+.ms-head + .ms-group { margin-top: 8px; }
+/* a row nobody wins still shows its split, but faintly: at full strength
+   the wider bar reads as having won something */
+.ms-row.ms-even .ms-bar i { opacity: .42; }
 .fx-names { font-weight: 600; margin: 16px 0 0; }
 .fx-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   color: var(--text-secondary); margin: 18px 2px 6px; font-weight: 600; }
@@ -3612,25 +3629,62 @@ def _resolved_matches(db, league):
     ]
 
 
-# What each feed stores per team per match, in the order it is shown:
-# label, decimal places, lower-is-better, suffix. Understat counts pressing
-# and territory; FotMob counts shots and possession. Neither stores anything
+# What each feed stores per team per match, in the order it is shown, as
+# (label, database column, decimals, direction, suffix, group). Direction is
+# 1 where the lower number is the better one and -1 where neither side wins
+# the row -- a side that clears more has usually been under more pressure,
+# and nobody leads a match on fouls. An empty group is the headline block;
+# the rest sit behind "More from this match".
+#
+# The column travels with the label so the SELECT below is built from this
+# same list: the two cannot fall out of order, which is the one mistake that
+# would attribute a number to the wrong side without ever looking wrong.
+#
+# Understat counts pressing and territory and stops there. FotMob measures
+# most of a match, but only for Allsvenskan. Neither stores anything
 # player-level per match, so a report is a team stat line and says so.
 UNDERSTAT_MATCH_STATS = [
-    ["Expected goals", 2, 0, ""],
-    ["Non-penalty xG", 2, 0, ""],
-    ["Deep completions", 0, 0, ""],
-    ["PPDA", 1, 1, ""],
-    ["Expected points", 2, 0, ""],
+    ("Expected goals", "xg", 2, 0, "", ""),
+    ("Non-penalty xG", "npxg", 2, 0, "", ""),
+    ("Deep completions", "deep", 0, 0, "", ""),
+    ("PPDA", "ppda", 1, 1, "", ""),
+    ("Expected points", "xpts", 2, 0, "", ""),
 ]
 FOTMOB_MATCH_STATS = [
-    ["Expected goals", 2, 0, ""],
-    ["Non-penalty xG", 2, 0, ""],
-    ["xG on target", 2, 0, ""],
-    ["Shots", 0, 0, ""],
-    ["Shots on target", 0, 0, ""],
-    ["Possession", 0, 0, "%"],
-    ["Expected points", 2, 0, ""],
+    ("Expected goals", "xg", 2, 0, "", ""),
+    ("Non-penalty xG", "npxg", 2, 0, "", ""),
+    ("xG on target", "xgot", 2, 0, "", ""),
+    ("Shots", "shots", 0, 0, "", ""),
+    ("Shots on target", "sot", 0, 0, "", ""),
+    ("Possession", "possession", 0, 0, "%", ""),
+    ("Expected points", "xpts", 2, 0, "", ""),
+    ("Big chances", "big_chances", 0, 0, "", "Chances"),
+    ("Big chances missed", "big_chances_missed", 0, -1, "", "Chances"),
+    ("Touches in opposition box", "touches_opp_box", 0, 0, "", "Chances"),
+    ("Corners", "corners", 0, 0, "", "Chances"),
+    ("xG open play", "xg_open_play", 2, 0, "", "Chances"),
+    ("xG set play", "xg_set_play", 2, 0, "", "Chances"),
+    ("Shots inside the box", "shots_inside_box", 0, 0, "", "Shooting"),
+    ("Shots outside the box", "shots_outside_box", 0, 0, "", "Shooting"),
+    ("Hit the woodwork", "woodwork", 0, -1, "", "Shooting"),
+    ("Passes", "passes", 0, 0, "", "Passing"),
+    ("Accurate passes", "accurate_passes", 0, 0, "", "Passing"),
+    ("Pass accuracy", "pass_pct", 0, 0, "%", "Passing"),
+    ("Offsides", "offsides", 0, -1, "", "Passing"),
+    # every one of these rises with time spent defending, so none of them is
+    # a row a side can be said to lead: blocked_shots is left out entirely,
+    # being the other side's Blocks counted from the shooter's end
+    ("Tackles", "tackles", 0, -1, "", "Defending"),
+    ("Interceptions", "interceptions", 0, -1, "", "Defending"),
+    ("Blocks", "blocks", 0, -1, "", "Defending"),
+    ("Clearances", "clearances", 0, -1, "", "Defending"),
+    ("Keeper saves", "keeper_saves", 0, -1, "", "Defending"),
+    ("Duels won", "duels_won", 0, 0, "", "Duels and discipline"),
+    ("Aerial duels won", "aerials_won", 0, 0, "", "Duels and discipline"),
+    ("Successful dribbles", "dribbles", 0, 0, "", "Duels and discipline"),
+    ("Fouls", "fouls", 0, -1, "", "Duels and discipline"),
+    ("Yellow cards", "yellow_cards", 0, -1, "", "Duels and discipline"),
+    ("Red cards", "red_cards", 0, -1, "", "Duels and discipline"),
 ]
 
 
@@ -3650,6 +3704,11 @@ def _match_stats(db, league, since=None):
     Understat's pairing is the same mirror join _resolved_matches explains;
     FotMob names both sides itself and joins on the match id.
 
+    Returns the column list alongside the lines, because a database older
+    than this code has fewer columns than the list asks for: the missing ones
+    are dropped from both, so an out-of-date database renders a shorter stat
+    line instead of failing the build.
+
     Deliberately uncapped across seasons, unlike the other main.-qualified
     reads: only the live page builds a Matches tab, and the (date, home,
     away) key cannot collide between seasons anyway -- two clubs cannot meet
@@ -3657,11 +3716,19 @@ def _match_stats(db, league, since=None):
     explorer can actually show rather than pairing twelve seasons to serve
     ten lookups.
     """
-    if league in UNDERSTAT_LEAGUES:
+    understat = league in UNDERSTAT_LEAGUES
+    table = "understat_team_matches" if understat else "fotmob_team_matches"
+    cols = UNDERSTAT_MATCH_STATS if understat else FOTMOB_MATCH_STATS
+    # only what this database actually has: the live one is migrated by the
+    # fetcher, and a build can run before that has happened
+    have = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+    cols = [c for c in cols if c[1] in have]
+    if not cols:
+        return [], {}
+    picked = ", ".join(f"{side}.{c[1]}" for side in ("h", "a") for c in cols)
+    if understat:
         rows = db.execute(
-            """SELECT h.match_date, h.team, a.team, h.scored, h.missed,
-                      h.xg, h.npxg, h.deep, h.ppda, h.xpts,
-                      a.xg, a.npxg, a.deep, a.ppda, a.xpts
+            f"""SELECT h.match_date, h.team, a.team, h.scored, h.missed, {picked}
                FROM main.understat_team_matches h
                JOIN main.understat_team_matches a
                  ON h.league = a.league AND h.season = a.season
@@ -3672,12 +3739,9 @@ def _match_stats(db, league, since=None):
                  AND h.team <> a.team AND h.match_date >= ?""",
             (league, since or ""),
         ).fetchall()
-        per_side = len(UNDERSTAT_MATCH_STATS)
     else:
         rows = db.execute(
-            """SELECT h.match_date, h.team, h.opponent, h.scored, h.missed,
-                      h.xg, h.npxg, h.xgot, h.shots, h.sot, h.possession, h.xpts,
-                      a.xg, a.npxg, a.xgot, a.shots, a.sot, a.possession, a.xpts
+            f"""SELECT h.match_date, h.team, h.opponent, h.scored, h.missed, {picked}
                FROM main.fotmob_team_matches h
                JOIN main.fotmob_team_matches a
                  ON h.league = a.league AND h.season = a.season
@@ -3685,13 +3749,17 @@ def _match_stats(db, league, since=None):
                WHERE h.league = ? AND h.home_away = 'h' AND h.match_date >= ?""",
             (league, since or ""),
         ).fetchall()
-        per_side = len(FOTMOB_MATCH_STATS)
+    per_side = len(cols)
     out = {}
     for r in rows:
         vals = [round(v, 2) if isinstance(v, float) else v for v in r[5:]]
+        # FotMob stores counts in REAL columns, so 9.0 would ship as "9.00"
+        # against a decimals of 0; the label knows how many places it wants
+        vals = [int(v) if isinstance(v, float) and not (cols[i % per_side][2])
+                and v == int(v) else v for i, v in enumerate(vals)]
         out[((r[0] or "")[:10], unescape(r[1]), unescape(r[2]))] = (
             r[3], r[4], [vals[:per_side], vals[per_side:]])
-    return out
+    return cols, out
 
 
 def _forecasts_for(db, league, names):
@@ -3977,7 +4045,7 @@ def load_fixture_data(db, league):
         xg_by_match[(mdate, h, a)] = (hg, ag, hxg, axg)
     # the rest of the stat line, keyed the same way again, and only as far
     # back as the oldest result the explorer holds
-    stats = _match_stats(
+    scols, stats = _match_stats(
         db, league, since=min(((r[1] or "")[:10] for r in results), default=""))
     # Understat's rerun of the same match, keyed the same way
     forecasts = _forecasts_for(db, league, fx_names)
@@ -4028,8 +4096,9 @@ def load_fixture_data(db, league):
     # the column definitions ride along only when a result actually carries a
     # stat line, so a league whose feed is behind ships nothing to explain
     if any("st" in r for r in out_results):
-        out["scols"] = (UNDERSTAT_MATCH_STATS if league in UNDERSTAT_LEAGUES
-                        else FOTMOB_MATCH_STATS)
+        # the database column is server-side business; the browser gets the
+        # label, its decimals, its direction, its suffix and its group
+        out["scols"] = [[c[0], c[2], c[3], c[4], c[5]] for c in scols]
     return out
 
 
@@ -4176,12 +4245,22 @@ def fixtures_panel(db, leagues):
         "metres of goal \u2014 territory rather than chances), <strong>PPDA</strong> "
         "(opposition passes allowed per defensive action: lower means more "
         "pressing, so its bar deliberately favours the smaller number) and "
-        "<strong>expected points</strong>. Allsvenskan's feed keeps a different set "
-        "\u2014 possession, shots, shots on target, expected goals, non-penalty xG, "
-        "<strong>xG on target</strong> (which rates the shot rather than the "
-        "chance, counting where in the goal it went) and expected points \u2014 so "
-        "the rows differ by league rather than being padded with blanks. The bar "
-        "carries the comparison and the bolder number is the side ahead. Neither "
+        "<strong>expected points</strong>. Allsvenskan's feed measures far more, so "
+        "its headline rows are expected goals, non-penalty xG, <strong>xG on "
+        "target</strong> (which rates the shot rather than the chance, counting "
+        "where in the goal it went), shots, shots on target, possession and "
+        "expected points \u2014 with <strong>everything else the feed measured</strong> "
+        "behind a disclosure under them: big chances and big chances missed, "
+        "touches in the opposition box, xG split into open play and set play, "
+        "corners, shots inside and outside the box, the woodwork, passes and "
+        "pass accuracy, offsides, tackles, interceptions, blocks, clearances, "
+        "keeper saves, duels and aerial duels won, successful dribbles, fouls "
+        "and cards. The rows differ by league rather than being padded with "
+        "blanks. The bar carries the comparison and the bolder number is the "
+        "side ahead \u2014 except on the rows nobody wins, which are drawn faint "
+        "and unbolded: tackles, blocks, clearances, saves, fouls and cards all "
+        "climb with time spent defending, so a side can lead every one of them "
+        "and be losing. Neither "
         "feed stores anything player-level per match, so there are no individual "
         "match ratings here; the player numbers on this site are season totals. A "
         "measurement neither side has is left off rather than printed empty \u2014 "
@@ -5706,35 +5785,59 @@ window.__navRestoring = true;
     return "<p class='meta dim ms-note'>" + bits.join(' ') + '</p>';
   }
 
+  // c = [label, decimals, direction, suffix, group]; direction 1 means the
+  // lower number is the better one, -1 that neither side wins the row
+  function statRow(c, h, a) {
+    if (h == null && a == null) return '';   // the feed is missing this one
+    const low = c[2] === 1, even = c[2] === -1, sfx = c[3] || '';
+    const fmt = (v) => num(v, c[1]) + (v == null ? '' : sfx);
+    const tot = (h || 0) + (a || 0);
+    // a side with nothing to compare against gets an even bar rather than a
+    // full one it has not earned
+    let share = (h == null || a == null) ? 0.5 : (tot > 0 ? h / tot : 0.5);
+    if (low) share = 1 - share;
+    const lead = (even || h == null || a == null || h === a) ? -1
+      : (low ? (h < a ? 0 : 1) : (h > a ? 0 : 1));
+    return "<div class='ms-row" + (even ? ' ms-even' : '') +
+      "'><b class='ms-n" + (lead === 0 ? ' ms-hi' : '') +
+      "'>" + fmt(h) + "</b><div><div class='ms-lab'>" + esc(c[0]) +
+      "</div><div class='ms-bar'><i class='h' style='width:" +
+      (share * 100).toFixed(1) + "%'></i><i class='a' style='width:" +
+      ((1 - share) * 100).toFixed(1) + "%'></i></div></div><b class='ms-n" +
+      (lead === 1 ? ' ms-hi' : '') + "'>" + fmt(a) + '</b></div>';
+  }
+
   function statsBlock(m) {
     const cols = D.scols || [];
     if (!m.st || !cols.length) return '';
-    let out = "<div class='ms'><div class='ms-head'><span>" + esc(m.home) +
-      '</span><span>' + esc(m.away) + '</span></div>';
-    let shown = 0;
+    const head = "<div class='ms-head'><span>" + esc(m.home) + '</span><span>' +
+      esc(m.away) + '</span></div>';
+    let lead = '';
+    const groups = [];
     cols.forEach((c, i) => {
-      const h = m.st[0][i], a = m.st[1][i];
-      if (h == null && a == null) return;   // the feed is missing this one
-      shown++;
-      const low = c[2], sfx = c[3] || '';
-      const fmt = (v) => num(v, c[1]) + (v == null ? '' : sfx);
-      const tot = (h || 0) + (a || 0);
-      // a side with nothing to compare against gets an even bar rather than
-      // a full one it has not earned
-      let share = (h == null || a == null) ? 0.5 : (tot > 0 ? h / tot : 0.5);
-      if (low) share = 1 - share;
-      const lead = (h == null || a == null || h === a) ? -1
-        : (low ? (h < a ? 0 : 1) : (h > a ? 0 : 1));
-      out += "<div class='ms-row'><b class='ms-n" +
-        (lead === 0 ? ' ms-hi' : '') + "'>" + fmt(h) + '</b>' +
-        "<div><div class='ms-lab'>" + esc(c[0]) + "</div><div class='ms-bar'>" +
-        "<i class='h' style='width:" + (share * 100).toFixed(1) + "%'></i>" +
-        "<i class='a' style='width:" + ((1 - share) * 100).toFixed(1) +
-        "%'></i></div></div><b class='ms-n" + (lead === 1 ? ' ms-hi' : '') +
-        "'>" + fmt(a) + '</b></div>';
+      const row = statRow(c, m.st[0][i], m.st[1][i]);
+      if (!row) return;
+      if (!c[4]) { lead += row; return; }
+      // the feed's own grouping, kept in the order the columns arrive
+      let g = groups[groups.length - 1];
+      if (!g || g.name !== c[4]) { g = { name: c[4], html: '' }; groups.push(g); }
+      g.html += row;
     });
-    if (!shown) return '';
-    return out + '</div>' + statsNote();
+    // the headline rows are the block: without them the names header and
+    // the note would stand over nothing
+    if (!lead) return '';
+    let out = "<div class='ms'>" + head + lead + '</div>' + statsNote();
+    if (groups.length) {
+      out += "<details class='ms-more'><summary>Everything else the feed " +
+        'measured</summary>' + "<div class='ms'>" + head +
+        groups.map((g) => "<div class='ms-group'>" + esc(g.name) + '</div>' +
+          g.html).join('') + '</div>' +
+        "<p class='meta dim ms-note'>Faint rows are the ones nobody wins: " +
+        'tackles, blocks, clearances, saves, fouls and cards all climb with ' +
+        'time spent defending, so a side can lead every one of them and be ' +
+        'losing.</p>' + '</details>';
+    }
+    return out;
   }
 
   function callBox(m) {
