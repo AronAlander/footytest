@@ -456,6 +456,23 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .ms-bar i.h { background: var(--accent); }
 .ms-bar i.a { background: var(--away); }
 .ms-note { margin: 2px 2px 0; }
+/* the rest of the stat line: everything the feed measured that does not
+   answer "who was better", which is most of it */
+.ms-more { margin: 10px 2px 0; }
+.ms-more > summary { cursor: pointer; font-size: 12.5px; font-weight: 600;
+  color: var(--accent); list-style: none; padding: 4px 0; }
+.ms-more > summary::-webkit-details-marker { display: none; }
+.ms-more > summary::before { content: '\203A'; display: inline-block;
+  margin-right: 6px; transition: transform .12s; font-weight: 700; }
+.ms-more[open] > summary::before { transform: rotate(90deg); }
+.ms-group { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); font-weight: 600; margin: 14px 0 7px; }
+/* :first-of-type would match nothing here -- the names header is the
+   first div of its type inside the block */
+.ms-head + .ms-group { margin-top: 8px; }
+/* a row nobody wins still shows its split, but faintly: at full strength
+   the wider bar reads as having won something */
+.ms-row.ms-even .ms-bar i { opacity: .42; }
 .fx-names { font-weight: 600; margin: 16px 0 0; }
 .fx-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   color: var(--text-secondary); margin: 18px 2px 6px; font-weight: 600; }
@@ -2058,35 +2075,59 @@ window.__navRestoring = true;
     return "<p class='meta dim ms-note'>" + bits.join(' ') + '</p>';
   }
 
+  // c = [label, decimals, direction, suffix, group]; direction 1 means the
+  // lower number is the better one, -1 that neither side wins the row
+  function statRow(c, h, a) {
+    if (h == null && a == null) return '';   // the feed is missing this one
+    const low = c[2] === 1, even = c[2] === -1, sfx = c[3] || '';
+    const fmt = (v) => num(v, c[1]) + (v == null ? '' : sfx);
+    const tot = (h || 0) + (a || 0);
+    // a side with nothing to compare against gets an even bar rather than a
+    // full one it has not earned
+    let share = (h == null || a == null) ? 0.5 : (tot > 0 ? h / tot : 0.5);
+    if (low) share = 1 - share;
+    const lead = (even || h == null || a == null || h === a) ? -1
+      : (low ? (h < a ? 0 : 1) : (h > a ? 0 : 1));
+    return "<div class='ms-row" + (even ? ' ms-even' : '') +
+      "'><b class='ms-n" + (lead === 0 ? ' ms-hi' : '') +
+      "'>" + fmt(h) + "</b><div><div class='ms-lab'>" + esc(c[0]) +
+      "</div><div class='ms-bar'><i class='h' style='width:" +
+      (share * 100).toFixed(1) + "%'></i><i class='a' style='width:" +
+      ((1 - share) * 100).toFixed(1) + "%'></i></div></div><b class='ms-n" +
+      (lead === 1 ? ' ms-hi' : '') + "'>" + fmt(a) + '</b></div>';
+  }
+
   function statsBlock(m) {
     const cols = D.scols || [];
     if (!m.st || !cols.length) return '';
-    let out = "<div class='ms'><div class='ms-head'><span>" + esc(m.home) +
-      '</span><span>' + esc(m.away) + '</span></div>';
-    let shown = 0;
+    const head = "<div class='ms-head'><span>" + esc(m.home) + '</span><span>' +
+      esc(m.away) + '</span></div>';
+    let lead = '';
+    const groups = [];
     cols.forEach((c, i) => {
-      const h = m.st[0][i], a = m.st[1][i];
-      if (h == null && a == null) return;   // the feed is missing this one
-      shown++;
-      const low = c[2], sfx = c[3] || '';
-      const fmt = (v) => num(v, c[1]) + (v == null ? '' : sfx);
-      const tot = (h || 0) + (a || 0);
-      // a side with nothing to compare against gets an even bar rather than
-      // a full one it has not earned
-      let share = (h == null || a == null) ? 0.5 : (tot > 0 ? h / tot : 0.5);
-      if (low) share = 1 - share;
-      const lead = (h == null || a == null || h === a) ? -1
-        : (low ? (h < a ? 0 : 1) : (h > a ? 0 : 1));
-      out += "<div class='ms-row'><b class='ms-n" +
-        (lead === 0 ? ' ms-hi' : '') + "'>" + fmt(h) + '</b>' +
-        "<div><div class='ms-lab'>" + esc(c[0]) + "</div><div class='ms-bar'>" +
-        "<i class='h' style='width:" + (share * 100).toFixed(1) + "%'></i>" +
-        "<i class='a' style='width:" + ((1 - share) * 100).toFixed(1) +
-        "%'></i></div></div><b class='ms-n" + (lead === 1 ? ' ms-hi' : '') +
-        "'>" + fmt(a) + '</b></div>';
+      const row = statRow(c, m.st[0][i], m.st[1][i]);
+      if (!row) return;
+      if (!c[4]) { lead += row; return; }
+      // the feed's own grouping, kept in the order the columns arrive
+      let g = groups[groups.length - 1];
+      if (!g || g.name !== c[4]) { g = { name: c[4], html: '' }; groups.push(g); }
+      g.html += row;
     });
-    if (!shown) return '';
-    return out + '</div>' + statsNote();
+    // the headline rows are the block: without them the names header and
+    // the note would stand over nothing
+    if (!lead) return '';
+    let out = "<div class='ms'>" + head + lead + '</div>' + statsNote();
+    if (groups.length) {
+      out += "<details class='ms-more'><summary>Everything else the feed " +
+        'measured</summary>' + "<div class='ms'>" + head +
+        groups.map((g) => "<div class='ms-group'>" + esc(g.name) + '</div>' +
+          g.html).join('') + '</div>' +
+        "<p class='meta dim ms-note'>Faint rows are the ones nobody wins: " +
+        'tackles, blocks, clearances, saves, fouls and cards all climb with ' +
+        'time spent defending, so a side can lead every one of them and be ' +
+        'losing.</p>' + '</details>';
+    }
+    return out;
   }
 
   function callBox(m) {
