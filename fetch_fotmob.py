@@ -149,7 +149,7 @@ PLAYER_STATS = [
 # is re-fetched, newest first, so new columns fill in without a cold start.
 # (The database lives in the Actions cache and the nightly run only asks for
 # matches it has never seen, so nothing else would ever revisit them.)
-STATS_VERSION = 3
+STATS_VERSION = 4
 REFRESH_PER_RUN = 120   # ...but only this many per run: re-fetching every
                         # stored season at once is half an hour of requests
                         # and the workflow has 45 minutes for everything
@@ -219,6 +219,31 @@ CREATE TABLE IF NOT EXISTS fotmob_match_players (
     fetched_at  TEXT,
     PRIMARY KEY (season, league, match_id, player_id)
 );
+CREATE TABLE IF NOT EXISTS fotmob_match_shots (
+    season      TEXT NOT NULL,
+    league      TEXT NOT NULL,
+    match_id    TEXT NOT NULL,
+    shot_id     TEXT NOT NULL,
+    team        TEXT,
+    player_id   TEXT,
+    player_name TEXT,
+    minute      INTEGER,
+    minute_added INTEGER,
+    period      TEXT,
+    x           REAL,
+    y           REAL,
+    xg          REAL,
+    xgot        REAL,
+    outcome     TEXT,
+    shot_type   TEXT,
+    situation   TEXT,
+    is_blocked  INTEGER,
+    is_on_target INTEGER,
+    is_own_goal INTEGER,
+    inside_box  INTEGER,
+    fetched_at  TEXT,
+    PRIMARY KEY (season, league, match_id, shot_id)
+);
 CREATE TABLE IF NOT EXISTS fotmob_team_matches (
     season       TEXT NOT NULL,
     league       TEXT NOT NULL,
@@ -261,6 +286,10 @@ MIGRATIONS = {
     # database holding an older version of the table would never gain a
     # column added to PLAYER_STATS afterwards
     "fotmob_match_players": [(column, "REAL") for column, _ in PLAYER_STATS],
+    # nothing to add yet, and that is the point: the entry is here so the
+    # first column this table gains has somewhere to be declared, rather
+    # than being written into SCHEMA where the live database never sees it
+    "fotmob_match_shots": [],
 }
 
 
@@ -479,6 +508,64 @@ def store_match_players(db, season, match_id, md, teams, fetched_at):
     return len(rows)
 
 
+SHOT_COLUMNS = (
+    "season, league, match_id, shot_id, team, player_id, player_name, minute,"
+    " minute_added, period, x, y, xg, xgot, outcome, shot_type, situation,"
+    " is_blocked, is_on_target, is_own_goal, inside_box, fetched_at"
+)
+
+
+def store_match_shots(db, season, match_id, md, teams, fetched_at):
+    """Every shot in the match, from content.shotmap.
+
+    FotMob has already turned the pitch round for us: both teams' shots are
+    given attacking the same goal, x running 0-105 towards it and y 0-68
+    across, so a shot map is drawn per team without mirroring anything.
+
+    xG is kept at full precision -- a 0.02 chance and a 0.04 chance are a
+    factor of two apart, and the circle drawn for each is sized by it. The
+    report rounds; the database should not.
+
+    Written under the caller's transaction, like the squad rows, so a match
+    that fails halfway leaves the shots it already had.
+    """
+    shots = ((md.get("content") or {}).get("shotmap") or {}).get("shots")
+    if not shots:
+        return 0
+    names = {str(t.get("id")): t.get("name") for t in teams}
+    rows = []
+    for s in shots:
+        if s.get("id") is None or s.get("x") is None or s.get("y") is None:
+            continue        # a shot with no location cannot be drawn
+        rows.append((
+            season, LEAGUE, str(match_id), str(s.get("id")),
+            names.get(str(s.get("teamId"))),
+            None if s.get("playerId") is None else str(s.get("playerId")),
+            s.get("playerName"),
+            s.get("min"), s.get("minAdded"), s.get("period"),
+            num(s.get("x")), num(s.get("y")),
+            num(s.get("expectedGoals")), num(s.get("expectedGoalsOnTarget")),
+            s.get("eventType"), s.get("shotType"), s.get("situation"),
+            1 if s.get("isBlocked") else 0,
+            1 if s.get("isOnTarget") else 0,
+            1 if s.get("isOwnGoal") else 0,
+            1 if s.get("isFromInsideBox") else 0,
+            fetched_at,
+        ))
+    if not rows:
+        return 0
+    db.execute(
+        "DELETE FROM fotmob_match_shots WHERE season = ? AND league = ? AND match_id = ?",
+        (season, LEAGUE, str(match_id)),
+    )
+    db.executemany(
+        f"INSERT OR REPLACE INTO fotmob_match_shots ({SHOT_COLUMNS}) "
+        f"VALUES ({','.join('?' * 22)})",
+        rows,
+    )
+    return len(rows)
+
+
 def fetch_match(db, season, match_id, fetched_at):
     md = get_json(f"{BASE}/matchDetails?matchId={match_id}")
     header_teams = (md.get("header") or {}).get("teams") or []
@@ -559,6 +646,7 @@ def fetch_match(db, season, match_id, fetched_at):
         )
 
     store_match_players(db, season, match_id, md, header_teams, fetched_at)
+    store_match_shots(db, season, match_id, md, header_teams, fetched_at)
 
 
 def fetch_season(db, season, fetched_at, refresh_budget=REFRESH_PER_RUN):

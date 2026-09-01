@@ -56,10 +56,11 @@ install TEMP VIEWs that shadow `matches`, `standings`, `understat_players`,
 `understat_team_matches`, `fotmob_players` and `fotmob_team_matches`. Ordinary
 queries see one season and should stay that way.
 
-`fotmob_match_players` is deliberately **not** shadowed: its only reader is
-the live Matches tab, which asks for named match ids and qualifies the table
-`main.`. Anything new that reads it unqualified would read every season at
-once on a frozen page, so add it to the views first if that day comes.
+`fotmob_match_players` and `fotmob_match_shots` are deliberately **not**
+shadowed: their only reader is the live Matches tab, which asks for named
+match ids and qualifies both tables `main.`. Anything new that reads either
+unqualified would read every season at once on a frozen page, so add it to
+the views first if that day comes.
 
 A query that must read across seasons — a club's history, a player's career —
 uses `main.`-qualified table names deliberately, and **caps at the newest season

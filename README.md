@@ -280,7 +280,18 @@ Accents are folded, so "martinez" finds Martínez.
   saves, duels and aerial duels won, successful dribbles, fouls and cards.
   Rows nobody wins — tackles, blocks, clearances, saves, fouls, cards — are
   drawn faint and unbolded, because all of them climb with time spent
-  defending. Under that, again Allsvenskan only, **who played**: both
+  defending. Then, Allsvenskan only, **where the shots came from**: a
+  picture of the last 36 metres per team, with a circle for every attempt,
+  placed where it was struck and sized by area on its expected goals — down
+  to a floor that keeps the faintest ones visible — filled for a goal,
+  paler for a save, grey for a block, red off the woodwork and hollow for
+  a miss; hovering names the player, the minute and the body part, and
+  clicking opens their season card. The caption adds the shots up one at a
+  time, which comes to a little more than the team xG in the table above:
+  that discounts a shot taken straight after a save. Own goals are left off — the feed puts them at the other end under
+  the player who scored one, with no expected goals — and counted in the
+  caption of the side they were given to, so the picture still adds up to
+  the scoreline. Under that, again Allsvenskan only, **who played**: both
   squads, starters first and then whoever came off the bench, with FotMob's
   rating out of 10, minutes, goals, assists, xG, xA and shots for that match
   alone, keepers' saves and goals prevented on their own line, and a name

@@ -529,6 +529,25 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .pl-rtg.hot { background: #0a7d24; }
 .pl-rtg.cold { background: var(--loss); }
 .pl-gk { margin: 6px 2px 0; font-size: 12px; }
+/* the shot map: one attacking half per team, drawn in metres -- the viewBox
+   is the pitch, so every coordinate below is a real distance */
+.sm-pitch { width: 100%; height: auto; display: block; margin-top: 2px; }
+.sm-turf { fill: var(--row-alt); }
+.sm-line { fill: none; stroke: var(--border); stroke-width: .38; }
+.sm-spot { fill: var(--border); }
+.sm-goal { stroke: var(--muted); stroke-width: .8; }
+.sm-dot { stroke-width: .45; }
+.sm-m { fill: none; stroke: var(--muted); }
+.sm-b { fill: var(--draw); fill-opacity: .3; stroke: var(--draw); }
+.sm-s { fill: var(--accent); fill-opacity: .5; stroke: var(--accent); }
+.sm-w { fill: none; stroke: var(--loss); }
+.sm-g { fill: #0a7d24; stroke: var(--card); stroke-width: .55; }
+.sm-dot[data-pid] { cursor: pointer; }
+.sm-cap { margin: 3px 2px 0; font-size: 12px; }
+.sm-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 7px 2px 0;
+  font-size: 12px; color: var(--text-secondary); }
+.sm-key span { display: inline-flex; align-items: center; gap: 5px; }
+.sm-key svg { width: 13px; height: 13px; overflow: visible; }
 /* the rest of the stat line: everything the feed measured that does not
    answer "who was better", which is most of it */
 .ms-more { margin: 10px 2px 0; }
@@ -547,6 +566,7 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
    the wider bar reads as having won something */
 .ms-row.ms-even .ms-bar i { opacity: .42; }
 .fx-names { font-weight: 600; margin: 16px 0 0; }
+.fx-cols .fx-names { margin: 10px 0 2px; }
 .fx-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   color: var(--text-secondary); margin: 18px 2px 6px; font-weight: 600; }
 .fx-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
@@ -3855,6 +3875,83 @@ def _match_players(db, league, match_ids):
     return out
 
 
+# One shot, in the order the browser reads it: who took it, when, where on
+# the pitch, what it was worth, how it ended, with what, and out of what.
+SHOT_OUTCOME = {"Goal": "g", "Post": "w", "AttemptSaved": "s"}
+
+
+def _match_shots(db, league, match_ids):
+    """Every shot in each named match, and the own goals beside it.
+
+    Returns ({match_id: {team: [shot rows]}}, {(match_id, team): own goals}),
+    where the second is counted for the team the own goal was *given* to.
+
+    FotMob normalises the pitch before we see it: both teams are given
+    attacking the same goal, x running towards it and y across, so each
+    team's shots are drawn on their own half-pitch with nothing mirrored.
+
+    Same shape and the same reasoning as _match_players -- FotMob only, ids
+    resolved from the current season by the caller, deduplicated by shot.
+    """
+    if league in UNDERSTAT_LEAGUES or not match_ids:
+        return {}, {}
+    if not db.execute(
+        "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?",
+        ("fotmob_match_shots",),
+    ).fetchone():
+        return {}, {}      # a database from before the table existed
+    ids = sorted({str(m) for m in match_ids if m})
+    rows = db.execute(
+        f"""SELECT match_id, team, player_name, minute, minute_added, x, y, xg,
+                  outcome, is_blocked, shot_type, situation, player_id, shot_id,
+                  is_own_goal
+           FROM main.fotmob_match_shots
+           WHERE league = ? AND match_id IN ({",".join("?" * len(ids))})
+             AND x IS NOT NULL AND y IS NOT NULL
+           ORDER BY minute, minute_added, shot_id""",
+        (league, *ids),
+    ).fetchall()
+    # who the two teams in each match are, so an own goal can be credited to
+    # the other one -- the feed files it under the man who scored it, at his
+    # own goal line, with no expected goals at all
+    sides = {}
+    for mid, team, *_ in rows:
+        sides.setdefault(str(mid), set()).add(unescape(team or ""))
+
+    out, owns, seen = {}, {}, set()
+    for (mid, team, name, minute, added, x, y, xg,
+         outcome, blocked, kind, situation, pid, sid, own_goal) in rows:
+        if (str(mid), str(sid)) in seen:
+            continue
+        seen.add((str(mid), str(sid)))
+        if own_goal:
+            # not a shot this team took at the goal it was attacking, so it
+            # is no part of their map; it is a goal for the other side, and
+            # only for one of them -- crediting a match whose two sides did
+            # not both come back would put the goal in both captions, and
+            # one of the two would then disagree with the scoreline
+            other = sides.get(str(mid), set()) - {unescape(team or "")}
+            if len(other) == 1:
+                club = other.pop()
+                owns[(str(mid), club)] = owns.get((str(mid), club), 0) + 1
+            continue
+        # blocked is an outcome of its own on the map: a defender in the way
+        # is a different story from a keeper making a save
+        code = "b" if blocked else SHOT_OUTCOME.get(outcome or "", "m")
+        out.setdefault(str(mid), {}).setdefault(unescape(team or ""), []).append([
+            unescape(name or ""),
+            # a shot in stoppage time is 90+4, not another shot on 90: two
+            # of them a match share a minute often enough to matter
+            None if minute is None else
+            (f"{int(minute)}+{int(added)}" if added else int(minute)),
+            round(x, 1), round(y, 1),
+            round(xg, 3) if xg is not None else 0,
+            code, kind or "", situation or "",
+            None if pid is None else str(pid),
+        ])
+    return out, owns
+
+
 def _forecasts_for(db, league, names):
     """Understat's post-match forecast, keyed by (date, home, away) using the
     caller's own club names.
@@ -4188,26 +4285,43 @@ def load_fixture_data(db, league):
         add_h2h(rec, home, away, before=day)
         out_results.append(rec)
 
-    # both squads, for the results that resolved to a FotMob match
-    squad_lines = _match_players(db, league, [r.get("mid") for r in out_results])
-    out_squads = {}
+    # both squads and every shot, for the results that resolved to a FotMob
+    # match. Both are keyed by that match id, and a result keeps the id when
+    # either of them lands -- one feed being behind on the other should not
+    # take both off the report
+    mids = [r.get("mid") for r in out_results]
+    squad_lines = _match_players(db, league, mids)
+    shot_lines, own_goals = _match_shots(db, league, mids)
+    out_squads, out_shots = {}, {}
+
+    def by_side(lines, rec):
+        both = lines.get(rec.get("mid") or "")
+        if not both:
+            return None
+        home = both.get(mapping.get(rec["home"]) or "")
+        away = both.get(mapping.get(rec["away"]) or "")
+        return [home, away] if home and away else None
+
     for rec in out_results:
-        by_team = squad_lines.get(rec.get("mid") or "")
-        rows = None
-        if by_team:
-            h_rows = by_team.get(mapping.get(rec["home"]) or "")
-            a_rows = by_team.get(mapping.get(rec["away"]) or "")
-            if h_rows and a_rows:
-                rows = [h_rows, a_rows]
+        rows = by_side(squad_lines, rec)
+        shots = by_side(shot_lines, rec)
         if rows:
             out_squads[rec["mid"]] = rows
-        else:
+        if shots:
+            # a third element only when there were own goals: without it the
+            # dots would not add up to the score and nothing would say why
+            owns = [own_goals.get((rec["mid"], mapping.get(rec[side]) or ""), 0)
+                    for side in ("home", "away")]
+            out_shots[rec["mid"]] = shots + [owns] if any(owns) else shots
+        if not rows and not shots:
             rec.pop("mid", None)      # nothing to open, so promise nothing
 
     out = {"fixtures": out_fixtures, "results": out_results, "form": form,
            "venue": venue, "players": players, "h2h": h2h}
     if out_squads:
         out["squads"] = out_squads
+    if out_shots:
+        out["shots"] = out_shots
     # the column definitions ride along only when a result actually carries a
     # stat line, so a league whose feed is behind ships nothing to explain
     if any("st" in r for r in out_results):
@@ -4383,6 +4497,30 @@ def fixtures_panel(db, leagues):
         "one only the away side has shows the home side a dash. A stat line that "
         "disagrees with the scoreline is dropped rather than shown: the two feeds "
         "would be describing different 90 minutes.</p>"
+        "<p><strong>Where the shots came from</strong> is Allsvenskan only "
+        "as well. FotMob records every attempt with the spot it was struck "
+        "from and what a chance from there is worth, and each team gets its "
+        "own picture of the last 36 metres of the pitch \u2014 which holds all "
+        "but a handful of shots a season \u2014 both drawn attacking upwards. "
+        "One circle is one shot and its area is its expected goals, so a "
+        "circle twice as wide was four times the chance, down to a floor "
+        "that keeps the faintest half-chances big enough to see: filled for "
+        "a goal, filled paler for a save, grey where a defender blocked "
+        "it, red where it hit the woodwork, and hollow for one that "
+        "missed. The caption counts the shots, the ones on target and the "
+        "expected goals they add up to. That last one can sit a little above "
+        "the expected goals in the stat table, and the gap is not a mistake: "
+        "FotMob discounts a shot taken straight after a save in the same "
+        "passage of play, on the grounds that the chance has been counted "
+        "once already, and adding the circles up one at a time does not. "
+        "Hovering a circle "
+        "names the player, the minute, the body part and what came of it; "
+        "clicking one opens the same season card a name in the squad does. A "
+        "shot from further out than the picture goes is drawn on its bottom "
+        "edge rather than left out. Own goals are not on it at all \u2014 the "
+        "feed records them at the other end of the pitch, under the man who "
+        "scored one, with no expected goals \u2014 so they are counted in the "
+        "caption of the team they were given to instead.</p>"
         "<p><strong>Who played</strong> is Allsvenskan only, and it is the one "
         "thing that league gets which the big five do not: FotMob keeps a stat "
         "line per player per match, Understat keeps none at all. Both squads are "
@@ -6033,14 +6171,111 @@ window.__navRestoring = true;
     return out;
   }
 
+  // ---- the shot map ---------------------------------------------------
+  // s = [name, minute, x, y, xG, outcome, body part, situation, player id]
+  // outcome: g goal, s saved, b blocked, w woodwork, m off target.
+  // FotMob gives both teams attacking the same goal, so each team is drawn
+  // on its own attacking half with nothing mirrored: x is metres towards
+  // that goal line, y is metres across the pitch.
+  const SHOT_SIT = {
+    RegularPlay: 'in open play', IndividualPlay: 'in open play',
+    FromCorner: 'from a corner', SetPiece: 'from a set piece',
+    FreeKick: 'from a free kick', FastBreak: 'on the break',
+    Penalty: 'from the spot', ThrowInSetPiece: 'from a throw-in',
+  };
+  const SHOT_KIND = { RightFoot: 'right foot', LeftFoot: 'left foot',
+    Header: 'header', OtherBodyParts: 'off the body' };
+  const SHOT_END = { g: 'scored', s: 'saved', b: 'blocked',
+    w: 'off the woodwork', m: 'off target' };
+  const spaced = (v) =>
+    String(v || '').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+
+  function shotDot(s, live, league) {
+    // metres from the goal line, and across it. The picture is the last
+    // 36 metres -- 99% of shots are struck inside 32 -- so the handful from
+    // further out sit on its back edge rather than off the drawing
+    const cy = Math.max(1.1, Math.min(34.9, 105 - s[2]));
+    const cx = Math.max(1.1, Math.min(66.9, s[3]));
+    // area is the expected goals: radius goes with the square root, so a
+    // circle twice as wide is four times the chance. The 0.55 is a floor
+    // rather than something added to every radius -- added, it made a 0.02
+    // chance eight times the size it had earned -- and it takes over below
+    // about 0.03 xG, where the honest circle would be too small to see
+    const r = Math.max(0.55, 3.3 * Math.sqrt(Math.max(0, s[4] || 0))).toFixed(2);
+    const label = s[0] + (s[1] == null ? '' : ' ' + s[1] + "'") +
+      ' \\u2014 ' + num(s[4], 2) + ' xG, ' +
+      (SHOT_KIND[s[6]] || spaced(s[6]) || 'shot') + ' ' +
+      (SHOT_SIT[s[7]] || spaced(s[7])) + ', ' + (SHOT_END[s[5]] || 'shot');
+    const pid = live && s[8] && window.hasPlayer(league, s[8])
+      ? " data-pid='" + esc(s[8]) + "' data-lg='" + esc(league) + "'" : '';
+    return "<circle class='sm-dot sm-" + s[5] + "' cx='" + cx + "' cy='" +
+      cy + "' r='" + r + "'" + pid + '><title>' + esc(label) +
+      '</title></circle>';
+  }
+
+  function shotPitch(rows, league, owns) {
+    if (!rows || !rows.length) return '';
+    const live = typeof window.hasPlayer === 'function';
+    // the biggest chances first, goals last: a tap-in must never hide under
+    // the circle of the shot from thirty yards that came before it
+    const order = rows.slice().sort((a, b) =>
+      ((a[5] === 'g') - (b[5] === 'g')) || (b[4] || 0) - (a[4] || 0));
+    const shots = rows.length;
+    const target = rows.filter((s) => s[5] === 'g' || s[5] === 's').length;
+    const xg = rows.reduce((t, s) => t + (s[4] || 0), 0);
+    return "<svg class='sm-pitch' viewBox='0 0 68 36' role='img' " +
+      "aria-label='" + shots + ' shots, ' + target + ' on target, ' +
+      num(xg, 2) + " expected goals'>" +
+      "<rect class='sm-turf' x='0' y='0' width='68' height='36'/>" +
+      "<rect class='sm-line' x='13.84' y='0' width='40.32' height='16.5'/>" +
+      "<rect class='sm-line' x='24.84' y='0' width='18.32' height='5.5'/>" +
+      "<circle class='sm-spot' cx='34' cy='11' r='.32'/>" +
+      "<path class='sm-line' d='M26.69 16.5 Q34 23.8 41.31 16.5'/>" +
+      "<line class='sm-goal' x1='30.34' y1='.4' x2='37.66' y2='.4'/>" +
+      order.map((s) => shotDot(s, live, league)).join('') + '</svg>' +
+      "<p class='sm-cap meta'>" + shots + (shots === 1 ? ' shot' : ' shots') +
+      ' \\u00b7 ' + target + ' on target \\u00b7 ' + num(xg, 2) + ' xG' +
+      // an own goal is not on this map: it was struck at the other end of
+      // the pitch, by the other team, and the feed gives it no xG at all
+      (owns ? ' \\u00b7 plus ' + (owns === 1 ? 'an own goal' :
+        owns + ' own goals') : '') + '</p>';
+  }
+
+  function shotsBlock(m) {
+    const rows = (D.shots || {})[m.mid];
+    if (!rows) return '';
+    const key = [['g', 'scored'], ['s', 'saved'], ['b', 'blocked'],
+                 ['w', 'woodwork'], ['m', 'off target']].map(([c, l]) =>
+      "<span><svg viewBox='0 0 10 10'><circle class='sm-dot sm-" + c +
+      "' cx='5' cy='5' r='4' style='stroke-width:.9'/></svg>" + l + '</span>'
+    ).join('');
+    return "<h4 class='fx-h'>Where the shots came from</h4>" +
+      // the name goes inside its own column: these stack on a phone, and a
+      // separate row of two names would leave both of them above both maps
+      "<div class='fx-cols'><div><p class='fx-names'>" + esc(m.home) +
+      '</p>' + shotPitch(rows[0], window.CUR_LG, (rows[2] || [])[0]) +
+      "</div><div><p class='fx-names'>" + esc(m.away) + '</p>' +
+      shotPitch(rows[1], window.CUR_LG, (rows[2] || [])[1]) + '</div></div>' +
+      "<div class='sm-key'>" + key + '</div>' +
+      "<p class='meta dim'>Each team attacks the goal at the top. The " +
+      'picture is the last 36 metres of the pitch, which holds all but a ' +
+      'handful of shots a season; anything struck from further out sits on ' +
+      'the bottom edge. A circle is one shot, sized by the chance it was: ' +
+      'the area is its expected goals, so a circle twice as wide was four ' +
+      'times the chance, down to a floor that keeps the faintest ones ' +
+      'visible. They add up to a little more than the xG in the table ' +
+      'above, which discounts a shot taken straight after a save. Hover or ' +
+      'tap one for who took it, when, and what it was worth.</p>';
+  }
+
   function squadsBlock(m) {
     const rows = (D.squads || {})[m.mid];
     if (!rows) return '';
     return "<h4 class='fx-h'>Who played</h4>" +
-      "<div class='fx-cols fx-names'><div>" + esc(m.home) +
-      "</div><div>" + esc(m.away) + '</div></div>' +
-      "<div class='fx-cols'><div>" + squadTable(rows[0], window.CUR_LG) +
-      "</div><div>" + squadTable(rows[1], window.CUR_LG) + '</div></div>' +
+      "<div class='fx-cols'><div><p class='fx-names'>" + esc(m.home) +
+      '</p>' + squadTable(rows[0], window.CUR_LG) +
+      "</div><div><p class='fx-names'>" + esc(m.away) + '</p>' +
+      squadTable(rows[1], window.CUR_LG) + '</div></div>' +
       "<p class='meta dim'>Rating is FotMob's own, out of 10. Minutes, goals " +
       'and assists are this match alone' +
       // the names are links only where the page carries season cards to open
@@ -6089,7 +6324,7 @@ window.__navRestoring = true;
       // the stat line opens with the same expected goals the headline
       // carries, so only one of the two is ever shown
       (ms ? "<h4 class='fx-h'>Match stats</h4>" + ms : xg) +
-      squadsBlock(m) +
+      shotsBlock(m) + squadsBlock(m) +
       // the forecast supersedes the xG-difference verdict rather than sitting
       // beside it: same question, and this one answers it properly
       (m.fc ? "<h4 class='fx-h'>What the chances deserved</h4>" + deservedBox(m)
@@ -6197,11 +6432,13 @@ window.__navRestoring = true;
   // so this needs no name matching -- and the keyboard gets in too, since
   // these are marked up as links
   const openSquadPlayer = (el) => {
-    if (!el || !window.showPlayer) return false;
+    if (!el || !el.dataset || !el.dataset.pid || !window.showPlayer) return false;
     return window.showPlayer(el.dataset.lg || window.CUR_LG, el.dataset.pid);
   };
   card.addEventListener('click', (e) => {
-    openSquadPlayer(e.target.closest('.squad-link'));
+    // a name in a squad and a circle on the shot map both carry a player id
+    const el = e.target.closest && e.target.closest('[data-pid]');
+    openSquadPlayer(el);
   });
   card.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
