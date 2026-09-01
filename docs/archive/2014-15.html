@@ -480,6 +480,25 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .pl-rtg.hot { background: #0a7d24; }
 .pl-rtg.cold { background: var(--loss); }
 .pl-gk { margin: 6px 2px 0; font-size: 12px; }
+/* the shot map: one attacking half per team, drawn in metres -- the viewBox
+   is the pitch, so every coordinate below is a real distance */
+.sm-pitch { width: 100%; height: auto; display: block; margin-top: 2px; }
+.sm-turf { fill: var(--row-alt); }
+.sm-line { fill: none; stroke: var(--border); stroke-width: .38; }
+.sm-spot { fill: var(--border); }
+.sm-goal { stroke: var(--muted); stroke-width: .8; }
+.sm-dot { stroke-width: .45; }
+.sm-m { fill: none; stroke: var(--muted); }
+.sm-b { fill: var(--draw); fill-opacity: .3; stroke: var(--draw); }
+.sm-s { fill: var(--accent); fill-opacity: .5; stroke: var(--accent); }
+.sm-w { fill: none; stroke: var(--loss); }
+.sm-g { fill: #0a7d24; stroke: var(--card); stroke-width: .55; }
+.sm-dot[data-pid] { cursor: pointer; }
+.sm-cap { margin: 3px 2px 0; font-size: 12px; }
+.sm-key { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 7px 2px 0;
+  font-size: 12px; color: var(--text-secondary); }
+.sm-key span { display: inline-flex; align-items: center; gap: 5px; }
+.sm-key svg { width: 13px; height: 13px; overflow: visible; }
 /* the rest of the stat line: everything the feed measured that does not
    answer "who was better", which is most of it */
 .ms-more { margin: 10px 2px 0; }
@@ -498,6 +517,7 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
    the wider bar reads as having won something */
 .ms-row.ms-even .ms-bar i { opacity: .42; }
 .fx-names { font-weight: 600; margin: 16px 0 0; }
+.fx-cols .fx-names { margin: 10px 0 2px; }
 .fx-h { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   color: var(--text-secondary); margin: 18px 2px 6px; font-weight: 600; }
 .fx-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
@@ -2221,14 +2241,111 @@ window.__navRestoring = true;
     return out;
   }
 
+  // ---- the shot map ---------------------------------------------------
+  // s = [name, minute, x, y, xG, outcome, body part, situation, player id]
+  // outcome: g goal, s saved, b blocked, w woodwork, m off target.
+  // FotMob gives both teams attacking the same goal, so each team is drawn
+  // on its own attacking half with nothing mirrored: x is metres towards
+  // that goal line, y is metres across the pitch.
+  const SHOT_SIT = {
+    RegularPlay: 'in open play', IndividualPlay: 'in open play',
+    FromCorner: 'from a corner', SetPiece: 'from a set piece',
+    FreeKick: 'from a free kick', FastBreak: 'on the break',
+    Penalty: 'from the spot', ThrowInSetPiece: 'from a throw-in',
+  };
+  const SHOT_KIND = { RightFoot: 'right foot', LeftFoot: 'left foot',
+    Header: 'header', OtherBodyParts: 'off the body' };
+  const SHOT_END = { g: 'scored', s: 'saved', b: 'blocked',
+    w: 'off the woodwork', m: 'off target' };
+  const spaced = (v) =>
+    String(v || '').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+
+  function shotDot(s, live, league) {
+    // metres from the goal line, and across it. The picture is the last
+    // 36 metres -- 99% of shots are struck inside 32 -- so the handful from
+    // further out sit on its back edge rather than off the drawing
+    const cy = Math.max(1.1, Math.min(34.9, 105 - s[2]));
+    const cx = Math.max(1.1, Math.min(66.9, s[3]));
+    // area is the expected goals: radius goes with the square root, so a
+    // circle twice as wide is four times the chance. The 0.55 is a floor
+    // rather than something added to every radius -- added, it made a 0.02
+    // chance eight times the size it had earned -- and it takes over below
+    // about 0.03 xG, where the honest circle would be too small to see
+    const r = Math.max(0.55, 3.3 * Math.sqrt(Math.max(0, s[4] || 0))).toFixed(2);
+    const label = s[0] + (s[1] == null ? '' : ' ' + s[1] + "'") +
+      ' \u2014 ' + num(s[4], 2) + ' xG, ' +
+      (SHOT_KIND[s[6]] || spaced(s[6]) || 'shot') + ' ' +
+      (SHOT_SIT[s[7]] || spaced(s[7])) + ', ' + (SHOT_END[s[5]] || 'shot');
+    const pid = live && s[8] && window.hasPlayer(league, s[8])
+      ? " data-pid='" + esc(s[8]) + "' data-lg='" + esc(league) + "'" : '';
+    return "<circle class='sm-dot sm-" + s[5] + "' cx='" + cx + "' cy='" +
+      cy + "' r='" + r + "'" + pid + '><title>' + esc(label) +
+      '</title></circle>';
+  }
+
+  function shotPitch(rows, league, owns) {
+    if (!rows || !rows.length) return '';
+    const live = typeof window.hasPlayer === 'function';
+    // the biggest chances first, goals last: a tap-in must never hide under
+    // the circle of the shot from thirty yards that came before it
+    const order = rows.slice().sort((a, b) =>
+      ((a[5] === 'g') - (b[5] === 'g')) || (b[4] || 0) - (a[4] || 0));
+    const shots = rows.length;
+    const target = rows.filter((s) => s[5] === 'g' || s[5] === 's').length;
+    const xg = rows.reduce((t, s) => t + (s[4] || 0), 0);
+    return "<svg class='sm-pitch' viewBox='0 0 68 36' role='img' " +
+      "aria-label='" + shots + ' shots, ' + target + ' on target, ' +
+      num(xg, 2) + " expected goals'>" +
+      "<rect class='sm-turf' x='0' y='0' width='68' height='36'/>" +
+      "<rect class='sm-line' x='13.84' y='0' width='40.32' height='16.5'/>" +
+      "<rect class='sm-line' x='24.84' y='0' width='18.32' height='5.5'/>" +
+      "<circle class='sm-spot' cx='34' cy='11' r='.32'/>" +
+      "<path class='sm-line' d='M26.69 16.5 Q34 23.8 41.31 16.5'/>" +
+      "<line class='sm-goal' x1='30.34' y1='.4' x2='37.66' y2='.4'/>" +
+      order.map((s) => shotDot(s, live, league)).join('') + '</svg>' +
+      "<p class='sm-cap meta'>" + shots + (shots === 1 ? ' shot' : ' shots') +
+      ' \u00b7 ' + target + ' on target \u00b7 ' + num(xg, 2) + ' xG' +
+      // an own goal is not on this map: it was struck at the other end of
+      // the pitch, by the other team, and the feed gives it no xG at all
+      (owns ? ' \u00b7 plus ' + (owns === 1 ? 'an own goal' :
+        owns + ' own goals') : '') + '</p>';
+  }
+
+  function shotsBlock(m) {
+    const rows = (D.shots || {})[m.mid];
+    if (!rows) return '';
+    const key = [['g', 'scored'], ['s', 'saved'], ['b', 'blocked'],
+                 ['w', 'woodwork'], ['m', 'off target']].map(([c, l]) =>
+      "<span><svg viewBox='0 0 10 10'><circle class='sm-dot sm-" + c +
+      "' cx='5' cy='5' r='4' style='stroke-width:.9'/></svg>" + l + '</span>'
+    ).join('');
+    return "<h4 class='fx-h'>Where the shots came from</h4>" +
+      // the name goes inside its own column: these stack on a phone, and a
+      // separate row of two names would leave both of them above both maps
+      "<div class='fx-cols'><div><p class='fx-names'>" + esc(m.home) +
+      '</p>' + shotPitch(rows[0], window.CUR_LG, (rows[2] || [])[0]) +
+      "</div><div><p class='fx-names'>" + esc(m.away) + '</p>' +
+      shotPitch(rows[1], window.CUR_LG, (rows[2] || [])[1]) + '</div></div>' +
+      "<div class='sm-key'>" + key + '</div>' +
+      "<p class='meta dim'>Each team attacks the goal at the top. The " +
+      'picture is the last 36 metres of the pitch, which holds all but a ' +
+      'handful of shots a season; anything struck from further out sits on ' +
+      'the bottom edge. A circle is one shot, sized by the chance it was: ' +
+      'the area is its expected goals, so a circle twice as wide was four ' +
+      'times the chance, down to a floor that keeps the faintest ones ' +
+      'visible. They add up to a little more than the xG in the table ' +
+      'above, which discounts a shot taken straight after a save. Hover or ' +
+      'tap one for who took it, when, and what it was worth.</p>';
+  }
+
   function squadsBlock(m) {
     const rows = (D.squads || {})[m.mid];
     if (!rows) return '';
     return "<h4 class='fx-h'>Who played</h4>" +
-      "<div class='fx-cols fx-names'><div>" + esc(m.home) +
-      "</div><div>" + esc(m.away) + '</div></div>' +
-      "<div class='fx-cols'><div>" + squadTable(rows[0], window.CUR_LG) +
-      "</div><div>" + squadTable(rows[1], window.CUR_LG) + '</div></div>' +
+      "<div class='fx-cols'><div><p class='fx-names'>" + esc(m.home) +
+      '</p>' + squadTable(rows[0], window.CUR_LG) +
+      "</div><div><p class='fx-names'>" + esc(m.away) + '</p>' +
+      squadTable(rows[1], window.CUR_LG) + '</div></div>' +
       "<p class='meta dim'>Rating is FotMob's own, out of 10. Minutes, goals " +
       'and assists are this match alone' +
       // the names are links only where the page carries season cards to open
@@ -2277,7 +2394,7 @@ window.__navRestoring = true;
       // the stat line opens with the same expected goals the headline
       // carries, so only one of the two is ever shown
       (ms ? "<h4 class='fx-h'>Match stats</h4>" + ms : xg) +
-      squadsBlock(m) +
+      shotsBlock(m) + squadsBlock(m) +
       // the forecast supersedes the xG-difference verdict rather than sitting
       // beside it: same question, and this one answers it properly
       (m.fc ? "<h4 class='fx-h'>What the chances deserved</h4>" + deservedBox(m)
@@ -2385,11 +2502,13 @@ window.__navRestoring = true;
   // so this needs no name matching -- and the keyboard gets in too, since
   // these are marked up as links
   const openSquadPlayer = (el) => {
-    if (!el || !window.showPlayer) return false;
+    if (!el || !el.dataset || !el.dataset.pid || !window.showPlayer) return false;
     return window.showPlayer(el.dataset.lg || window.CUR_LG, el.dataset.pid);
   };
   card.addEventListener('click', (e) => {
-    openSquadPlayer(e.target.closest('.squad-link'));
+    // a name in a squad and a circle on the shot map both carry a player id
+    const el = e.target.closest && e.target.closest('[data-pid]');
+    openSquadPlayer(el);
   });
   card.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
