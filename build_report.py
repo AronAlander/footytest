@@ -51,6 +51,10 @@ CSS = """
 :root {
   --surface: #f7f7f4; --card: #ffffff; --border: #e4e3df;
   --text-primary: #101010; --text-secondary: #52514e;
+  /* one step fainter again than --text-secondary, for the labels on a table
+     that is itself secondary. Four rules have asked for this and been given
+     the body colour instead, the bench divider among them */
+  --muted: #7a7975;
   --accent: #2a78d6; --accent-2: #7c5cff;
   --win: #0ca30c; --loss: #d03b3b; --draw: #8a8983;
   --away: #eb6834;  /* predictions bar away pole; validated vs --accent for CVD */
@@ -62,6 +66,7 @@ CSS = """
   :root {
     --surface: #161615; --card: #212120; --border: #3a3936;
     --text-primary: #ffffff; --text-secondary: #c3c2b7;
+    --muted: #96958c;
     --accent: #3987e5; --accent-2: #9d86ff; --draw: #75746e;
     --away: #e0602e;
     --row-hover: #2a2b2e; --row-alt: rgba(255,255,255,.03);
@@ -448,8 +453,8 @@ svg .radar-poly.pc2 { stroke: var(--accent-2); fill: var(--accent-2); }
 }
 #pd-copy:hover { color: var(--accent); border-color: var(--accent); }
 .tc-squad { margin-top: 12px; }
-.team-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px;
-  border-radius: 3px; }
+.team-link:focus-visible, .squad-link:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 3px; }
 tr.fx-link { cursor: pointer; }
 tr.fx-link:hover td { background: var(--row-hover); }
 tr.fx-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -505,6 +510,25 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .ms-bar i.h { background: var(--accent); }
 .ms-bar i.a { background: var(--away); }
 .ms-note { margin: 2px 2px 0; }
+/* the two squads: a compact line each, starters then the bench */
+.pl-tab { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pl-tab th, .pl-tab td { padding: 2px 4px; white-space: nowrap; width: 1%;
+  border-bottom: 1px solid var(--border); }
+.pl-tab th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); text-align: left; font-weight: 600; }
+.pl-tab td.pl-name { width: 100%; white-space: normal; }
+.pl-tab tr:last-child td { border-bottom: 0; }
+.pl-sub td { opacity: .72; }
+.pl-bench td { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); padding-top: 8px; border-bottom: 0; }
+.pl-rtg { font-variant-numeric: tabular-nums; font-weight: 700;
+  border-radius: 4px; padding: 1px 5px; color: #fff; background: #6f6e69; }
+/* fixed rather than --draw/--win, and darker than both: the text on a chip
+   is always white, and white on --win measures 3.35:1 at this size. These
+   are 5.1:1 and 5.3:1, and they read the same in either theme */
+.pl-rtg.hot { background: #0a7d24; }
+.pl-rtg.cold { background: var(--loss); }
+.pl-gk { margin: 6px 2px 0; font-size: 12px; }
 /* the rest of the stat line: everything the feed measured that does not
    answer "who was better", which is most of it */
 .ms-more { margin: 10px 2px 0; }
@@ -1047,6 +1071,11 @@ PREDICT_ALIASES = {
     "Hamburg": "Hamburger SV",
     "RB Leipzig": "RasenBallsport Leipzig",
     "Halmstad": "Halmstads BK",
+    # and the same pair the other way round, for the squad bridge, which
+    # joins FotMob's player table to its match table rather than to a
+    # fixture list. "Halmstads" and "Halmstad" are different tokens once
+    # "BK" is dropped, so normalisation alone leaves this club unlinked
+    "Halmstads BK": "Halmstad",
 }
 
 
@@ -3521,8 +3550,9 @@ def load_squads(db, league, names):
 
     Those two feeds also disagree about club names -- FotMob's player table
     says "Hammarby IF" where its match table says "Hammarby" -- so the same
-    normaliser the predictions use bridges them. It maps all sixteen
-    Allsvenskan clubs with no new aliases.
+    normaliser the predictions use bridges them. That maps fifteen of the
+    sixteen Allsvenskan clubs on its own; Halmstad needs an alias, because
+    dropping "BK" leaves "Halmstads" against "Halmstad".
     """
     if league in UNDERSTAT_LEAGUES or not fotmob_available(db) or not names:
         return {}
@@ -3696,10 +3726,12 @@ def _match_stats(db, league, since=None):
     completions, PPDA and expected points; FotMob adds shots, shots on
     target, xG on target and possession.
 
-    Each entry is (home goals, away goals, [[home values], [away values]]),
-    so the caller can refuse a line whose scoreline disagrees with the
-    fixture feed exactly as it does for the xG headline -- a stat line from a
-    different 90 minutes would read as fact.
+    Each entry is (home goals, away goals, [[home values], [away values]],
+    match id), so the caller can refuse a line whose scoreline disagrees with
+    the fixture feed exactly as it does for the xG headline -- a stat line
+    from a different 90 minutes would read as fact -- and can then ask for
+    that match's player rows by the id the check just validated. Understat
+    has no match id and no player rows, and carries None.
 
     Understat's pairing is the same mirror join _resolved_matches explains;
     FotMob names both sides itself and joins on the match id.
@@ -3728,7 +3760,7 @@ def _match_stats(db, league, since=None):
     picked = ", ".join(f"{side}.{c[1]}" for side in ("h", "a") for c in cols)
     if understat:
         rows = db.execute(
-            f"""SELECT h.match_date, h.team, a.team, h.scored, h.missed, {picked}
+            f"""SELECT h.match_date, h.team, a.team, h.scored, h.missed, NULL, {picked}
                FROM main.understat_team_matches h
                JOIN main.understat_team_matches a
                  ON h.league = a.league AND h.season = a.season
@@ -3741,7 +3773,8 @@ def _match_stats(db, league, since=None):
         ).fetchall()
     else:
         rows = db.execute(
-            f"""SELECT h.match_date, h.team, h.opponent, h.scored, h.missed, {picked}
+            f"""SELECT h.match_date, h.team, h.opponent, h.scored, h.missed,
+                      h.match_id, {picked}
                FROM main.fotmob_team_matches h
                JOIN main.fotmob_team_matches a
                  ON h.league = a.league AND h.season = a.season
@@ -3752,14 +3785,74 @@ def _match_stats(db, league, since=None):
     per_side = len(cols)
     out = {}
     for r in rows:
-        vals = [round(v, 2) if isinstance(v, float) else v for v in r[5:]]
+        vals = [round(v, 2) if isinstance(v, float) else v for v in r[6:]]
         # FotMob stores counts in REAL columns, so 9.0 would ship as "9.00"
         # against a decimals of 0; the label knows how many places it wants
         vals = [int(v) if isinstance(v, float) and not (cols[i % per_side][2])
                 and v == int(v) else v for i, v in enumerate(vals)]
         out[((r[0] or "")[:10], unescape(r[1]), unescape(r[2]))] = (
-            r[3], r[4], [vals[:per_side], vals[per_side:]])
+            r[3], r[4], [vals[:per_side], vals[per_side:]], r[5])
     return cols, out
+
+
+# One player's line in one match, in the order it is shipped. Kept short on
+# purpose: this is a squad list, not the player explorer, and every field
+# here is paid for once per player per match shown.
+# The browser reads these positionally, so the order here is the contract;
+# squadTable in EXPLORER_JS names each index in a comment above itself.
+PLAYER_MATCH_COLS = ("player_id", "player_name", "is_gk", "started", "minutes",
+                     "rating", "goals", "assists", "xg", "xa", "shots",
+                     "saves", "goals_prevented")
+
+
+def _match_players(db, league, match_ids):
+    """Both squads of each named match, as {match_id: {team: [player rows]}}.
+
+    Only FotMob keeps this -- Understat has no per-match player data at all
+    -- and only for the handful of matches a report can be opened on, so it
+    is fetched by id rather than by season.
+
+    The ids are the same ids fotmob_players stores, so a name here and a
+    profile card there are the same player without any name matching.
+
+    Ordered all the way down to the player id: six starters can share
+    "started, 90 minutes", and without a tiebreak their order on the page is
+    whatever order the rows happen to sit in -- which a re-fetch rewrites.
+    The keeper leads his squad because that is where a team sheet starts.
+
+    Not season-scoped, unlike the writer: a FotMob match id is unique across
+    seasons, and the caller has already resolved these ids from the current
+    season. Rows are still deduplicated by player, so a match somehow stored
+    under two season labels lists each player once rather than twice.
+    """
+    if league in UNDERSTAT_LEAGUES or not match_ids:
+        return {}
+    if not db.execute(
+        "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?",
+        ("fotmob_match_players",),
+    ).fetchone():
+        return {}      # a database from before the table existed
+    ids = sorted({str(m) for m in match_ids if m})
+    rows = db.execute(
+        f"""SELECT match_id, team, {", ".join(PLAYER_MATCH_COLS)}
+           FROM main.fotmob_match_players
+           WHERE league = ? AND match_id IN ({",".join("?" * len(ids))})
+             AND minutes > 0
+           ORDER BY started DESC, is_gk DESC, minutes DESC, player_id""",
+        (league, *ids),
+    ).fetchall()
+    out, seen = {}, set()
+    for r in rows:
+        if (str(r[0]), r[2]) in seen:
+            continue
+        seen.add((str(r[0]), r[2]))
+        line = [round(v, 2) if isinstance(v, float) else v for v in r[2:]]
+        # counts are stored as REAL, and "1.00 goals" reads like a mistake
+        line = [int(v) if isinstance(v, float) and v == int(v) and i != 5 else v
+                for i, v in enumerate(line)]
+        line[1] = unescape(line[1] or "")
+        out.setdefault(str(r[0]), {}).setdefault(unescape(r[1] or ""), []).append(line)
+    return out
 
 
 def _forecasts_for(db, league, names):
@@ -4069,6 +4162,10 @@ def load_fixture_data(db, league):
         line = stats.get((day, mapping.get(home), mapping.get(away)))
         if line and line[0] == hg and line[1] == ag:
             rec["st"] = line[2]
+            if line[3]:
+                # the id has just been checked against the scoreline, so the
+                # squads it names are this match's
+                rec["mid"] = str(line[3])
         # what the chances deserved: the same scoreline check applies, since a
         # forecast attached to the wrong match would read as a confident lie
         fc = forecasts.get((day, home, away))
@@ -4091,8 +4188,26 @@ def load_fixture_data(db, league):
         add_h2h(rec, home, away, before=day)
         out_results.append(rec)
 
+    # both squads, for the results that resolved to a FotMob match
+    squad_lines = _match_players(db, league, [r.get("mid") for r in out_results])
+    out_squads = {}
+    for rec in out_results:
+        by_team = squad_lines.get(rec.get("mid") or "")
+        rows = None
+        if by_team:
+            h_rows = by_team.get(mapping.get(rec["home"]) or "")
+            a_rows = by_team.get(mapping.get(rec["away"]) or "")
+            if h_rows and a_rows:
+                rows = [h_rows, a_rows]
+        if rows:
+            out_squads[rec["mid"]] = rows
+        else:
+            rec.pop("mid", None)      # nothing to open, so promise nothing
+
     out = {"fixtures": out_fixtures, "results": out_results, "form": form,
            "venue": venue, "players": players, "h2h": h2h}
+    if out_squads:
+        out["squads"] = out_squads
     # the column definitions ride along only when a result actually carries a
     # stat line, so a league whose feed is behind ships nothing to explain
     if any("st" in r for r in out_results):
@@ -4268,6 +4383,19 @@ def fixtures_panel(db, leagues):
         "one only the away side has shows the home side a dash. A stat line that "
         "disagrees with the scoreline is dropped rather than shown: the two feeds "
         "would be describing different 90 minutes.</p>"
+        "<p><strong>Who played</strong> is Allsvenskan only, and it is the one "
+        "thing that league gets which the big five do not: FotMob keeps a stat "
+        "line per player per match, Understat keeps none at all. Both squads are "
+        "listed as they were used \u2014 starters first, then whoever came off the "
+        "bench \u2014 with FotMob\u2019s rating out of 10, minutes, goals, assists, "
+        "expected goals and assists, and shots, all for that match alone. "
+        "Goalkeepers get their own line underneath for saves and goals prevented, "
+        "which is xG on target faced minus goals conceded: a positive number is a "
+        "keeper who saved more than the shots deserved. A name opens that "
+        "player\u2019s season card where the page holds one, because the match "
+        "feed and the season squads share FotMob\u2019s player ids and need no "
+        "name matching. Anyone who did not get on is left out rather than "
+        "listed with a dash.</p>"
         "<p>The head-to-head on a report stops <em>before</em> the match being "
         "reported, so it shows the history the two sides actually brought into it.</p>"
         "<p><strong>The verdict</strong> is the same Poisson model as the "
@@ -4810,7 +4938,11 @@ window.__navRestoring = true;
          ['Key passes', p.kp], ['G\\u2212xG', signed(p.gdiff)],
          ['A\\u2212xA', signed(p.adiff)]]
     ).map(([l, v]) =>
-      "<div><span class='pd-tv'>" + v + "</span><span class='pd-tl'>" + l + "</span></div>"
+      // a keeper has no shots total at all in the FotMob feed, and the card
+      // used to print the word null at him. It is reachable now that a match
+      // squad opens these, so the missing ones say so
+      "<div><span class='pd-tv'>" + (v == null ? '\u2013' : v) +
+      "</span><span class='pd-tl'>" + l + "</span></div>"
     ).join('');
     $('pd-modal').innerHTML =
       "<div class='pd-head'><div><h4>" + esc(p.name) + "</h4>" +
@@ -4865,13 +4997,19 @@ window.__navRestoring = true;
   }
   // the club card's squad list lives in another closure and holds ids, not
   // player objects; this is the only way in
+  // the explorer first, then the squad rows shipped for leagues it does not
+  // cover -- ids from the two feeds never meet, since a league is in one or
+  // the other
+  const playerById = (league, id) =>
+    (PLAYERS_BY_LG[league] || []).find((q) => String(q.id) === String(id)) ||
+    fotmobPool(league).find((q) => String(q.id) === String(id)) || null;
+  // asked before a name is drawn as a link, so nothing offers a card it
+  // cannot then open
+  window.hasPlayer = function (league, id) {
+    return playerById(league, id) !== null;
+  };
   window.showPlayer = function (league, id) {
-    const pool = PLAYERS_BY_LG[league] || [];
-    let p = pool.find((q) => String(q.id) === String(id));
-    // the explorer first, then the squad rows shipped for leagues it does not
-    // cover -- ids from the two feeds never meet, since a league is in one or
-    // the other
-    if (!p) p = fotmobPool(league).find((q) => String(q.id) === String(id));
+    const p = playerById(league, id);
     if (!p) return false;
     openDetail(p);
     return true;
@@ -5840,6 +5978,78 @@ window.__navRestoring = true;
     return out;
   }
 
+  // ---- who played -----------------------------------------------------
+  // p = [id, name, gk, started, minutes, rating, goals, assists, xg, xa,
+  //      shots, saves, goals prevented]  -- PLAYER_MATCH_COLS, in order
+  function squadTable(rows, league) {
+    if (!rows || !rows.length) return '';
+    // a name is a link only where there is really a card behind it: the
+    // squad list can name a player the season data has never heard of
+    const live = typeof window.hasPlayer === 'function';
+    const rtg = (v) => {
+      if (v == null) return '';
+      const cls = v >= 7.5 ? ' hot' : v < 6 ? ' cold' : '';
+      return "<span class='pl-rtg" + cls + "'>" + num(v, 2) + '</span>';
+    };
+    let out = "<table class='pl-tab'><thead><tr><th class='pl-name'>Player</th>" +
+      "<th class='num'>Rtg</th><th class='num'>Min</th><th class='num'>G</th>" +
+      "<th class='num'>A</th><th class='num'>xG</th><th class='num'>xA</th>" +
+      "<th class='num'>Sh</th></tr></thead><tbody>";
+    let bench = false;
+    rows.forEach((p) => {
+      if (!p[3] && !bench) {          // the first name off the bench
+        bench = true;
+        out += "<tr class='pl-bench'><td colspan='8'>Substitutes</td></tr>";
+      }
+      const name = live && p[0] && window.hasPlayer(league, p[0])
+        ? "<span class='squad-link' data-pid='" + esc(p[0]) + "' data-lg='" +
+          esc(league) + "' tabindex='0' role='link'>" + esc(p[1]) + '</span>'
+        : esc(p[1]);
+      out += "<tr" + (p[3] ? '' : " class='pl-sub'") + "><td class='pl-name'>" +
+        name + (p[2] ? " <span class='dim'>GK</span>" : '') +
+        "</td><td class='num'>" + rtg(p[5]) + "</td><td class='num dim'>" +
+        (p[4] == null ? '' : p[4] + "'") + "</td><td class='num'>" +
+        (p[6] || '') + "</td><td class='num'>" + (p[7] || '') +
+        // tallies stay blank at zero, a table of noughts reads as noise;
+        // the measured numbers do not, because 0.00 xG is a real reading
+        "</td><td class='num dim'>" + (p[8] == null ? '' : num(p[8], 2)) +
+        "</td><td class='num dim'>" + (p[9] == null ? '' : num(p[9], 2)) +
+        "</td><td class='num dim'>" + (p[10] || '') + '</td></tr>';
+    });
+    out += '</tbody></table>';
+    // the keeper's own numbers, which no outfield column would ever hold
+    const gk = rows.filter((p) => p[2] && (p[11] != null || p[12] != null));
+    gk.forEach((p) => {
+      const bits = [];
+      if (p[11] != null) bits.push(p[11] + (p[11] === 1 ? ' save' : ' saves'));
+      if (p[12] != null) {
+        bits.push(sign(p[12], 2) + ' goals prevented');
+      }
+      if (bits.length) {
+        out += "<p class='meta pl-gk'>" + esc(p[1]) + ': ' + bits.join(', ') +
+          '</p>';
+      }
+    });
+    return out;
+  }
+
+  function squadsBlock(m) {
+    const rows = (D.squads || {})[m.mid];
+    if (!rows) return '';
+    return "<h4 class='fx-h'>Who played</h4>" +
+      "<div class='fx-cols fx-names'><div>" + esc(m.home) +
+      "</div><div>" + esc(m.away) + '</div></div>' +
+      "<div class='fx-cols'><div>" + squadTable(rows[0], window.CUR_LG) +
+      "</div><div>" + squadTable(rows[1], window.CUR_LG) + '</div></div>' +
+      "<p class='meta dim'>Rating is FotMob's own, out of 10. Minutes, goals " +
+      'and assists are this match alone' +
+      // the names are links only where the page carries season cards to open
+      (typeof window.hasPlayer === 'function'
+        ? ' \\u2014 click a name for the season card behind it' : '') +
+      '. Understat has no equivalent for the big five, so this is the one ' +
+      'thing Allsvenskan gets that they do not.</p>';
+  }
+
   function callBox(m) {
     if (!m.pct) {
       return "<p class='dim fx-none'>No published call for this one \\u2014 it was " +
@@ -5879,6 +6089,7 @@ window.__navRestoring = true;
       // the stat line opens with the same expected goals the headline
       // carries, so only one of the two is ever shown
       (ms ? "<h4 class='fx-h'>Match stats</h4>" + ms : xg) +
+      squadsBlock(m) +
       // the forecast supersedes the xG-difference verdict rather than sitting
       // beside it: same question, and this one answers it properly
       (m.fc ? "<h4 class='fx-h'>What the chances deserved</h4>" + deservedBox(m)
@@ -5980,6 +6191,23 @@ window.__navRestoring = true;
   });
   $('fx-prev').addEventListener('click', () => step(-1));
   $('fx-next').addEventListener('click', () => step(1));
+
+  // a name in a match squad opens that player's season card. The ids come
+  // from FotMob's match payload and are the same ids the season squads carry,
+  // so this needs no name matching -- and the keyboard gets in too, since
+  // these are marked up as links
+  const openSquadPlayer = (el) => {
+    if (!el || !window.showPlayer) return false;
+    return window.showPlayer(el.dataset.lg || window.CUR_LG, el.dataset.pid);
+  };
+  card.addEventListener('click', (e) => {
+    openSquadPlayer(e.target.closest('.squad-link'));
+  });
+  card.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const el = e.target.closest && e.target.closest('.squad-link');
+    if (el) { e.preventDefault(); openSquadPlayer(el); }
+  });
 
   // ---- opening a match from the League tab ---------------------------
   const entriesOf = (lg) => {

@@ -1,7 +1,7 @@
 """Fetch Allsvenskan advanced stats (xG, xA, shots on target, ...) from FotMob.
 
 FotMob has no official API, but its website loads JSON from two hosts that
-need no key or signing (verified 2026-07-17):
+need no key or signing (verified 2026-08-31):
 
   www.fotmob.com/api/data/leagues?id=67   league table, fixtures, stat links
   data.fotmob.com/stats/67/season/<id>/*  full player leaderboards per stat
@@ -110,11 +110,46 @@ MATCH_STATS = [
     ("red_cards",          "red_cards",                  "n"),
 ]
 
+# Per player per match, as (column, the label FotMob gives it). A label a
+# player has no entry for stores NULL: an outfielder has no Saves, and a
+# defender who never shot has no xG -- neither of them has a zero.
+PLAYER_STATS = [
+    ("minutes",             "Minutes played"),
+    ("rating",              "FotMob rating"),
+    ("goals",               "Goals"),
+    ("assists",             "Assists"),
+    ("xg",                  "Expected goals (xG)"),
+    ("npxg",                "xG Non-penalty"),
+    ("xgot",                "Expected goals on target (xGOT)"),
+    ("xa",                  "Expected assists (xA)"),
+    ("shots",               "Total shots"),
+    ("sot",                 "Shots on target"),
+    ("chances_created",     "Chances created"),
+    ("big_chances_created", "Big chances created"),
+    ("touches",             "Touches"),
+    ("touches_opp_box",     "Touches in opposition box"),
+    ("accurate_passes",     "Accurate passes"),
+    ("tackles",             "Tackles"),
+    ("interceptions",       "Interceptions"),
+    ("clearances",          "Clearances"),
+    ("blocks",              "Blocks"),
+    ("recoveries",          "Recoveries"),
+    ("duels_won",           "Duels won"),
+    ("aerials_won",         "Aerial duels won"),
+    ("dribbles",            "Successful dribbles"),
+    ("fouls",               "Fouls committed"),
+    ("was_fouled",          "Was fouled"),
+    ("dispossessed",        "Dispossessed"),
+    ("saves",               "Saves"),
+    ("goals_conceded",      "Goals conceded"),
+    ("goals_prevented",     "Goals prevented"),
+]
+
 # Bumped when the set above changes: a stored match carrying an older number
 # is re-fetched, newest first, so new columns fill in without a cold start.
 # (The database lives in the Actions cache and the nightly run only asks for
 # matches it has never seen, so nothing else would ever revisit them.)
-STATS_VERSION = 2
+STATS_VERSION = 3
 REFRESH_PER_RUN = 120   # ...but only this many per run: re-fetching every
                         # stored season at once is half an hour of requests
                         # and the workflow has 45 minutes for everything
@@ -140,6 +175,49 @@ CREATE TABLE IF NOT EXISTS fotmob_players (
     chances_created INTEGER,
     fetched_at      TEXT,
     PRIMARY KEY (season, league, player_id)
+);
+CREATE TABLE IF NOT EXISTS fotmob_match_players (
+    season      TEXT NOT NULL,
+    league      TEXT NOT NULL,
+    match_id    TEXT NOT NULL,
+    player_id   TEXT NOT NULL,
+    team        TEXT,
+    player_name TEXT,
+    started     INTEGER,
+    is_gk       INTEGER,
+    shirt       TEXT,
+    position    TEXT,
+    minutes             REAL,
+    rating              REAL,
+    goals               REAL,
+    assists             REAL,
+    xg                  REAL,
+    npxg                REAL,
+    xgot                REAL,
+    xa                  REAL,
+    shots               REAL,
+    sot                 REAL,
+    chances_created     REAL,
+    big_chances_created REAL,
+    touches             REAL,
+    touches_opp_box     REAL,
+    accurate_passes     REAL,
+    tackles             REAL,
+    interceptions       REAL,
+    clearances          REAL,
+    blocks              REAL,
+    recoveries          REAL,
+    duels_won           REAL,
+    aerials_won         REAL,
+    dribbles            REAL,
+    fouls               REAL,
+    was_fouled          REAL,
+    dispossessed        REAL,
+    saves               REAL,
+    goals_conceded      REAL,
+    goals_prevented     REAL,
+    fetched_at  TEXT,
+    PRIMARY KEY (season, league, match_id, player_id)
 );
 CREATE TABLE IF NOT EXISTS fotmob_team_matches (
     season       TEXT NOT NULL,
@@ -175,11 +253,15 @@ CREATE TABLE IF NOT EXISTS fotmob_team_matches (
 # sqlite has no ADD COLUMN IF NOT EXISTS, and executescript would abort the
 # whole SCHEMA the second time an ALTER ran, so these live outside it and are
 # applied one at a time against what the database actually has.
-MIGRATIONS = [(column, f"ALTER TABLE fotmob_team_matches ADD COLUMN {column} REAL")
-              for column, _, _ in MATCH_STATS]
-MIGRATIONS.append(
-    ("stats_version",
-     "ALTER TABLE fotmob_team_matches ADD COLUMN stats_version INTEGER"))
+MIGRATIONS = {
+    "fotmob_team_matches":
+        [(column, "REAL") for column, _, _ in MATCH_STATS]
+        + [("stats_version", "INTEGER")],
+    # SCHEMA creates this one whole, but only when it does not exist yet: a
+    # database holding an older version of the table would never gain a
+    # column added to PLAYER_STATS afterwards
+    "fotmob_match_players": [(column, "REAL") for column, _ in PLAYER_STATS],
+}
 
 
 def migrate(db):
@@ -189,13 +271,17 @@ def migrate(db):
     cache every night -- so this is the only way a new column ever reaches
     production.
     """
-    have = {row[1] for row in db.execute("PRAGMA table_info(fotmob_team_matches)")}
-    added = [statement for column, statement in MIGRATIONS if column not in have]
-    for statement in added:
-        db.execute(statement)
-    if added:
-        db.commit()
-        print(f"  schema: {len(added)} new column(s) on fotmob_team_matches")
+    for table, columns in MIGRATIONS.items():
+        have = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+        if not have:
+            continue        # the table itself is SCHEMA's business
+        added = [c for c, _ in columns if c not in have]
+        for column, kind in columns:
+            if column in added:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+        if added:
+            db.commit()
+            print(f"  schema: {len(added)} new column(s) on {table}")
 
 
 def get_json(url):
@@ -306,6 +392,93 @@ def match_stat_map(match_json):
     return out
 
 
+def player_stat_map(player):
+    """Flatten one player's stat groups to {label: value}."""
+    out = {}
+    for group in player.get("stats") or []:
+        for label, item in (group.get("stats") or {}).items():
+            if label in out:
+                continue
+            value = (item.get("stat") or {}).get("value") if isinstance(item, dict) else item
+            out[label] = value
+    return out
+
+
+def position_of(player):
+    """The player's position as text, whatever shape the feed sends it in.
+
+    Today usualPosition is absent and positionId is a bare number; FotMob
+    sends this field as an object elsewhere in the same payload, and an
+    unhandled dict binds as a parameter of an unsupported type -- which is
+    an exception in the middle of writing a squad.
+    """
+    value = player.get("usualPosition") or player.get("positionId")
+    if isinstance(value, dict):
+        value = value.get("label") or value.get("name") or value.get("id")
+    return None if value is None else str(value)
+
+
+def store_match_players(db, season, match_id, md, teams, fetched_at):
+    """One row per player who was in the squad, from the same payload.
+
+    Player ids here are the ids fotmob_players already stores, so a match
+    row and a season row are the same player without any name matching.
+
+    Rows are replaced rather than added to: a re-fetch of a match whose
+    squad list has changed should not leave a player behind who is no
+    longer in it. The delete and the insert are one statement pair inside
+    the caller's transaction, which fetch_season commits only when the whole
+    match worked, so a throw anywhere in here leaves the old squad standing.
+    """
+    stats = ((md.get("content") or {}).get("playerStats") or {})
+    if not stats:
+        return 0
+    lineup = (md.get("content") or {}).get("lineup") or {}
+    started = set()
+    for side in ("homeTeam", "awayTeam"):
+        for p in (lineup.get(side) or {}).get("starters") or []:
+            started.add(str(p.get("id")))
+    # who started is read from one path in the payload and nothing else can
+    # stand in for it. If that path is ever renamed the set comes back empty
+    # and every player in the match reads as a substitute -- a wrong squad
+    # sheet, stamped current and never revisited. Refuse instead
+    if not started:
+        raise ValueError(f"match {match_id}: no starters in the lineup")
+    names = {str(t.get("id")): t.get("name") for t in teams}
+
+    columns = ("season, league, match_id, player_id, team, player_name, started,"
+               " is_gk, shirt, position"
+               + "".join(f", {column}" for column, _ in PLAYER_STATS)
+               + ", fetched_at")
+    placeholders = ",".join("?" * (11 + len(PLAYER_STATS)))
+    rows = []
+    for pid, player in stats.items():
+        flat = player_stat_map(player)
+        rows.append((
+            season, LEAGUE, str(match_id), str(pid),
+            names.get(str(player.get("teamId"))) or player.get("teamName"),
+            player.get("name"),
+            1 if str(pid) in started else 0,
+            1 if player.get("isGoalkeeper") else 0,
+            str(player.get("shirtNumber") or ""),
+            position_of(player),
+            *[num(flat.get(label)) for _, label in PLAYER_STATS],
+            fetched_at,
+        ))
+    if not rows:
+        return 0
+    db.execute(
+        "DELETE FROM fotmob_match_players WHERE season = ? AND league = ? AND match_id = ?",
+        (season, LEAGUE, str(match_id)),
+    )
+    db.executemany(
+        f"INSERT OR REPLACE INTO fotmob_match_players ({columns}) "
+        f"VALUES ({placeholders})",
+        rows,
+    )
+    return len(rows)
+
+
 def fetch_match(db, season, match_id, fetched_at):
     md = get_json(f"{BASE}/matchDetails?matchId={match_id}")
     header_teams = (md.get("header") or {}).get("teams") or []
@@ -385,6 +558,8 @@ def fetch_match(db, season, match_id, fetched_at):
             ),
         )
 
+    store_match_players(db, season, match_id, md, header_teams, fetched_at)
+
 
 def fetch_season(db, season, fetched_at, refresh_budget=REFRESH_PER_RUN):
     print(f"--- {LEAGUE} {season} ---")
@@ -431,8 +606,16 @@ def fetch_season(db, season, fetched_at, refresh_budget=REFRESH_PER_RUN):
     for i, m in enumerate(todo, 1):
         try:
             fetch_match(db, season, m["id"], fetched_at)
+            db.commit()
             misses = 0
         except Exception as error:
+            # the commit used to sit below this block, so a match that threw
+            # halfway was written anyway: team rows stamped with the current
+            # stats_version -- which takes the match out of the re-fetch set
+            # for good -- and a squad deleted but not yet replaced. Rolling
+            # back leaves the stored match exactly as it was, which is the
+            # failure this fetcher is meant to have
+            db.rollback()
             misses += 1
             print(f"  ! match {m.get('id')} skipped: {error}")
             # one bad match is a bad match; eight in a row is the feed having
@@ -442,7 +625,6 @@ def fetch_season(db, season, fetched_at, refresh_budget=REFRESH_PER_RUN):
                 raise RuntimeError(
                     f"{misses} consecutive match fetches failed - "
                     f"matchDetails has probably changed shape") from error
-        db.commit()
         if i % 25 == 0:
             print(f"  ... {i}/{len(todo)}")
         time.sleep(REQUEST_PAUSE)
@@ -477,10 +659,12 @@ def main() -> None:
     print(f"\nDatabase: {DB_PATH.name}")
     for row in db.execute(
         "SELECT season, COUNT(DISTINCT match_id), "
-        "(SELECT COUNT(*) FROM fotmob_players p WHERE p.season = m.season) "
+        "(SELECT COUNT(*) FROM fotmob_players p WHERE p.season = m.season), "
+        "(SELECT COUNT(*) FROM fotmob_match_players q WHERE q.season = m.season) "
         "FROM fotmob_team_matches m GROUP BY season ORDER BY season"
     ):
-        print(f"  {row[0]}: {row[1]} matches, {row[2]} players")
+        print(f"  {row[0]}: {row[1]} matches, {row[2]} players, "
+              f"{row[3]} player-match lines")
     db.close()
 
 

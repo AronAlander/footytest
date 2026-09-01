@@ -280,7 +280,15 @@ Accents are folded, so "martinez" finds Martínez.
   saves, duels and aerial duels won, successful dribbles, fouls and cards.
   Rows nobody wins — tackles, blocks, clearances, saves, fouls, cards — are
   drawn faint and unbolded, because all of them climb with time spent
-  defending. Those extra columns are stored by `fetch_fotmob.py`, which keeps
+  defending. Under that, again Allsvenskan only, **who played**: both
+  squads, starters first and then whoever came off the bench, with FotMob's
+  rating out of 10, minutes, goals, assists, xG, xA and shots for that match
+  alone, keepers' saves and goals prevented on their own line, and a name
+  opening that player's season card wherever the page holds one — the match
+  feed and the season squads share FotMob's player ids, so no name matching
+  is involved. Understat publishes nothing per player per match, so the
+  big five have no equivalent. Those extra columns are stored by
+  `fetch_fotmob.py`, which keeps
   a `stats_version` per match and re-fetches any match stored under an older
   one, newest first and capped per run — the live database lives in the
   Actions cache and is never rebuilt, so that is the only way a new column
