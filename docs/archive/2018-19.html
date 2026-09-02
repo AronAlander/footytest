@@ -499,6 +499,38 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
   font-size: 12px; color: var(--text-secondary); }
 .sm-key span { display: inline-flex; align-items: center; gap: 5px; }
 .sm-key svg { width: 13px; height: 13px; overflow: visible; }
+/* the expected-goals race: the same shots along the clock. The viewBox is
+   620 wide and the chart is capped at 620px, so a user unit is a pixel at
+   full size and the type inside is the size it says it is */
+.xr-chart { width: 100%; max-width: 620px; height: auto; display: block;
+  margin-top: 2px; }
+.xr-grid, .xr-tick { stroke: var(--border); stroke-width: 1; }
+.xr-ht { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.xr-ax { fill: var(--muted); font-size: 10px; }
+.xr-ay { text-anchor: end; }
+.xr-at { text-anchor: middle; }
+.xr-line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.xr-h { stroke: var(--accent); }
+.xr-a { stroke: var(--away); }
+/* the goal sits on its own line and must read as a point on it, so it is
+   ringed in the card colour rather than left to touch the curve */
+.xr-goal { stroke: var(--card); stroke-width: 1.3; }
+.xr-gh { fill: var(--accent); }
+.xr-ga { fill: var(--away); }
+.xr-goal[data-pid] { cursor: pointer; }
+.xr-key { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 4px 2px 3px;
+  font-size: 12px; color: var(--text-secondary); }
+.xr-key span { display: inline-flex; align-items: center; gap: 6px; }
+.xr-key svg { width: 16px; height: 6px; overflow: visible; }
+/* the type inside the chart is in user units, so it shrinks with the chart:
+   left at one size it renders under 5px on a phone. These sizes are picked
+   against the width the card actually gets -- roughly the viewport less 90px,
+   capped at 620 -- to keep the labels between 8 and 14 real pixels */
+@media (max-width: 710px) { .xr-ax { font-size: 14px; } }
+@media (max-width: 500px) {
+  .xr-ax { font-size: 19px; }
+  .xr-t2 { display: none; }   /* 15 and 75: the quarter marks go first */
+}
 /* the rest of the stat line: everything the feed measured that does not
    answer "who was better", which is most of it */
 .ms-more { margin: 10px 2px 0; }
@@ -2338,6 +2370,144 @@ window.__navRestoring = true;
       'tap one for who took it, when, and what it was worth.</p>';
   }
 
+  // ---- when the chances came --------------------------------------------
+  // the same shots as the map, read along the clock instead of across the
+  // pitch. Each step is one attempt and the height it adds is what that
+  // chance was worth, so the shape carries what two totals cannot: which
+  // side was on top, for how long, and whether the goals came with the run
+  // of play or against it.
+  const RACE_W = 620, RACE_H = 176;
+  const RACE_L = 32, RACE_R = 10, RACE_T = 10, RACE_B = 24;
+
+  // esc is enough for text between tags, and every other use of a club
+  // name in this file is text. An attribute is quoted, so a name with an
+  // apostrophe in it would end the attribute early and hand the rest of
+  // itself to the parser as markup
+  const escA = (v) => esc(v).replace(/'/g, '&#39;');
+
+  function raceShots(rows) {
+    // the minute as the payload ships it: 63, or '90+4' in stoppage time
+    return (rows || []).map((s) => {
+      const parts = String(s[1] == null ? '' : s[1]).split('+');
+      const base = parseInt(parts[0], 10);
+      const add = parts.length > 1 ? parseInt(parts[1], 10) : 0;
+      return { base: base, add: add || 0, shot: s };
+    }).filter((e) => !isNaN(e.base));
+  }
+
+  function raceBlock(m) {
+    const rows = (D.shots || {})[m.mid];
+    if (!rows) return '';
+    const sides = [raceShots(rows[0]), raceShots(rows[1])];
+    if (!sides[0].length && !sides[1].length) return '';
+    // how long the first half ran is known only from shots struck in its
+    // stoppage time, which is all this needs: the half has to be long
+    // enough to hold the last of them, or a shot on 45+3 would be drawn on
+    // top of one from the 48th minute of the second half
+    let added = 0;
+    sides.forEach((v) => v.forEach((e) => {
+      if (e.base <= 45 && e.add > added) added = e.add;
+    }));
+    const half = 45 + added;
+    const clock = (e) => (e.base <= 45 ? e.base + e.add
+                                       : half + (e.base - 45) + e.add);
+    let end = half + 45, high = 0;
+    const series = sides.map((v) => {
+      const pts = [];
+      let sum = 0;
+      v.slice().sort((p, q) => clock(p) - clock(q)).forEach((e) => {
+        sum += Math.max(0, e.shot[4] || 0);
+        const x = clock(e);
+        if (x > end) end = x;
+        pts.push({ x: x, y: sum, shot: e.shot });
+      });
+      if (sum > high) high = sum;
+      return pts;
+    });
+    // a shot in the last minute of stoppage time would otherwise rise
+    // exactly on the right-hand edge, leaving the number it ends on no
+    // horizontal run to be read against
+    end += 1.5;
+    // both lines share one scale, which is the whole point of drawing them
+    // together; the floor keeps a goalless half-chance of a match from
+    // being blown up into a thriller
+    const top = Math.max(0.5, Math.ceil(high * 2) / 2);
+    const sx = (v) => (RACE_L + (v / end) * (RACE_W - RACE_L - RACE_R)).toFixed(1);
+    const syn = (v) => RACE_H - RACE_B - (v / top) * (RACE_H - RACE_T - RACE_B);
+    const sy = (v) => syn(v).toFixed(1);
+
+    let grid = '';
+    // one step throughout: a coarser step above 3 left a half-integer top
+    // with no line and no number against it, which is the one value on the
+    // chart a reader is most likely to want
+    const gstep = 0.5;
+    for (let v = 0; v <= top + 1e-9; v += gstep) {
+      grid += "<line class='xr-grid' x1='" + sx(0) + "' y1='" + sy(v) +
+        "' x2='" + sx(end) + "' y2='" + sy(v) + "'/>" +
+        "<text class='xr-ax xr-ay' x='" + (RACE_L - 5) + "' y='" +
+        (syn(v) + 3.4).toFixed(1) + "'>" + num(v, 1) + '</text>';
+    }
+    let ticks = '';
+    [[15, '15', 1], [30, '30', 0], [half, 'HT', 0], [half + 15, '60', 0],
+     [half + 30, '75', 1], [half + 45, '90', 0]].forEach((t) => {
+      ticks += "<line class='" + (t[1] === 'HT' ? 'xr-ht' : 'xr-tick') +
+        "' x1='" + sx(t[0]) + "' y1='" + sy(top) + "' x2='" + sx(t[0]) +
+        "' y2='" + sy(0) + "'/>" +
+        "<text class='xr-ax xr-at" + (t[2] ? ' xr-t2' : '') + "' x='" +
+        sx(t[0]) + "' y='" + (RACE_H - 8) + "'>" + t[1] + '</text>';
+    });
+
+    const path = (pts) => {
+      let d = 'M' + sx(0) + ' ' + sy(0);
+      pts.forEach((p) => { d += 'H' + sx(p.x) + 'V' + sy(p.y); });
+      return d + 'H' + sx(end);
+    };
+    const live = typeof window.hasPlayer === 'function';
+    const goals = (pts, cls) => pts.filter((p) => p.shot[5] === 'g')
+      .map((p) => {
+        const s = p.shot;
+        const pid = live && s[8] && window.hasPlayer(window.CUR_LG, s[8])
+          ? " data-pid='" + escA(s[8]) + "' data-lg='" + escA(window.CUR_LG) + "'"
+          : '';
+        return "<circle class='xr-goal " + cls + "' cx='" + sx(p.x) + "' cy='" +
+          sy(p.y) + "' r='3.4'" + pid + '><title>' +
+          esc(s[0] + (s[1] == null ? '' : ' ' + s[1] + "'") + ' \u2014 ' +
+              num(s[4], 2) + ' xG') + '</title></circle>';
+      }).join('');
+
+    // the same sums the map's captions carry, as long as every shot has a
+    // minute to be placed at -- none is missing one in 3,507 stored rows,
+    // and a shot without one could not be drawn here at all
+    const tot = series.map((p) => (p.length ? p[p.length - 1].y : 0));
+    const swatch = (cls, name, v) =>
+      "<span><svg viewBox='0 0 16 6'><line class='xr-line " + cls +
+      "' x1='0' y1='3' x2='16' y2='3'/></svg>" + esc(name) + ' ' +
+      num(v, 2) + ' xG</span>';
+    const owns = (rows[2] || []).reduce((t, v) => t + (v || 0), 0);
+    return "<h4 class='fx-h'>When the chances came</h4>" +
+      "<div class='xr-key'>" + swatch('xr-h', m.home, tot[0]) +
+      swatch('xr-a', m.away, tot[1]) + '</div>' +
+      "<svg class='xr-chart' viewBox='0 0 " + RACE_W + ' ' + RACE_H +
+      "' role='img' aria-label='" + escA('Expected goals through the match: ' +
+        m.home + ' ' + num(tot[0], 2) + ', ' + m.away + ' ' + num(tot[1], 2)) +
+      "'>" + grid + ticks +
+      "<path class='xr-line xr-h' d='" + path(series[0]) + "'/>" +
+      "<path class='xr-line xr-a' d='" + path(series[1]) + "'/>" +
+      goals(series[0], 'xr-gh') + goals(series[1], 'xr-ga') + '</svg>' +
+      "<p class='meta dim'>Each step is one shot and the height it adds is " +
+      'what that chance was worth, so a line that climbs steeply was a side ' +
+      'creating something and a flat stretch was a quiet twenty minutes. A ' +
+      'filled dot is a goal \u2014 hover or tap it for who scored and what ' +
+      'the chance was worth, and where the page holds their season card it ' +
+      'opens it. Stoppage time is played out rather than folded back into ' +
+      'the 45th and 90th minute, so a shot on 45+3 is not drawn on top of ' +
+      'one from the 48th; the dashed line sits after the last shot of the ' +
+      'first half, which is as much of that half as the feed records.' +
+      (owns ? ' An own goal is on neither line: the feed gives it no ' +
+        'expected goals at all, so the scoreline can be ahead of the dots.'
+            : '') + '</p>';
+  }
+
   function squadsBlock(m) {
     const rows = (D.squads || {})[m.mid];
     if (!rows) return '';
@@ -2394,7 +2564,7 @@ window.__navRestoring = true;
       // the stat line opens with the same expected goals the headline
       // carries, so only one of the two is ever shown
       (ms ? "<h4 class='fx-h'>Match stats</h4>" + ms : xg) +
-      shotsBlock(m) + squadsBlock(m) +
+      shotsBlock(m) + raceBlock(m) + squadsBlock(m) +
       // the forecast supersedes the xG-difference verdict rather than sitting
       // beside it: same question, and this one answers it properly
       (m.fc ? "<h4 class='fx-h'>What the chances deserved</h4>" + deservedBox(m)
