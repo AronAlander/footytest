@@ -522,6 +522,39 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
   font-size: 12px; color: var(--text-secondary); }
 .xr-key span { display: inline-flex; align-items: center; gap: 6px; }
 .xr-key svg { width: 16px; height: 6px; overflow: visible; }
+/* a season of shots: two pitches per club, drawn in metres like the
+   match map, so a dot in one is the same size as the same chance in the
+   other */
+.sp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 30px; }
+@media (max-width: 900px) { .sp-grid { grid-template-columns: 1fr; } }
+/* the row gap only ever applies once the pair has stacked, where 2px
+   left the second pitch's heading sitting on the first one's caption */
+.sp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+/* every other twin-pitch layout in this file stacks on a phone, and these
+   have to as well: side by side at 390px each pitch is 157px, where the
+   floor dot is under two pixels across. It has to come after the rule it
+   overrides -- a media query carries no extra specificity of its own */
+@media (max-width: 720px) { .sp-pair { grid-template-columns: 1fr; } }
+.sp-name { font-weight: 600; margin: 0 0 6px; font-size: 13.5px; }
+.sp-name .rank { color: var(--text-secondary); font-weight: 600;
+  font-size: 11px; }
+.sp-side { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); font-weight: 600; margin: 0 0 3px; }
+.sp-pitch { width: 100%; height: auto; display: block; }
+.sp-turf { fill: var(--row-alt); }
+.sp-line { fill: none; stroke: var(--border); stroke-width: .42; }
+.sp-goal { stroke: var(--muted); stroke-width: .8; }
+.sp-spot { fill: var(--border); }
+/* the cloud is hollow so a hundred overlapping shots still read as a
+   hundred, and the goals inside it are solid so they read as goals */
+.sp-pitch circle { fill: none; stroke: var(--muted); stroke-width: .3;
+  stroke-opacity: .8; }
+.sp-pitch circle.sp-g { fill: #0a7d24; stroke: var(--card); }
+.sp-cap { margin: 3px 0 0; font-size: 11px; }
+.sp-legend { margin: 0 0 14px; font-size: 12px; color: var(--text-secondary); }
+.sp-key { width: 11px; height: 11px; vertical-align: -1px; overflow: visible; }
+.sp-kh { fill: none; stroke: var(--muted); stroke-width: .9; }
+.sp-kg { fill: #0a7d24; stroke: var(--card); stroke-width: .9; }
 /* the type inside the chart is in user units, so it shrinks with the chart:
    left at one size it renders under 5px on a phone. These sizes are picked
    against the width the card actually gets -- roughly the viewport less 90px,
