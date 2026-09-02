@@ -571,6 +571,39 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
   font-size: 12px; color: var(--text-secondary); }
 .xr-key span { display: inline-flex; align-items: center; gap: 6px; }
 .xr-key svg { width: 16px; height: 6px; overflow: visible; }
+/* a season of shots: two pitches per club, drawn in metres like the
+   match map, so a dot in one is the same size as the same chance in the
+   other */
+.sp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 30px; }
+@media (max-width: 900px) { .sp-grid { grid-template-columns: 1fr; } }
+/* the row gap only ever applies once the pair has stacked, where 2px
+   left the second pitch's heading sitting on the first one's caption */
+.sp-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+/* every other twin-pitch layout in this file stacks on a phone, and these
+   have to as well: side by side at 390px each pitch is 157px, where the
+   floor dot is under two pixels across. It has to come after the rule it
+   overrides -- a media query carries no extra specificity of its own */
+@media (max-width: 720px) { .sp-pair { grid-template-columns: 1fr; } }
+.sp-name { font-weight: 600; margin: 0 0 6px; font-size: 13.5px; }
+.sp-name .rank { color: var(--text-secondary); font-weight: 600;
+  font-size: 11px; }
+.sp-side { font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted); font-weight: 600; margin: 0 0 3px; }
+.sp-pitch { width: 100%; height: auto; display: block; }
+.sp-turf { fill: var(--row-alt); }
+.sp-line { fill: none; stroke: var(--border); stroke-width: .42; }
+.sp-goal { stroke: var(--muted); stroke-width: .8; }
+.sp-spot { fill: var(--border); }
+/* the cloud is hollow so a hundred overlapping shots still read as a
+   hundred, and the goals inside it are solid so they read as goals */
+.sp-pitch circle { fill: none; stroke: var(--muted); stroke-width: .3;
+  stroke-opacity: .8; }
+.sp-pitch circle.sp-g { fill: #0a7d24; stroke: var(--card); }
+.sp-cap { margin: 3px 0 0; font-size: 11px; }
+.sp-legend { margin: 0 0 14px; font-size: 12px; color: var(--text-secondary); }
+.sp-key { width: 11px; height: 11px; vertical-align: -1px; overflow: visible; }
+.sp-kh { fill: none; stroke: var(--muted); stroke-width: .9; }
+.sp-kg { fill: #0a7d24; stroke: var(--card); stroke-width: .9; }
 /* the type inside the chart is in user units, so it shrinks with the chart:
    left at one size it renders under 5px on a phone. These sizes are picked
    against the width the card actually gets -- roughly the viewport less 90px,
@@ -7388,12 +7421,233 @@ def metric_glossary():
     )
 
 
+# --------------------------------------------------- a season of shots
+
+# the same furniture as the match map, in metres, on the last 36 of them
+SHOT_PITCH = (
+    "<rect class='sp-turf' x='0' y='0' width='68' height='36'/>"
+    "<rect class='sp-line' x='13.84' y='0' width='40.32' height='16.5'/>"
+    "<rect class='sp-line' x='24.84' y='0' width='18.32' height='5.5'/>"
+    "<circle class='sp-spot' cx='34' cy='11' r='.32'/>"
+    "<path class='sp-line' d='M26.69 16.5 Q34 23.8 41.31 16.5'/>"
+    "<line class='sp-goal' x1='30.34' y1='.4' x2='37.66' y2='.4'/>"
+)
+# a corner, a free kick, an attacking throw, and the feed's catch-all for the
+# rest of a set piece. A penalty is a stopped ball too and is deliberately
+# not here: one is worth about eight corners, so a single spot kick would
+# move a club's share further than a season of corners does
+SET_PLAY = ("FromCorner", "SetPiece", "FreeKick", "ThrowInSetPiece")
+
+
+def _season_caption(shots):
+    """What a season of shots comes to, in one line."""
+    total = sum(s[2] for s in shots)
+    goals = sum(1 for s in shots if s[3])
+    dead = sum(s[2] for s in shots if s[4] in SET_PLAY)
+    # the share of the chances that began at a stopped ball -- the one thing
+    # in this caption the picture above it cannot show, because a corner and
+    # a counter can end with a shot from the same blade of grass
+    dead_pct = round(100 * dead / total) if total else 0
+    return (
+        f"{len(shots)} " + ("shot" if len(shots) == 1 else "shots")
+        + f" \u00b7 {goals} " + ("goal" if goals == 1 else "goals")
+        + f" \u00b7 {total:.1f} xG, {total / len(shots):.3f} a shot"
+        f" \u00b7 {dead_pct}% of it from set plays"
+    )
+
+
+def _season_pitch(shots, club, label, blurb):
+    """One club, one end of the pitch, every shot it has to show for a season.
+
+    A dot per shot, its area its expected goals by the same rule the match
+    map uses, at a smaller scale because there are two hundred of them here
+    and a dozen there, and down to a floor that keeps a half-chance visible.
+    Goals are filled and drawn last, biggest first within the group, so a
+    tap-in is never lost under the shot from thirty yards that came before
+    it. No dot carries a title: three and a half thousand of them would cost
+    more bytes than the pictures, and the match report is where a single
+    shot has a name.
+    """
+    if not shots:
+        # the other club in one of this club's matches sent no usable shots,
+        # every time -- rather than an empty column, say so
+        return (f"<p class='sp-side'>{escape(label)}</p>"
+                "<p class='sp-cap meta dim'>Nothing stored.</p>")
+    dots = []
+    for x, y, xg, goal, _situation in sorted(shots, key=lambda s: (s[3], -s[2])):
+        cy = max(1.1, min(34.9, 105 - x))
+        cx = max(1.1, min(66.9, y))
+        radius = max(0.35, 2.6 * math.sqrt(max(0.0, xg)))
+        dots.append(
+            ("<circle class='sp-g'" if goal else "<circle")
+            + f" cx='{cx:.1f}' cy='{cy:.1f}' r='{radius:.1f}'/>"
+        )
+    caption = _season_caption(shots)
+    # the label names the club and what the picture is; the numbers are read
+    # out from the caption below it, which is a paragraph either way
+    return (
+        f"<p class='sp-side'>{escape(label)}</p>"
+        "<svg class='sp-pitch' viewBox='0 0 68 36' role='img' aria-label="
+        f"\"{escape(club)} \u2014 {escape(blurb)}\">"
+        f"{SHOT_PITCH}{''.join(dots)}</svg>"
+        f"<p class='sp-cap meta dim'>{caption}</p>"
+    )
+
+
+def shot_profile(db, league):
+    """Where a club shoots from, and where it lets others shoot.
+
+    Reads fotmob_match_shots, which the season scoping shadows, so a frozen
+    archive page gets its own season's shots -- or, for every season before
+    this one, since the table starts with the shot map, none at all, and the
+    block disappears rather than borrowing a season it is not about.
+    """
+    if league in UNDERSTAT_LEAGUES:
+        return ""      # Understat publishes no shot locations for the big five
+    if not db.execute(
+        "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?",
+        ("fotmob_match_shots",),
+    ).fetchone():
+        return ""      # a database from before the table existed
+    rows = db.execute(
+        """SELECT match_id, team, x, y, xg, outcome, situation
+           FROM fotmob_match_shots
+           WHERE league = ? AND is_own_goal = 0
+             AND x IS NOT NULL AND y IS NOT NULL
+           ORDER BY match_id, team""",
+        (league,),
+    ).fetchall()
+    if not rows:
+        return ""
+    # own goals are excluded above: an own goal is nobody's shot at the goal
+    # they were attacking, and the feed gives it no expected goals to draw
+    sides = {}
+    for mid, team, *_ in rows:
+        sides.setdefault(mid, set()).add(unescape(team or ""))
+    took, faced = {}, {}
+    for mid, team, x, y, xg, outcome, situation in rows:
+        club = unescape(team or "")
+        shot = (x, y, xg or 0.0, outcome == "Goal", situation or "")
+        took.setdefault(club, []).append(shot)
+        other = sides.get(mid, set()) - {club}
+        # a match whose other side never came back would otherwise credit its
+        # shots to nobody, or to each of two clubs
+        if len(other) == 1:
+            faced.setdefault(other.pop(), []).append(shot)
+
+    order = [unescape(r[0]) for r in db.execute(
+        "SELECT team FROM understat_team_matches WHERE league = ? "
+        "GROUP BY team ORDER BY SUM(pts) DESC, team", (league,)
+    )]
+    clubs = [c for c in order if c in took]
+    clubs += sorted(c for c in took if c not in order)
+    if not clubs:
+        return ""
+
+    cells = "".join(
+        "<div class='sp-club'><p class='sp-name'>"
+        f"<span class='rank'>{i}</span> {escape(club)}</p>"
+        "<div class='sp-pair'><div>"
+        + _season_pitch(took[club], club, "Took", "where its shots came from")
+        + "</div><div>"
+        + _season_pitch(faced.get(club, []), club, "Faced",
+                        "where the shots against it came from")
+        + "</div></div></div>"
+        for i, club in enumerate(clubs, 1)
+    )
+    swatch = lambda cls: (
+        f"<svg class='sp-key' viewBox='0 0 10 10'><circle class='{cls}' "
+        "cx='5' cy='5' r='3.6'/></svg>"
+    )
+    # named rather than called "this season": this block will be built for
+    # a finished season the day one of these pages is frozen
+    season = db.execute(
+        "SELECT MAX(season) FROM fotmob_match_shots WHERE league = ?",
+        (league,),
+    ).fetchone()[0]
+    drawn = len({r[0] for r in rows})
+    played = db.execute(
+        "SELECT COUNT(*) FROM fotmob_team_matches "
+        "WHERE league = ? AND home_away = 'h'", (league,),
+    ).fetchone()[0]
+    # a match whose shotmap has not arrived is not in these pictures, and
+    # saying so is cheaper than a caveat that is wrong once it catches up
+    missing = (
+        f" Drawn from the {drawn} of {played} matches whose shots the feed "
+        "has sent so far."
+        if played and drawn < played else ""
+    )
+    legend = (
+        f"<p class='sp-legend'>{escape(league)} {escape(str(season))}, in "
+        "league order. Both pitches are the last 36 metres, attacking "
+        "upwards. " + swatch("sp-kh") + " one dot is one shot and its area "
+        "is the chance it was, down to a floor that keeps the faintest "
+        "visible; " + swatch("sp-kg") + " filled means it went in. " +
+        (f"All {len(clubs)} clubs are" if len(clubs) > 1 else "Every club is")
+        + " drawn to one scale, so a bigger cloud really is more shooting."
+        + missing + "</p>"
+    )
+    # the extremes are read off the data rather than written down, because a
+    # number in prose is wrong by the following Saturday. Clubs with no
+    # expected goals at all are left out: one of them is a division by zero
+    # two sentences later, and on the first weekend of a season there can be
+    # several
+    per_shot = {c: sum(s[2] for s in v) / len(v) for c, v in took.items()
+                if sum(s[2] for s in v) > 0}
+    spread = ""
+    if len(per_shot) > 1:
+        best = max(per_shot, key=lambda c: per_shot[c])
+        worst = min(per_shot, key=lambda c: per_shot[c])
+        # rounded first, so the printed rate is the one a reader gets by
+        # dividing the printed average into one
+        hi, lo = round(per_shot[best], 3), round(per_shot[worst], 3)
+        spread = (
+            " A side that works the ball into the six-yard box and one that "
+            "shoots from 25 metres can take the same number of shots and be "
+            f"doing entirely different things: {escape(best)}\u2019s average "
+            f"attempt is worth {hi:.3f} expected goals and "
+            f"{escape(worst)}\u2019s {lo:.3f}, which is a chance every "
+            f"{round(1 / hi)} shots against one every {round(1 / lo)}."
+        )
+    about = (
+        "<p><strong>What it shows.</strong> Every shot a club took over the "
+        "season named above on the left, every shot it faced on the right, "
+        "each drawn where it was struck. The match reports draw one match at "
+        "a time; this is the same rows read the other way round, which is "
+        "where habits show up rather than afternoons. A dot\u2019s area is "
+        "its expected goals \u2014 a dot twice as wide was four times the "
+        "chance \u2014 down to a floor that keeps the faintest half-chance "
+        "visible, and a filled dot is one that went in.</p>"
+        "<p><strong>How to read it.</strong> Look at where the cloud sits "
+        "before you look at how big it is." + spread + " The right-hand "
+        "pitch asks the same question of the defence \u2014 a back line that "
+        "concedes only from distance is doing its job even when the shot "
+        "count against it looks bad.</p>"
+        "<p>The set-play share in each caption is the share of the "
+        "<em>expected goals</em>, not of the shots, that began at a stopped "
+        "ball: a corner, a free kick, an attacking throw, or a set piece the "
+        "feed does not break down further. A penalty is a stopped ball too "
+        "and is deliberately not counted \u2014 one is worth about eight "
+        "corners, so a single spot kick would move a club\u2019s share "
+        "further than a season of corners does, and the Insights tab has a "
+        "block about penalties already.</p>"
+        "<p>Own goals are left out at both ends, as they are on the match "
+        "map \u2014 the feed records them at the other end of the pitch, under "
+        "the player who scored one, with no expected goals at all. This is "
+        "Allsvenskan only: Understat publishes no shot locations for the big "
+        "five, so there is nothing to draw for them.</p>"
+    )
+    return block("Shot profile — where a season's chances come from",
+                 f"<div class='chart-card'>{legend}"
+                 f"<div class='sp-grid'>{cells}</div></div>", about)
+
 def teams_panel(db, leagues, archive=False):
     tables = "".join(
         lgview(lg, xg_table(db, lg), i == 0) for i, lg in enumerate(leagues)
     )
     charts = "".join(
-        lgview(lg, style_scatter(db, lg) + rolling_sparklines(db, lg), i == 0)
+        lgview(lg, style_scatter(db, lg) + rolling_sparklines(db, lg) +
+               shot_profile(db, lg), i == 0)
         for i, lg in enumerate(leagues)
     )
     teams_by_lg = {lg: load_teams(db, lg) for lg in leagues}
@@ -7591,12 +7845,26 @@ def scope_to_current_season(db):
             "WHERE f.season = (SELECT MAX(u.season) FROM main.fotmob_team_matches u "
             "WHERE u.league = f.league)"
         )
+        # fotmob_match_shots joins them now that a block reads it a season
+        # at a time. The match reports go on asking main. for named match
+        # ids, which is unaffected either way
         for table in ("fotmob_players", "fotmob_team_matches"):
             db.execute(
                 f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} t "
                 f"WHERE t.season = (SELECT MAX(u.season) FROM main.{table} u "
                 "WHERE u.league = t.league)"
             )
+        # the shots anchor on fotmob_team_matches, not on themselves. A match
+        # can be stored before its shotmap is -- a feed that answers with an
+        # empty shotmap writes no shot rows at all -- and a table asked for
+        # its own newest season would then answer with the whole of the
+        # previous one, drawn under this season's heading
+        db.execute(
+            "CREATE TEMP VIEW fotmob_match_shots AS "
+            "SELECT * FROM main.fotmob_match_shots t WHERE t.season = "
+            "(SELECT MAX(u.season) FROM main.fotmob_team_matches u "
+            " WHERE u.league = t.league)"
+        )
     else:
         db.execute("CREATE TEMP VIEW understat_team_matches AS " + understat_current)
 
@@ -7607,7 +7875,8 @@ def scope_to_archive_season(db, season):
     db.execute("CREATE TEMP VIEW matches AS SELECT * FROM main.matches WHERE 0")
     db.execute("CREATE TEMP VIEW standings AS SELECT * FROM main.standings WHERE 0")
     if fotmob_available(db):
-        for table in ("fotmob_players", "fotmob_team_matches"):
+        for table in ("fotmob_players", "fotmob_team_matches",
+                      "fotmob_match_shots"):
             db.execute(
                 f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} WHERE 0"
             )
@@ -7664,7 +7933,8 @@ def scope_to_fotmob_season(db, league, season):
         "       fetched_at "
         f"FROM main.fotmob_team_matches WHERE {where}"
     )
-    for table in ("fotmob_players", "fotmob_team_matches"):
+    for table in ("fotmob_players", "fotmob_team_matches",
+                  "fotmob_match_shots"):
         db.execute(f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} "
                    f"WHERE {where}")
 

@@ -326,7 +326,17 @@ Accents are folded, so "martinez" finds Martínez.
   (bars split by league-percentile share), this season's actual meetings between
   the clubs with the score and both sides' xG, last-five form chips, points and
   npxGD split by home/away, and both teams' rolling form curves overlaid on one
-  chart.
+  chart. Allsvenskan additionally gets a **shot profile**: two pitches per
+  club, every shot it took on one and every shot it faced on the other, each
+  dot placed where the shot was struck and sized by area on its expected
+  goals, filled where it went in. It is the match map's rows read a season at
+  a time, so it shows habits rather than afternoons — who works the ball into
+  the six-yard box and who shoots from 25 metres, and the same question asked
+  of the defence. Each caption carries the one thing the picture cannot: the
+  share of the chances that began at a corner, a free kick or an attacking
+  throw. Penalties are left out of that share — one is worth about eight
+  corners, and a single spot kick would move it further than a season of
+  corners does.
 - **Players** — an explorer over every tracked player (~590): search, team /
   position / minutes filters, a per-90 toggle, and click-to-sort columns for
   goals, xG, G−xG, assists, xA, shots, key passes, xGChain, xGBuildup and more.
