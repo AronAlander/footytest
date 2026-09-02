@@ -291,7 +291,14 @@ Accents are folded, so "martinez" finds Martínez.
   that discounts a shot taken straight after a save. Own goals are left off — the feed puts them at the other end under
   the player who scored one, with no expected goals — and counted in the
   caption of the side they were given to, so the picture still adds up to
-  the scoreline. Under that, again Allsvenskan only, **who played**: both
+  the scoreline. Then **when the chances came**: the same shots along the
+  clock, one line per side climbing by each shot's xG at the minute it was
+  struck, both to the same scale, with a filled dot for a goal. Stoppage
+  time is played out rather than folded back into the 45th and 90th minute,
+  so a shot on 45+3 is not drawn on top of one from the 48th; the halftime
+  line sits after the last shot of the first half, which is as much of that
+  half as the feed records. Under that, again Allsvenskan only,
+  **who played**: both
   squads, starters first and then whoever came off the bench, with FotMob's
   rating out of 10, minutes, goals, assists, xG, xA and shots for that match
   alone, keepers' saves and goals prevented on their own line, and a name
