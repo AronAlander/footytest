@@ -604,6 +604,44 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .sp-key { width: 11px; height: 11px; vertical-align: -1px; overflow: visible; }
 .sp-kh { fill: none; stroke: var(--muted); stroke-width: .9; }
 .sp-kg { fill: #0a7d24; stroke: var(--card); stroke-width: .9; }
+.dm-wrap { max-width: 640px; margin: 0 auto 4px; }
+.dm-ylab, .dm-xlab { font-size: 11px; color: var(--text-secondary); }
+.dm-ylab { margin: 0 0 2px; }
+.dm-xlab { margin: 0; text-align: center; }
+.dm-sc { width: 100%; height: auto; display: block; }
+.dm-gr { stroke: var(--border); stroke-width: 1; }
+.dm-ax { font-size: 11px; fill: var(--muted); }
+.dm-lb { font-size: 11px; fill: var(--text-primary); font-weight: 600;
+  paint-order: stroke; stroke: var(--card); stroke-width: 3px;
+  stroke-linejoin: round; }
+.dm-sc circle { stroke: var(--card); stroke-width: .6; fill-opacity: .68; }
+.dm-p1 { fill: var(--accent); }
+.dm-p2 { fill: var(--win); }
+.dm-p3 { fill: var(--away); }
+.dm-key { margin: 8px 0 0; font-size: 12px; color: var(--text-secondary);
+  text-align: center; }
+.dm-k { margin: 0 9px; white-space: nowrap; }
+.dm-k i { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: 5px; vertical-align: 0; }
+.dm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 30px;
+  margin-top: 18px; }
+.dm-half h4 { margin: 0 0 2px; font-size: 13px; }
+.dm-blurb { margin: 0 0 6px; font-size: 11.5px; color: var(--text-secondary); }
+.dm-half table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dm-half td { padding: 3px 6px; border-bottom: 1px solid var(--border); }
+.dm-bar { position: relative; display: inline-block; width: 62px; height: 9px;
+  background: var(--row-alt); border-radius: 2px; vertical-align: middle; }
+.dm-bar i { position: absolute; left: 0; top: 1px; bottom: 1px;
+  border-radius: 2px; }
+.dm-bar i.dm-p1 { background: var(--accent); }
+.dm-bar i.dm-p2 { background: var(--win); }
+.dm-bar i.dm-p3 { background: var(--away); }
+.dm-n { display: inline-block; min-width: 38px; text-align: right; }
+/* the axis type is in user units and shrinks with the chart, exactly as the
+   race chart's does; these keep it between 8 and 14 real pixels */
+@media (max-width: 710px) { .dm-ax, .dm-lb { font-size: 14px; } }
+@media (max-width: 620px) { .dm-grid { grid-template-columns: 1fr; } }
+@media (max-width: 500px) { .dm-ax, .dm-lb { font-size: 19px; } }
 /* the type inside the chart is in user units, so it shrinks with the chart:
    left at one size it renders under 5px on a phone. These sizes are picked
    against the width the card actually gets -- roughly the viewport less 90px,
@@ -7991,6 +8029,256 @@ def keeper_table(db, league):
                  table, about)
 
 
+# --------------------------------------------- the outfielders' board
+
+DEF_MIN_MINUTES = 450   # the same bar the goalkeepers and the attackers use
+
+# the feed files a player on a line rather than in a position: 1 is the back
+# line, 2 the middle, 3 the front, 11 the goalkeeper
+DEF_LINES = (("1", "Defenders"), ("2", "Midfielders"), ("3", "Forwards"))
+
+DEF_JOBS = (
+    ("win", "Ball-winning", "Tackles and interceptions per 90 \u2014 taking "
+     "it off a man who has it."),
+    ("rec", "Loose balls", "Recoveries per 90 \u2014 second balls, poor "
+     "touches and passes cut out before anyone was tackled."),
+    ("box", "Defending the box", "Clearances and blocks per 90 \u2014 the "
+     "work you only do near your own goal."),
+    ("air", "In the air", "Aerial duels won per 90."),
+)
+
+
+def defender_rows(db, league, min_minutes=DEF_MIN_MINUTES):
+    """One row per outfielder, aggregated from his match rows.
+
+    Every figure here is a count the feed gives whole, so the aggregation is
+    a sum and the only judgement is what to do with a match line that is
+    missing one. It is left out and counted, as on the keeper board: the six
+    counts are present on every played outfield line on file today, and a
+    line that arrives without one is a line the parser did not understand
+    rather than a match in which nobody made a tackle.
+
+    A player's line is the one he was named on most often -- 39 men have
+    played on more than one this season -- and his club the one he has given
+    the most minutes to.
+    """
+    rows = db.execute(
+        """SELECT player_id, player_name, team, position, minutes,
+                  tackles, interceptions, clearances, blocks, recoveries,
+                  aerials_won
+           FROM fotmob_match_players
+           WHERE league = ? AND is_gk = 0 AND minutes > 0
+           ORDER BY player_id, match_id""",
+        (league,),
+    ).fetchall()
+    men, dropped = {}, 0
+    for (pid, name, team, pos, minutes, tk, it, cl, bl, rc, ae) in rows:
+        m = men.setdefault(str(pid), {
+            "name": unescape(name or ""), "clubs": {}, "lines": {},
+            "apps": 0, "minutes": 0.0, "win": 0.0, "rec": 0.0, "box": 0.0,
+            "air": 0.0, "dropped": 0,
+        })
+        if None in (pos, tk, it, cl, bl, rc, ae):
+            m["dropped"] += 1
+            dropped += 1
+            continue
+        m["clubs"][unescape(team or "")] = (
+            m["clubs"].get(unescape(team or ""), 0) + (minutes or 0))
+        m["lines"][pos] = m["lines"].get(pos, 0) + (minutes or 0)
+        m["apps"] += 1
+        m["minutes"] += minutes or 0
+        m["win"] += tk + it
+        m["rec"] += rc
+        m["box"] += cl + bl
+        m["air"] += ae
+    out = []
+    for m in men.values():
+        if m["minutes"] < min_minutes or not m["lines"]:
+            continue
+        per90 = 90 / m["minutes"]
+        out.append({
+            "name": m["name"],
+            # ties broken by name so two builds of the same data agree
+            "club": sorted(m["clubs"], key=lambda c: (-m["clubs"][c], c))[0],
+            "line": sorted(m["lines"], key=lambda p: (-m["lines"][p], p))[0],
+            "apps": m["apps"], "minutes": m["minutes"],
+            "dropped": m["dropped"],
+            "win": m["win"] * per90, "rec": m["rec"] * per90,
+            "box": m["box"] * per90, "air": m["air"] * per90,
+        })
+    out.sort(key=lambda m: (m["line"], m["name"]))
+    return out, dropped
+
+
+def _defensive_scatter(men):
+    """Every qualifying outfielder as a dot: what he does, not how well."""
+    W, H, L, R, T, B = 620, 400, 42, 16, 16, 34
+    xs = [m["win"] + m["rec"] for m in men]
+    ys = [m["box"] for m in men]
+    xmax = max(2.0, math.ceil(max(xs)))
+    ymax = max(2.0, math.ceil(max(ys)))
+    sx = lambda v: L + (v / xmax) * (W - L - R)
+    sy = lambda v: H - B - (v / ymax) * (H - T - B)
+    s = (f"<svg class='dm-sc' viewBox='0 0 {W} {H}' role='img' "
+         "aria-label='every outfielder placed by the kind of defending he "
+         "does'>")
+    for g in range(0, int(xmax) + 1, 2):
+        s += (f"<line class='dm-gr' x1='{sx(g):.1f}' y1='{T}' "
+              f"x2='{sx(g):.1f}' y2='{H - B}'/>"
+              f"<text class='dm-ax' x='{sx(g):.1f}' y='{H - B + 14}' "
+              f"text-anchor='middle'>{g}</text>")
+    for g in range(0, int(ymax) + 1, 2):
+        s += (f"<line class='dm-gr' x1='{L}' y1='{sy(g):.1f}' "
+              f"x2='{W - R}' y2='{sy(g):.1f}'/>"
+              f"<text class='dm-ax' x='{L - 6}' y='{sy(g) + 4:.1f}' "
+              f"text-anchor='end'>{g}</text>")
+    for m in men:
+        s += (f"<circle class='dm-p{m['line']}' "
+              f"cx='{sx(m['win'] + m['rec']):.1f}' cy='{sy(m['box']):.1f}' "
+              f"r='3.6'><title>{escape(m['name'])} \u00b7 "
+              f"{escape(m['club'])}</title></circle>")
+    # four names, so the reader can find his bearings without hovering
+    named, seen = [], set()
+    for key in ("box", None):
+        pick = sorted(men, key=lambda m: -(m["box"] if key else
+                                           m["win"] + m["rec"]))[:2]
+        for m in pick:
+            if m["name"] not in seen:
+                seen.add(m["name"])
+                named.append(m)
+    for m in named:
+        x, y = sx(m["win"] + m["rec"]), sy(m["box"])
+        anchor = "end" if x > W * .62 else "start"
+        s += (f"<text class='dm-lb' x='{x + (-7 if anchor == 'end' else 7):.1f}'"
+              f" y='{y + 3.5:.1f}' text-anchor='{anchor}'>"
+              f"{escape(m['name'])}</text>")
+    return s + "</svg>"
+
+
+def defensive_map(db, league):
+    """Where each outfielder does his defending, and who leads at each job."""
+    if league in UNDERSTAT_LEAGUES:
+        return ""      # Understat publishes nothing per player per match
+    if not db.execute(
+        "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?",
+        ("fotmob_match_players",),
+    ).fetchone():
+        return ""      # a database from before the table existed
+    men, dropped = defender_rows(db, league)
+    if len(men) < 8:
+        return ""      # too few for a picture to mean anything
+    key = "".join(
+        f"<span class='dm-k'><i class='dm-p{p}'></i>{lab} "
+        f"({sum(1 for m in men if m['line'] == p)})</span>"
+        for p, lab in DEF_LINES)
+    chart = (
+        "<div class='dm-wrap'>"
+        "<p class='dm-ylab'>defending your own box \u2014 clearances and "
+        "blocks per 90</p>"
+        + _defensive_scatter(men)
+        + "<p class='dm-xlab'>taking the ball off people \u2014 tackles, "
+        "interceptions and recoveries per 90</p>"
+        f"<p class='dm-key'>{key}</p></div>"
+    )
+    boards = ""
+    for field, title, blurb in DEF_JOBS:
+        best = sorted(men, key=lambda m: (-m[field], m["name"]))[:8]
+        top = best[0][field] or 1
+        body = ""
+        for i, m in enumerate(best, 1):
+            wide = round(62 * min(1, m[field] / top))
+            body += (
+                f"<tr><td class='num dim'>{i}</td>"
+                f"<td>{escape(m['name'])}</td>"
+                f"<td class='dim'>{escape(m['club'])}</td>"
+                f"<td class='num'><span class='dm-bar'>"
+                f"<i class='dm-p{m['line']}' style='width:{wide}px'></i></span>"
+                f"<span class='dm-n'>{m[field]:.2f}</span></td></tr>"
+            )
+        boards += (f"<div class='dm-half'><h4>{title}</h4>"
+                   f"<p class='dm-blurb'>{blurb}</p>"
+                   f"<table><tbody>{body}</tbody></table></div>")
+    note = ""
+    if dropped:
+        seen_short = sum(1 for m in men if m["dropped"])
+        note += (
+            f"<p class='meta dim'>{dropped} match "
+            + ("line" if dropped == 1 else "lines")
+            + " left out: the feed sent "
+            + ("it" if dropped == 1 else "them")
+            + " without one of the six counts, or without the line he "
+              "played on — which is a line the parser did not "
+              "understand rather than a quiet afternoon"
+            + (f", and {seen_short} of the players here "
+               + ("is" if seen_short == 1 else "are")
+               + " short by at least one." if seen_short else ".")
+            + "</p>"
+        )
+    lined = db.execute(
+        "SELECT COUNT(DISTINCT match_id) FROM fotmob_match_players "
+        "WHERE league = ? AND is_gk = 0 AND minutes > 0", (league,),
+    ).fetchone()[0]
+    played = db.execute(
+        "SELECT COUNT(*) FROM fotmob_team_matches "
+        "WHERE league = ? AND home_away = 'h'", (league,),
+    ).fetchone()[0]
+    if played and lined < played:
+        note += (
+            f"<p class='meta dim'>Built on the {lined} of {played} matches "
+            "whose teamsheets the feed has sent so far. These are per-90 "
+            "rates rather than totals, so a missing match costs precision "
+            "rather than position.</p>"
+        )
+    about = (
+        "<p><strong>What it shows.</strong> Every outfielder with "
+        f"{DEF_MIN_MINUTES}+ minutes, placed by the kind of defending he "
+        "does. Across the page: tackles, interceptions and loose balls "
+        "recovered \u2014 taking the ball off people, wherever on the pitch "
+        "he does it. Up the page: clearances and blocks, which is work you "
+        "only do in front of your own goal. The three colours are the line "
+        "the feed named him on, and they fall out of the picture rather "
+        "than being drawn into it.</p>"
+        "<p><strong>There is no best-defender number here, deliberately.</strong> "
+        "Add these counts into one score and you rank centre-backs by "
+        "clearances, because clearances are the biggest number in the sum "
+        "\u2014 which measures how often a side is pinned back, not how well "
+        "it defends. The two defenders furthest apart on this chart make the "
+        "point: one is near the top having barely tackled anyone, the other "
+        "far to the right having barely cleared. Both are doing their job. "
+        "So the four boards below rank on one real count each, and nothing "
+        "adds them up. The top of this chart and its right-hand edge are "
+        "occupied by different men, and neither is the better defender for "
+        "it.</p>"
+        "<p><strong>What it cannot tell you.</strong> Whether any of it was "
+        "any good. A tackle is not recorded as won or lost here, an "
+        "interception in your own six-yard box counts the same as one on "
+        "halfway, and a defender is not credited for the pass he made "
+        "unnecessary. Read it as a description of a role, and use the "
+        "attacking boards and the ratings for how well it was filled.</p>"
+        "<p><strong>The denominator is minutes on the pitch, not minutes "
+        "without the ball.</strong> A side that spends the afternoon chasing "
+        "defends more, and these rates carry that. It is a mild effect here "
+        "\u2014 the league runs from 41% possession to 61%, and a player's "
+        "action rate correlates with his side's possession at only about "
+        "\u22120.16 \u2014 but not a nil one: dividing instead by the time "
+        "his side spent out of possession moves the median man five places "
+        f"of {len(men)}, leaves the aerial eight untouched and replaces half "
+        "of the box-defending one. Minutes played is "
+        "kept because it is a denominator a reader can check, and because "
+        "this block sets out to say which job a man does rather than to rank "
+        "how well he does it. Discount a player from a side that never has "
+        "the ball accordingly.</p>"
+        "<p>Allsvenskan only, from the per-player match rows FotMob "
+        "publishes; Understat has no equivalent for the big five. A man who "
+        "has played on more than one line \u2014 39 have \u2014 is coloured by "
+        "the one he has played most, and one who changed clubs is filed "
+        "under whichever he has given the most minutes.</p>"
+    )
+    return block("Defending \u2014 who does which job",
+                 "<div class='card'>" + chart
+                 + f"<div class='dm-grid'>{boards}</div></div>" + note, about)
+
+
 def players_panel(db, leagues):
     finishing_about = (
         "<p><strong>What it shows.</strong> The players (≥900 minutes) whose goal tallies "
@@ -8033,7 +8321,7 @@ def players_panel(db, leagues):
                         player_table(fotmob_finishing_rows(db, lg, "ASC"), "G−xG"),
                         wasteful_about)
                 + "</div>"
-                + keeper_table(db, lg)
+                + keeper_table(db, lg) + defensive_map(db, lg)
             )
         return (
             "<div class='duo'>"

@@ -337,6 +337,14 @@ Accents are folded, so "martinez" finds Martínez.
   throw. Penalties are left out of that share — one is worth about eight
   corners, and a single spot kick would move it further than a season of
   corners does.
+- **Defending** (Players tab, Allsvenskan only) — every outfielder with 450+
+  minutes placed by the kind of defending he does: across, tackles,
+  interceptions and loose balls recovered; up, clearances and blocks. Three
+  colours for the three lines, and they fall out of the picture rather than
+  being drawn into it. Four leaderboards under it rank on one real count each
+  — deliberately, since adding the counts together would rank centre-backs by
+  clearances, which measures how often a side is pinned back rather than how
+  well it defends.
 - **Goalkeepers** (Players tab, Allsvenskan only) — every keeper with 450+
   minutes ranked by goals prevented: what the shots on target he faced were
   worth, minus what he let in. Save percentage is in the table beside it
