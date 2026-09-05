@@ -555,6 +555,44 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .sp-key { width: 11px; height: 11px; vertical-align: -1px; overflow: visible; }
 .sp-kh { fill: none; stroke: var(--muted); stroke-width: .9; }
 .sp-kg { fill: #0a7d24; stroke: var(--card); stroke-width: .9; }
+.dm-wrap { max-width: 640px; margin: 0 auto 4px; }
+.dm-ylab, .dm-xlab { font-size: 11px; color: var(--text-secondary); }
+.dm-ylab { margin: 0 0 2px; }
+.dm-xlab { margin: 0; text-align: center; }
+.dm-sc { width: 100%; height: auto; display: block; }
+.dm-gr { stroke: var(--border); stroke-width: 1; }
+.dm-ax { font-size: 11px; fill: var(--muted); }
+.dm-lb { font-size: 11px; fill: var(--text-primary); font-weight: 600;
+  paint-order: stroke; stroke: var(--card); stroke-width: 3px;
+  stroke-linejoin: round; }
+.dm-sc circle { stroke: var(--card); stroke-width: .6; fill-opacity: .68; }
+.dm-p1 { fill: var(--accent); }
+.dm-p2 { fill: var(--win); }
+.dm-p3 { fill: var(--away); }
+.dm-key { margin: 8px 0 0; font-size: 12px; color: var(--text-secondary);
+  text-align: center; }
+.dm-k { margin: 0 9px; white-space: nowrap; }
+.dm-k i { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: 5px; vertical-align: 0; }
+.dm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 30px;
+  margin-top: 18px; }
+.dm-half h4 { margin: 0 0 2px; font-size: 13px; }
+.dm-blurb { margin: 0 0 6px; font-size: 11.5px; color: var(--text-secondary); }
+.dm-half table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dm-half td { padding: 3px 6px; border-bottom: 1px solid var(--border); }
+.dm-bar { position: relative; display: inline-block; width: 62px; height: 9px;
+  background: var(--row-alt); border-radius: 2px; vertical-align: middle; }
+.dm-bar i { position: absolute; left: 0; top: 1px; bottom: 1px;
+  border-radius: 2px; }
+.dm-bar i.dm-p1 { background: var(--accent); }
+.dm-bar i.dm-p2 { background: var(--win); }
+.dm-bar i.dm-p3 { background: var(--away); }
+.dm-n { display: inline-block; min-width: 38px; text-align: right; }
+/* the axis type is in user units and shrinks with the chart, exactly as the
+   race chart's does; these keep it between 8 and 14 real pixels */
+@media (max-width: 710px) { .dm-ax, .dm-lb { font-size: 14px; } }
+@media (max-width: 620px) { .dm-grid { grid-template-columns: 1fr; } }
+@media (max-width: 500px) { .dm-ax, .dm-lb { font-size: 19px; } }
 /* the type inside the chart is in user units, so it shrinks with the chart:
    left at one size it renders under 5px on a phone. These sizes are picked
    against the width the card actually gets -- roughly the viewport less 90px,
