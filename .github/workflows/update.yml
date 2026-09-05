@@ -53,6 +53,26 @@ jobs:
         with:
           python-version: "3.11"
 
+      # this workflow publishes: a push to build_report.py runs it, and it
+      # commits docs/ at the end. --strict already aborts on a fetcher or a
+      # build that raises, but a block that publishes a confident wrong
+      # answer -- a board of noughts because the feed renamed a label, last
+      # season's rows under this season's heading -- raises nothing and the
+      # grep sanity checks below cannot see it. So the suite runs first, and
+      # before the fetch: a failure then costs fifteen seconds, asks the
+      # feeds for nothing and publishes nothing.
+      #
+      # It needs no database and no network, so it cannot fail because a feed
+      # changed -- only because the code did, which is when blocking is
+      # right. pytest is capped below the next major for the same reason: a
+      # release that changed collection would otherwise stop the nightly data
+      # update. Test-only changes are not in the push paths above and are
+      # covered by the nightly run.
+      - name: Run the tests
+        run: |
+          python -m pip install --quiet "pytest~=9.1"
+          python -m pytest -q
+
       # v3 forces one cold start so the run picks up the reseeded database.
       # Bumping this is the ONLY way history reaches the cloud: the nightly
       # fetchers only ever ask for the current season, so a warm cache can

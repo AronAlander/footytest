@@ -110,7 +110,9 @@ the same code from a different scope and are where cross-season bugs surface.
 ## Before pushing: `python -m pytest`
 
 The suite in `tests/` is the gate. It must pass before a push, and a change
-that adds a block to a page adds its cases to it.
+that adds a block to a page adds its cases to it. The workflow runs it too,
+before it fetches anything — a push to `build_report.py` publishes, so the
+gate has to sit in front of that and not only on this machine.
 
 It never opens `football.sqlite`. That database lives in the Actions cache,
 is not in the repository, and holds whatever the feed sent last night —
