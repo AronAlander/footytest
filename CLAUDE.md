@@ -56,18 +56,16 @@ install TEMP VIEWs that shadow `matches`, `standings`, `understat_players`,
 `understat_team_matches`, `fotmob_players` and `fotmob_team_matches`. Ordinary
 queries see one season and should stay that way.
 
-`fotmob_match_shots` **is** shadowed by all three scoping functions
-(`scope_to_current_season`, `scope_to_fotmob_season`, `scope_to_archive_season`),
-because the shot profile in Team analytics reads it a whole season at a time.
-Its view anchors on `fotmob_team_matches`, not on itself: a match can be
-stored before its shotmap is, and a table asked for its own newest season
-would answer with the whole previous one. The match reports still ask `main.`
-for named match ids, which is unaffected.
-
-`fotmob_match_players` is deliberately **not** shadowed: its only reader is
-the live Matches tab, which asks for named match ids and qualifies the table
-`main.`. Anything new that reads it unqualified would read every season at
-once on a frozen page, so add it to the views first if that day comes.
+`fotmob_match_shots` and `fotmob_match_players` **are** shadowed by all
+three scoping functions (`scope_to_current_season`, `scope_to_fotmob_season`,
+`scope_to_archive_season`), because the shot profile in Team analytics and the
+goalkeeper board in Players each read a whole season of them at a time.
+Anything added later that reads a per-match table a whole season at a time
+must join the views too, or it will read every season at once on a frozen
+page. Both views anchor on `fotmob_team_matches`, not on themselves: a match can be
+stored before its shotmap or its lineup is, and a table asked for its own
+newest season would answer with the whole previous one. The match reports
+still ask `main.` for named match ids, which is unaffected.
 
 A query that must read across seasons — a club's history, a player's career —
 uses `main.`-qualified table names deliberately, and **caps at the newest season

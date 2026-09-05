@@ -337,6 +337,16 @@ Accents are folded, so "martinez" finds Martínez.
   throw. Penalties are left out of that share — one is worth about eight
   corners, and a single spot kick would move it further than a season of
   corners does.
+- **Goalkeepers** (Players tab, Allsvenskan only) — every keeper with 450+
+  minutes ranked by goals prevented: what the shots on target he faced were
+  worth, minus what he let in. Save percentage is in the table beside it
+  precisely because it is the misleading one — it counts a tap-in and a
+  thirty-yard shot the same, so it punishes a keeper for his defence. Summed
+  from the per-player match rows FotMob publishes, over the matches whose
+  teamsheets have arrived rather than every match played, which the block
+  says under the table. A keeper who faced nothing on target gets no figure
+  from the feed and is counted as the zero he earned; one whose figure is
+  missing after a busy afternoon is left out and his row marked.
 - **Players** — an explorer over every tracked player (~590): search, team /
   position / minutes filters, a per-90 toggle, and click-to-sort columns for
   goals, xG, G−xG, assists, xA, shots, key passes, xGChain, xGBuildup and more.

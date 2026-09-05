@@ -7729,6 +7729,268 @@ def fotmob_finishing_rows(db, league, order, limit=10, min_minutes=600):
     ).fetchall()
 
 
+# ----------------------------------------------------- the keeper board
+
+GK_MIN_MINUTES = 450    # five matches: the same bar the attackers board uses
+
+
+def keeper_own_goals(db, league):
+    """{(match id, club): own goals put past that club\u2019s own keeper}.
+
+    The feed\u2019s two keeper numbers disagree about an own goal: goals
+    conceded counts it, goals prevented does not -- rightly, since an own
+    goal is not a shot the keeper faced and carries no expected goals on
+    target at all. The two cannot go into one sum until something says how
+    many there were, and the shot map is the only place the count exists: it
+    files an own goal under the team of the player who scored it, which is
+    the team that conceded it.
+    """
+    if not db.execute(
+        "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?",
+        ("fotmob_match_shots",),
+    ).fetchone():
+        return {}
+    out = {}
+    for mid, team in db.execute(
+        "SELECT match_id, team FROM fotmob_match_shots "
+        "WHERE league = ? AND is_own_goal = 1", (league,)
+    ):
+        key = (str(mid), unescape(team or ""))
+        out[key] = out.get(key, 0) + 1
+    return out
+
+
+def keeper_rows(db, league, min_minutes=GK_MIN_MINUTES):
+    """One row per goalkeeper, aggregated from his match rows.
+
+    Aggregated in Python rather than in SQL because goals prevented needs a
+    rule SQL would hide: the feed publishes none at all for a keeper who
+    faced nothing on target, and every such row on file is a clean sheet
+    with no saves in it, where the right number is zero rather than
+    "unknown". A null that is *not* that -- a keeper who conceded, or made a
+    save, and still has no figure -- is something else, and is left out of
+    the totals and counted so the block can say so.
+
+    The quiet afternoon is tested as an explicit nought rather than as a
+    falsy value, because the parser writes null for any figure whose shape
+    it does not recognise. Were the feed to rename the label, every row
+    would arrive with three nulls, every one would read as a clean sheet,
+    and the whole board would publish as zeroes with nothing dropped and
+    nothing said. A null saves count is a missing number, not a nought.
+
+    Own goals are the second rule, and they come from the shot map because
+    the feed puts them in neither figure the same way; see keeper_own_goals.
+    """
+    own = keeper_own_goals(db, league)
+    rows = db.execute(
+        """SELECT match_id, player_id, player_name, team, minutes, saves,
+                  goals_conceded, goals_prevented, rating
+           FROM fotmob_match_players
+           WHERE league = ? AND is_gk = 1 AND minutes > 0
+           ORDER BY player_id, match_id""",
+        (league,),
+    ).fetchall()
+    keepers, dropped = {}, 0
+    for (mid, pid, name, team, minutes, saves,
+         conceded, prevented, rating) in rows:
+        quiet = saves == 0 and conceded == 0
+        k = keepers.setdefault(str(pid), {
+            "name": unescape(name or ""), "clubs": {}, "apps": 0,
+            "minutes": 0.0, "saves": 0.0, "conceded": 0.0, "own": 0,
+            "prevented": 0.0, "rating": 0.0, "rated": 0, "dropped": 0,
+        })
+        if prevented is None and not quiet:
+            # his totals are short this match, and the row says by how many
+            k["dropped"] += 1
+            dropped += 1
+            continue
+        k["clubs"][unescape(team or "")] = (
+            k["clubs"].get(unescape(team or ""), 0) + (minutes or 0))
+        k["apps"] += 1
+        k["minutes"] += minutes or 0
+        k["saves"] += saves or 0
+        k["conceded"] += conceded or 0
+        k["own"] += own.get((str(mid), unescape(team or "")), 0)
+        k["prevented"] += prevented or 0
+        if rating is not None:
+            k["rating"] += rating
+            k["rated"] += 1
+    out = []
+    for k in keepers.values():
+        if k["minutes"] < min_minutes:
+            continue
+        # a shot on target is one that reached him, and an own goal did not
+        faced = k["saves"] + k["conceded"] - k["own"]
+        out.append({
+            "name": k["name"],
+            # a keeper who moved mid-season is filed under whoever he played
+            # most of his minutes for, and by name if he split them evenly
+            "club": sorted(k["clubs"], key=lambda c: (-k["clubs"][c], c))[0],
+            "apps": k["apps"], "minutes": k["minutes"], "saves": k["saves"],
+            "conceded": k["conceded"], "prevented": k["prevented"],
+            "own": k["own"], "faced": faced, "dropped": k["dropped"],
+            # what the shots that reached him were worth on target, which is
+            # the figure goals prevented is measured against. The own goals
+            # come out of the conceded side of it: they are in that number
+            # and not in goals prevented, so leaving them in would credit
+            # him with facing a chance worth a whole goal that never existed
+            "xgot": k["conceded"] - k["own"] + k["prevented"],
+            "save_pct": 100 * k["saves"] / faced if faced else None,
+            "per90": k["prevented"] * 90 / k["minutes"] if k["minutes"] else 0,
+            "rating": k["rating"] / k["rated"] if k["rated"] else None,
+        })
+    out.sort(key=lambda k: (-k["prevented"], k["name"]))
+    return out, dropped
+
+
+def keeper_table(db, league):
+    """Goalkeepers ranked by the goals they saved that the shots said were in."""
+    if league in UNDERSTAT_LEAGUES:
+        return ""      # Understat publishes nothing per player per match
+    if not db.execute(
+        "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?",
+        ("fotmob_match_players",),
+    ).fetchone():
+        return ""      # a database from before the table existed
+    keepers, dropped = keeper_rows(db, league)
+    if not keepers:
+        return ""
+    widest = max(abs(k["prevented"]) for k in keepers) or 1
+    body = ""
+    for i, k in enumerate(keepers, 1):
+        # a total that cancels to -1e-15 is a nought, not a goal let in
+        side = "over" if k["prevented"] >= -0.005 else "under"
+        wide = round(38 * min(1, abs(k["prevented"]) / widest))
+        edge = "left:50%;width:" if side == "over" else "right:50%;width:"
+        gap = k["dropped"]
+        short = (
+            f"<span class='dim' title='{gap} of his match lines came "
+            "without the figure and are not in these totals'>"
+            "\u2009*</span>" if gap else ""
+        )
+        body += (
+            f"<tr><td class='num'>{i}</td><td>{escape(k['name'])}{short}</td>"
+            f"<td class='dim'>{escape(k['club'])}</td>"
+            f"<td class='num'>{k['apps']}</td>"
+            f"<td class='num'>{k['saves']:.0f}</td>"
+            + (f"<td class='num'>{k['save_pct']:.0f}%</td>"
+               if k["save_pct"] is not None else "<td class='num dim'>\u2013</td>")
+            + f"<td class='num'>{k['xgot']:.2f}</td>"
+            # every goal that went in behind him, with the own goals marked:
+            # take those off and the row reads xGOT minus goals = prevented
+            + f"<td class='num'>{k['conceded']:.0f}"
+            + (f" <span class='dim'>({k['own']} og)</span>"
+               if k["own"] else "")
+            + "</td>"
+            f"<td class='num'><span class='hist-bar' style='width:80px'>"
+            f"<i class='{side}' style='{edge}{wide}px'></i></span>"
+            f"<span class='hist-n {side}'>{fmt_delta(k['prevented'], 2)}</span></td>"
+            f"<td class='num dim'>{fmt_delta(k['per90'], 2)}</td>"
+            + (f"<td class='num score'>{k['rating']:.2f}</td>"
+               if k["rating"] is not None else "<td class='num dim'>\u2013</td>")
+            + "</tr>"
+        )
+    seen = sum(k["dropped"] for k in keepers)
+    note = (
+        f"<p class='meta dim'>{dropped} match "
+        + ("line" if dropped == 1 else "lines")
+        + " left out: the feed gave no goals-prevented figure for "
+        + ("it" if dropped == 1 else "them")
+        + " and the keeper had not had a quiet afternoon."
+        + (f" {seen} of "
+           + ("it" if dropped == 1 else "them")
+           + " belong to keepers in this table, whose totals and minutes are "
+             "short by that much; their names carry an asterisk."
+           if seen else
+           " None belong to a keeper who reaches the minutes bar \u2014 "
+           "though a keeper kept off it by the missing minutes would not "
+           "show here either.")
+        + "</p>"
+        if dropped else ""
+    )
+    # the feed sends a lineup some hours after the result, so the board is
+    # built on the matches it has rather than on the matches that were played
+    lined = db.execute(
+        "SELECT COUNT(DISTINCT match_id) FROM fotmob_match_players "
+        "WHERE league = ? AND is_gk = 1 AND minutes > 0", (league,),
+    ).fetchone()[0]
+    played = db.execute(
+        "SELECT COUNT(*) FROM fotmob_team_matches "
+        "WHERE league = ? AND home_away = 'h'", (league,),
+    ).fetchone()[0]
+    if played and lined < played:
+        note += (
+            f"<p class='meta dim'>Totals cover the {lined} of {played} "
+            "matches whose teamsheets the feed has sent so far, which is not "
+            "the same number for every club. Goals prevented adds up over a "
+            "season, so a keeper missing more matches than another is ranked "
+            "on less of one.</p>"
+        )
+    table = (
+        "<div class='card'><table><thead><tr>"
+        "<th class='num'>#</th><th>Goalkeeper</th><th>Club</th>"
+        "<th class='num' title='matches he got on the pitch for'>Apps</th>"
+        "<th class='num'>Saves</th>"
+        "<th class='num' title='saves as a share of the shots on target that "
+        "reached him, own goals aside'>Save%</th>"
+        "<th class='num' title='what the shots on target that reached him "
+        "were worth, own goals aside'>xGOT</th>"
+        "<th class='num' title='every goal that went in behind him, own "
+        "goals included'>Conceded</th>"
+        "<th class='num' title='xGOT faced minus the goals that came from "
+        "those shots'>Prevented</th>"
+        "<th class='num' title='goals prevented per 90 minutes'>/90</th>"
+        "<th class='num' title='average FotMob match rating'>Rating</th>"
+        f"</tr></thead><tbody>{body}</tbody></table></div>{note}"
+    )
+    about = (
+        "<p><strong>What it shows.</strong> Every goalkeeper with "
+        f"{GK_MIN_MINUTES}+ minutes, ranked by goals prevented: what the "
+        "shots on target he faced were worth, minus what he actually let in. "
+        "Above zero he has saved shots that usually go in; below zero the "
+        "shots he faced were worth fewer goals than he conceded.</p>"
+        "<p><strong>Why not save percentage.</strong> It is in the table, and "
+        "it is the number that misleads. A save is a save in it, so a keeper "
+        "behind a back line that lets people walk into the six-yard box is "
+        "punished for facing tap-ins, and one behind a side that concedes "
+        "only from 25 metres is flattered. Goals prevented weighs every shot "
+        "by how likely it was to be a goal before he moved, which is the "
+        "whole of a keeper's job and none of his defenders'.</p>"
+        "<p><strong>How to read it.</strong> Read it with the Apps column, "
+        "which counts the match lines on file rather than the matches he "
+        "played: a teamsheet reaches the feed some hours after the result, "
+        "so a recent match can be missing, and not from every club equally. "
+        "Half a goal over five matches is noise; two goals over most of a "
+        "season is a keeper. The per-90 column is there so a deputy and an "
+        "ever-present can be compared at all, but it magnifies a small "
+        "sample rather than fixing it \u2014 the ranking is on the running "
+        "total for that reason. Ratings are FotMob\u2019s own, averaged over "
+        "his appearances, which is a fair mean only while every one of them "
+        "is a full match; they have all been so far.</p>"
+        f"<p>{escape(league)} only: this is built from the per-player match rows "
+        "FotMob publishes, and Understat has no equivalent for the big five. "
+        "A keeper who faces nothing on target all afternoon gets no "
+        "goals-prevented figure from the feed at all, and is counted as the "
+        "zero he earned rather than dropped.</p>"
+        "<p><strong>Own goals.</strong> The feed\u2019s two numbers "
+        "disagree about them. Goals conceded counts an own goal; goals "
+        "prevented does not, and is right not to \u2014 an own goal is not a "
+        "shot the keeper faced, and carries no expected goals on target at "
+        "all. So Conceded here is every goal that went in behind him, with "
+        "the own goals marked beside it, while xGOT and the save percentage "
+        "leave them out. Take the marked ones off and the row reads xGOT "
+        "minus goals equals prevented. How many there were is the one figure "
+        "on this board taken off the shot maps rather than his own match "
+        "line, because the feed puts it in neither of them.</p>"
+        "<p>Everything else is his match line, not a count off the maps. The "
+        "two are produced separately and disagree by a shot now and then on "
+        "how many reached him \u2014 a shot the map files as blocked never "
+        "had to be saved \u2014 though not on how many went in.</p>"
+    )
+    return block("Goalkeepers \u2014 who saved more than the shots deserved",
+                 table, about)
+
+
 def players_panel(db, leagues):
     finishing_about = (
         "<p><strong>What it shows.</strong> The players (≥900 minutes) whose goal tallies "
@@ -7771,6 +8033,7 @@ def players_panel(db, leagues):
                         player_table(fotmob_finishing_rows(db, lg, "ASC"), "G−xG"),
                         wasteful_about)
                 + "</div>"
+                + keeper_table(db, lg)
             )
         return (
             "<div class='duo'>"
@@ -7854,17 +8117,17 @@ def scope_to_current_season(db):
                 f"WHERE t.season = (SELECT MAX(u.season) FROM main.{table} u "
                 "WHERE u.league = t.league)"
             )
-        # the shots anchor on fotmob_team_matches, not on themselves. A match
-        # can be stored before its shotmap is -- a feed that answers with an
-        # empty shotmap writes no shot rows at all -- and a table asked for
-        # its own newest season would then answer with the whole of the
-        # previous one, drawn under this season's heading
-        db.execute(
-            "CREATE TEMP VIEW fotmob_match_shots AS "
-            "SELECT * FROM main.fotmob_match_shots t WHERE t.season = "
-            "(SELECT MAX(u.season) FROM main.fotmob_team_matches u "
-            " WHERE u.league = t.league)"
-        )
+        # the per-match tables anchor on fotmob_team_matches, not on
+        # themselves. A match can be stored before its shotmap or its lineup
+        # is -- a feed that answers with an empty one writes no rows at all
+        # -- and a table asked for its own newest season would then answer
+        # with the whole of the previous one, under this season's heading
+        for table in ("fotmob_match_shots", "fotmob_match_players"):
+            db.execute(
+                f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} t "
+                "WHERE t.season = (SELECT MAX(u.season) "
+                "FROM main.fotmob_team_matches u WHERE u.league = t.league)"
+            )
     else:
         db.execute("CREATE TEMP VIEW understat_team_matches AS " + understat_current)
 
@@ -7876,7 +8139,7 @@ def scope_to_archive_season(db, season):
     db.execute("CREATE TEMP VIEW standings AS SELECT * FROM main.standings WHERE 0")
     if fotmob_available(db):
         for table in ("fotmob_players", "fotmob_team_matches",
-                      "fotmob_match_shots"):
+                      "fotmob_match_shots", "fotmob_match_players"):
             db.execute(
                 f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} WHERE 0"
             )
@@ -7934,7 +8197,7 @@ def scope_to_fotmob_season(db, league, season):
         f"FROM main.fotmob_team_matches WHERE {where}"
     )
     for table in ("fotmob_players", "fotmob_team_matches",
-                  "fotmob_match_shots"):
+                  "fotmob_match_shots", "fotmob_match_players"):
         db.execute(f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} "
                    f"WHERE {where}")
 
