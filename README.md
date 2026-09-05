@@ -27,6 +27,19 @@ python fetch_preseason.py
 python build_report.py
 ```
 
+### Tests
+
+```
+python -m pytest
+```
+
+Needs `pytest`; nothing else, and no database — every test builds the real
+schema out of the fetchers and inserts the few rows it wants, so the suite
+runs on a fresh clone. It covers the three things that have actually broken
+here: a figure the feed omitted being read as a nought, a block reading the
+wrong season on an archive page, and arithmetic on inputs no real season
+would produce.
+
 The season is picked automatically: both fetchers flip to the new campaign on
 1 August (European seasons run autumn–spring), and the report scopes every table
 and chart to each league's current season — older seasons stay in the database

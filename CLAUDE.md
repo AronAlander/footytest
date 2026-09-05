@@ -107,17 +107,37 @@ point — a DOM dump cannot see a broken legend.
 Check the archive pages and an Allsvenskan frozen page too. They are built by
 the same code from a different scope and are where cross-season bugs surface.
 
-## Before pushing: a fresh agent reviews the diff
+## Before pushing: `python -m pytest`
 
-Once a change is finished and verified, hand the diff to a subagent with no
-context from the session that wrote it, and act on what it finds before pushing.
-The author of a change is the worst reader of it: the reasoning that produced
-the bug also excuses it on re-reading. A reviewer starting from `git diff` and
-this file has none of that history.
+The suite in `tests/` is the gate. It must pass before a push, and a change
+that adds a block to a page adds its cases to it.
 
-Ask it specifically about: whether cross-season queries cap correctly, whether
-anything publishes stale data, whether the archive pages still hold, and whether
-the change does what the commit message says.
+It never opens `football.sqlite`. That database lives in the Actions cache,
+is not in the repository, and holds whatever the feed sent last night —
+so a test that read it would be unrunnable in CI and would check today's
+data rather than the rules the code must hold to. Each test instead builds
+the real schema out of the fetchers' own `SCHEMA` constants and inserts the
+handful of rows it wants, which is the only way to write down "the feed sent
+nothing" as a case.
+
+Three failure classes have caused every bug found here so far, and each has
+a file:
+
+- `test_missing_data.py` — a figure the feed omitted read as a nought. This
+  is the dangerous one, because it publishes a confident wrong answer with
+  nothing to see. The rule: a missing figure is either provably a nought or
+  it removes the block from the page.
+- `test_scoping.py` — a block that reads a season at a time is right on the
+  live page and wrong on every archive page unless its table is shadowed,
+  and wrong on the first morning of a new season unless its view anchors on
+  `fotmob_team_matches` rather than on itself.
+- `test_rendering.py` — escaping, byte-identical rebuilds, and arithmetic on
+  inputs no season would produce. The nightly is one process: an exception
+  in it takes the index page, both archive sets and the prediction log.
+
+A test that passes against the broken code is worse than no test. When you
+add one, reintroduce the bug it is meant to catch and watch it fail — every
+test in these files has been checked that way.
 
 ## Commits
 
