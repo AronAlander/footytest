@@ -276,8 +276,15 @@ Accents are folded, so "martinez" finds Martínez.
   goals that used to be discarded after building the margin sampler.
 - **Matches** — one match at a time, in either tense, reachable by clicking any
   row in Recent results or Upcoming fixtures. An upcoming fixture gets the
-  model's call, both sides' form and venue splits, the head-to-head and each
-  squad's leading attackers. A match already played gets a report: the score,
+  model's call, both sides' form and venue splits, a **tale of the tape**, the
+  head-to-head and each squad's leading attackers. The tape is the one block
+  built only from the venue this match is at — the home side from its home
+  matches, the visitor from its away ones, each ranked against the rest of the
+  league at that same venue, because the median club creates about a fifth more
+  chances at home than away. Four rows, chosen so they do not restate each
+  other, and only the first two have a better end: on the style rows a longer
+  bar means more of that thing, not better at it. It needs five matches at the
+  venue from both clubs, so in the big five it appears around October. A match already played gets a report: the score,
   the **match stats** both feeds keep for those 90 minutes, what the chances
   deserved (Understat's post-match rerun), and what this site said beforehand,
   graded called it / missed. The stat rows differ by feed rather than being

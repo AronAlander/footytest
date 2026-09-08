@@ -741,6 +741,12 @@ td.pcell i.cl { background: color-mix(in srgb, var(--accent) 20%, transparent); 
 td.pcell i.rel { background: color-mix(in srgb, var(--loss) 20%, transparent); }
 td.pcell span { position: relative; }
 .h2h-bar i.b { background: var(--win); margin-left: auto; }
+/* the fixture card settled on home = accent, away = --away for its prediction
+   bar long before this block existed. The tape follows it rather than the team
+   tab's green, so one card never uses two different colours for "away" */
+.fx-tape .h2h-bar i.b { background: var(--away); }
+.fx-tape .h2h-metric { margin: 7px 0; }
+.fx-note { color: var(--text-secondary); font-size: 12px; margin: 2px 0 0; }
 .h2h-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
 @media (max-width: 760px) { .h2h-cols { grid-template-columns: 1fr; } }
 svg .h2h-line { fill: none; stroke-width: 2; }
@@ -4214,6 +4220,110 @@ def load_team_form(db, league, limit=FIXTURE_FORM):
     return out
 
 
+# ------------------------------ the fixture's tale of the tape
+
+FIXTURE_TAPE_MIN = 5     # matches at that venue before a percentile means much
+FIXTURE_TAPE_POOL = 8    # clubs clearing that before the pool is a league
+
+# Two metrics a preview cannot omit -- who creates and who concedes -- and two
+# chosen because they are the least redundant real traits to put beside them.
+# Measured, not assumed: over 1,150 completed club-seasons the six-axis radar
+# on the Team tab pairs Attack with Territory at r=0.87 and Defence with Box
+# defence at 0.81, so half of it restates the other half. The worst pair here
+# is 0.52. Finishing is left out for a different reason: it repeats from one
+# season to the next at only r=0.22, against 0.79 for Attack, so on a page
+# whose job is to preview a match it is the axis least worth reading.
+# The last field says whether the row has a better end. Attack and Defence
+# do. The other two are styles: a side that presses high is not thereby
+# better than one that sits, and the block must not imply it is.
+TAPE_UNDERSTAT = (
+    ("Attack", "npxG per match", 2, False, True),
+    ("Defence", "npxGA per match", 2, True, True),
+    ("Pressing", "PPDA", 1, True, False),
+    ("Chance quality", "npxG per deep completion", 3, False, False),
+)
+# Allsvenskan comes from FotMob, which publishes no PPDA and no deep
+# completions but does publish rather more of its own. Set-play share is the
+# one that earns its place on a preview: it is a habit rather than a level,
+# and it is nearly uncorrelated with how good a side is.
+TAPE_FOTMOB = (
+    ("Attack", "npxG per match", 2, False, True),
+    ("Defence", "npxGA per match", 2, True, True),
+    ("Ball-winning", "tackles and interceptions per match", 1, False, False),
+    ("Set plays", "% of xG from a stopped ball", 0, False, False),
+)
+
+TAPE_SQL_UNDERSTAT = """
+    SELECT team, COUNT(*), SUM(npxg) / COUNT(*), SUM(npxga) / COUNT(*),
+           AVG(ppda),
+           CASE WHEN SUM(deep) > 0 THEN SUM(npxg) / SUM(deep) END
+      FROM understat_team_matches
+     WHERE league = ? AND home_away = ? GROUP BY team
+"""
+TAPE_SQL_FOTMOB = """
+    SELECT team, COUNT(*), SUM(npxg) / COUNT(*), SUM(npxga) / COUNT(*),
+           SUM(tackles + interceptions) / COUNT(*),
+           CASE WHEN SUM(xg) > 0 THEN 100.0 * SUM(xg_set_play) / SUM(xg) END
+      FROM fotmob_team_matches
+     WHERE league = ? AND home_away = ? GROUP BY team
+"""
+
+
+def _tape_side(db, league, side, sql, metrics):
+    """{club: [[raw, percentile], ...]} for one venue, or {} if too thin."""
+    clubs = {}
+    for row in db.execute(sql, (league, side)).fetchall():
+        if (row[1] or 0) < FIXTURE_TAPE_MIN:
+            continue           # too few matches at this venue to rank him by
+        clubs[unescape(row[0] or "")] = list(row[2:])
+    if len(clubs) < FIXTURE_TAPE_POOL:
+        return {}              # a percentile among five clubs is not a rank
+    out = {c: [] for c in clubs}
+    for i, (_label, _unit, _dec, invert, _merit) in enumerate(metrics):
+        # each metric keeps its own pool: a club missing one figure drops out
+        # of that ranking rather than out of the block
+        pool = [v[i] for v in clubs.values() if v[i] is not None]
+        # ranked the way the row is read, so fewer goals conceded ranks high
+        rank = (lambda v: -v) if invert else (lambda v: v)
+        for club, vals in clubs.items():
+            raw = vals[i]
+            if raw is None or len(pool) < 2:
+                out[club].append([None, None])
+                continue
+            below = sum(1 for p in pool if rank(p) < rank(raw))
+            out[club].append([round(raw, 4),
+                              round(100 * below / (len(pool) - 1))])
+    return out
+
+
+def fixture_tape(db, league):
+    """Both clubs of a fixture as they play at the venue this match is at.
+
+    A season-wide profile is the wrong one for a preview. Across those same
+    1,150 club-seasons the median side creates 0.29 more npxG per match at
+    home than away and concedes 0.29 fewer -- about a fifth of the average,
+    with only one club-season in ten running the other way -- so a chart
+    built from every match flatters the away side and undersells the home
+    one, in the single context where the venue is already known.
+    """
+    fotmob = league not in UNDERSTAT_LEAGUES
+    metrics = TAPE_FOTMOB if fotmob else TAPE_UNDERSTAT
+    sql = TAPE_SQL_FOTMOB if fotmob else TAPE_SQL_UNDERSTAT
+    table = "fotmob_team_matches" if fotmob else "understat_team_matches"
+    if not db.execute(
+        "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone():
+        return {}
+    home = _tape_side(db, league, "h", sql, metrics)
+    away = _tape_side(db, league, "a", sql, metrics)
+    if not home or not away:
+        return {}
+    return {"m": [[lab, unit, dec, merit]
+                  for lab, unit, dec, _inv, merit in metrics],
+            "h": home, "a": away}
+
+
 def load_fixture_data(db, league):
     """Everything the fixture explorer needs for one league, as plain JSON.
 
@@ -4427,7 +4537,8 @@ def load_fixture_data(db, league):
             rec.pop("mid", None)      # nothing to open, so promise nothing
 
     out = {"fixtures": out_fixtures, "results": out_results, "form": form,
-           "venue": venue, "players": players, "h2h": h2h}
+           "venue": venue, "players": players, "h2h": h2h,
+           "tape": fixture_tape(db, league)}
     if out_squads:
         out["squads"] = out_squads
     if out_shots:
@@ -4566,8 +4677,25 @@ def fixtures_panel(db, leagues):
         "An <strong>upcoming fixture</strong> gets everything the site knows about "
         "the two clubs gathered in one place: the model's win/draw/win call, both "
         "sides' recent form in results <em>and</em> in chance quality, their past "
-        "meetings, the venue split that actually applies to this match, and each "
-        "squad's leading attackers.</p>"
+        "meetings, the venue split that actually applies to this match, a tale "
+        "of the tape, and each squad's leading attackers.</p>"
+        "<p><strong>The tale of the tape</strong> is the one block here built "
+        "only from the venue this match is at: the home side from its home "
+        "matches, the visitor from its away ones, each ranked against the rest "
+        "of the league at that same venue. That is not a detail — the "
+        "median club creates about a fifth more chances at home than away and "
+        "concedes about a fifth fewer, and only one season in ten runs the "
+        "other way, so a profile averaged over every match quietly flatters "
+        "whoever is travelling.</p>"
+        "<p>Four rows rather than a fuller sweep, because the obvious extra "
+        "ones would repeat what is already there: chances created and "
+        "territory won measure nearly the same thing, as do goals conceded and "
+        "chances allowed near goal. Finishing is missing on purpose — it "
+        "barely carries from one season to the next, so on a page previewing a "
+        "match it is the number least worth knowing. The block needs five "
+        "matches at that venue from both clubs, and eight clubs in the league "
+        "to rank them against, so in the big five it appears around October "
+        "rather than in August.</p>"
         "<p><strong>A match already played</strong> gets a report instead: the "
         "score, what the chances were worth on the day, and — the part worth "
         "coming for — <em>what this site said about it beforehand</em>, taken from "
@@ -6618,6 +6746,49 @@ window.__navRestoring = true;
       .filter(Boolean);
     const vlabel = 'By venue' + (vs.length
       ? ' \\u2014 ' + esc(vs[0] === vs[1] ? vs[0] : vs.join(' / ')) : '');
+    // 88 -> "88th": the bracket says where in the league that figure sits,
+    // and an ordinal reads as a rank where a bare number reads as a value
+    const ordn = (p) => {
+      if (p == null) return '\u2013';
+      const t = p % 10, h = p % 100;
+      return p + (t === 1 && h !== 11 ? 'st' : t === 2 && h !== 12 ? 'nd'
+        : t === 3 && h !== 13 ? 'rd' : 'th');
+    };
+    function tapeBlock(fx) {
+      const T = D.tape;
+      if (!T || !T.m) return '';
+      const H = (T.h || {})[fx.home], A = (T.a || {})[fx.away];
+      // one of them has not played enough at this venue for a rank to mean
+      // anything: say nothing rather than rank him off three matches
+      if (!H || !A) return '';
+      const rows = T.m.map((m, i) => {
+        const hv = H[i] || [], av = A[i] || [];
+        if (hv[0] == null || av[0] == null) return '';
+        const hp = hv[1] || 0, ap = av[1] || 0;
+        const share = hp + ap === 0 ? 50 : Math.round(100 * hp / (hp + ap));
+        // m[3] marks a row with a better end; on a style row neither club
+        // leads, whatever the bar looks like
+        const cell = (v, p, side, ahead) =>
+          "<span class='h2h-val " + side + (ahead && m[3] ? ' lead' : '') +
+          "'>" + Number(v).toFixed(m[2]) + " <span class='dim'>(" + ordn(p) +
+          ')</span></span>';
+        return "<div class='h2h-metric'><div class='h2h-lab'>" + esc(m[0]) +
+          ' \u00b7 ' + esc(m[1]) + "</div><div class='h2h-row'>" +
+          cell(hv[0], hp, 'a', hp > ap) +
+          "<div class='h2h-bar'><i class='a' style='width:" + share +
+          "%'></i><i class='b' style='width:" + (100 - share) + "%'></i></div>" +
+          cell(av[0], ap, 'b', ap > hp) + '</div></div>';
+      }).join('');
+      if (!rows) return '';
+      return "<h4 class='fx-h'>Tale of the tape \u2014 home form against " +
+        "away form</h4><div class='fx-tape'>" + rows +
+        "<p class='fx-note'>Each club is drawn only from the matches it has " +
+        'played at the venue this match is at, and ranked against the rest of ' +
+        'the league at that same venue. The bar splits them by those ranks ' +
+        'and the figure beside it is the real one. Only the first two rows ' +
+        'have a better end \u2014 on the others a longer bar means more of ' +
+        'that thing, not better at it.</p></div>';
+    }
     card.innerHTML =
       "<div class='fx-head'><h4>" + esc(f.home) + " <span class='dim'>v</span> " +
         esc(f.away) + "</h4><span class='dim'>" + esc(when) + '</span></div>' +
@@ -6625,6 +6796,7 @@ window.__navRestoring = true;
       heads +
       pair('Recent form \\u2014 last six, newest first', formStrip(f.home), formStrip(f.away)) +
       pair(vlabel, venueBox(f.home, 'h'), venueBox(f.away, 'a')) +
+      tapeBlock(f) +
       "<h4 class='fx-h'>Head to head</h4>" + h2hBlock(f) +
       pair('Leading attackers', playerBox(f.home), playerBox(f.away));
   }
