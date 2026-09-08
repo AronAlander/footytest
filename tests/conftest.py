@@ -143,15 +143,19 @@ def add_understat_matches(db, team, played, league=LEAGUE, season="2026",
                           npxgd=0.4, pts=3):
     """`played` finished matches for one club, in the Understat shape.
 
-    Only the columns the season charts read are filled: npxgd drives the
-    rolling curves and pts their ordering.
+    Shaped like an Allsvenskan row rather than a big-five one: the expected
+    goals are there but ppda and deep are not, which is exactly what the
+    scoping view produces when it projects FotMob into this table. A fixture
+    that filled them would never exercise the axis-dropping the page does.
     """
     for n in range(played):
         db.execute(
             "INSERT INTO understat_team_matches (season, league, team, "
-            "match_date, home_away, npxgd, pts, scored, missed) "
-            "VALUES (?,?,?,?,?,?,?,?,?)",
+            "match_date, home_away, npxgd, pts, scored, missed, "
+            "npxg, npxga, xg, xga, xpts) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (season, league, team, f"{season}-04-{n + 1:02d}",
-             "h" if n % 2 else "a", npxgd, pts, 1, 0),
+             "h" if n % 2 else "a", npxgd, pts, 1, 0,
+             1.4, 1.0, 1.5, 1.1, 1.3),
         )
     db.commit()

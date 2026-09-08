@@ -25,7 +25,11 @@ def team_match(db, team, side, tag=0, season="2026", league=LEAGUE, **stats):
 
 
 def understat_match(db, team, side, season="2026", league=BIG5, n=0, **stats):
-    row = {"npxg": 1.5, "npxga": 1.0, "ppda": 10.0, "deep": 6.0}
+    # more columns than the tape reads, because load_teams reads the same
+    # rows for the team radar and sums scored/xg without guarding for null
+    row = {"npxg": 1.5, "npxga": 1.0, "ppda": 10.0, "deep": 6.0,
+           "deep_allowed": 5.0, "scored": 1, "missed": 1, "xg": 1.6,
+           "xga": 1.1, "pts": 1, "xpts": 1.2}
     row.update(stats)
     cols = ["season", "league", "team", "match_date", "home_away"] + list(row)
     vals = [season, league, team, f"{season}-04-{n + 1:02d}", side] + \

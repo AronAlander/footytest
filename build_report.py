@@ -3608,6 +3608,10 @@ def load_teams(db, league):
             "npxg": round(r[4] / r[1], 2), "npxga": round(r[5] / r[1], 2),
             "ppda": round(r[6], 1) if r[6] is not None else None,
             "deep": per_match(r[7], r[1], 1), "deep_allowed": per_match(r[8], r[1], 1),
+            # npxG per deep completion: what a club makes of the territory it
+            # wins, which is the part of Territory that Attack does not
+            # already say
+            "quality": round(r[4] / r[7], 3) if r[7] else None,
             "gpm": round(r[9] / r[1], 2), "cpm": round(r[10] / r[1], 2),
             "gdiff": round(r[9] - r[11], 1), "gadiff": round(r[12] - r[10], 1),
             "ptsdiff": round(r[2] - r[3], 1),
@@ -4597,7 +4601,7 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None,
         f"const SQUADS_BY_LG = {squad_payload};</script>"
     )
     about = (
-        "<p><strong>What it shows.</strong> One to three teams overlaid on a radar of six "
+        "<p><strong>What it shows.</strong> One to three teams overlaid on a radar of five "
         "style dimensions, each expressed as the team's <em>percentile</em> among the "
         "sides in that league. A single team is a profile rather than a comparison — "
         "that is where a click on a club's name over on the League tab lands"
@@ -4609,16 +4613,29 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None,
         "(flipped, so further out = fewer chances allowed). <strong>Finishing</strong> is "
         "goals minus xG — conversion above or below what the chances deserved. "
         "<strong>Pressing</strong> is PPDA flipped (opponent passes allowed per defensive "
-        "action — fewer means a higher press). <strong>Territory</strong> is deep "
-        "completions per match (passes received within ~20m of the opponent goal) and "
-        "<strong>Box defence</strong> is the same thing conceded, flipped.</p>"
+        "action — fewer means a higher press). <strong>Chance quality</strong> is "
+        "non-penalty xG per deep completion: what a side makes of the territory it "
+        "wins, so a team that works the ball to the six-yard box sits far out and one "
+        "that reaches the edge of the area and shoots from there does not.</p>"
+        "<p><strong>Why five and not six.</strong> It used to draw Territory (deep "
+        "completions per match) and Box defence (the same conceded) as two more spokes. "
+        "Across 1,150 completed club-seasons Territory correlates with Attack at 0.87 "
+        "and Box defence with Defence at 0.81 — near enough the same measurement twice "
+        "— so any decent side bulged on both halves of both pairs and the shape was "
+        "reporting how good a team is rather than what kind it is. Both numbers are "
+        "still here, in the table underneath, where a restatement is a number rather "
+        "than a shape. The worst-correlated pair left on the chart is Defence and "
+        "Pressing at 0.50.</p>"
         "<p><strong>How to read it.</strong> The shape is the identity: a dominant "
-        "pressing side bulges toward Attack–Pressing–Territory, a low-block counter team "
-        "can look small here yet still win points on Finishing and Box defence. The "
-        "table underneath gives the raw per-match numbers behind each axis, plus points "
-        "vs expected points. Shots on target aren't in the data — Understat's team feed "
-        "doesn't publish them — so chance <em>quality</em> (xG) stands in for shot "
-        "accuracy.</p>"
+        "pressing side bulges toward Attack–Pressing, a low-block counter team can look "
+        "small here yet still win points on Finishing and Chance quality. The table "
+        "underneath gives the raw per-match numbers behind each axis, the two that left "
+        "it, and points against expected points. One caveat on Finishing: it is the one "
+        "axis that does not carry — a club's goals-minus-xG repeats from one season to "
+        "the next at about 0.22, where Attack repeats at 0.79 — so read it as what "
+        "happened rather than as what this side is. Shots on target aren't in the data "
+        "— Understat's team feed doesn't publish them — so chance <em>quality</em> (xG) "
+        "stands in for shot accuracy.</p>"
         "<p><strong>Season by season.</strong> Under a single club, one row per season "
         "as far back as the data goes \u2014 where they finished, the record, goal "
         "difference, xG difference, and points against expected points. The bar is the "
@@ -5715,15 +5732,23 @@ window.__navRestoring = true;
       $('tc-' + i).innerHTML = "<option value=''>Team " + i + '\\u2026</option>' + options;
     });
   }
+  // Five axes, not six, and one of them is new. Measured over 1,150
+  // completed club-seasons the old set drew Attack beside Territory, which
+  // it correlates with at 0.87, and Defence beside Box defence at 0.81 --
+  // so two of the six spokes restated their neighbours and any decent side
+  // bulged on both halves of both pairs. The worst pair here is 0.50.
+  // Territory and Box defence are not lost: they moved to the table below,
+  // where a restatement is a number rather than a shape.
   const RADAR = [
-    { key: 'npxg',         label: 'Attack',      unit: 'npxG / match',         dec: 2 },
-    { key: 'npxga',        label: 'Defence',     unit: 'npxGA / match',        dec: 2, invert: true },
-    { key: 'gdiff',        label: 'Finishing',   unit: 'G \\u2212 xG (season)', dec: 1, signed: true },
-    { key: 'ppda',         label: 'Pressing',    unit: 'PPDA',                 dec: 1, invert: true },
-    { key: 'deep',         label: 'Territory',   unit: 'deep comp. / match',   dec: 1 },
-    { key: 'deep_allowed', label: 'Box defence', unit: 'deep allowed / match', dec: 1, invert: true }
+    { key: 'npxg',    label: 'Attack',         unit: 'npxG / match',         dec: 2 },
+    { key: 'npxga',   label: 'Defence',        unit: 'npxGA / match',        dec: 2, invert: true },
+    { key: 'gdiff',   label: 'Finishing',      unit: 'G \\u2212 xG (season)', dec: 1, signed: true },
+    { key: 'ppda',    label: 'Pressing',       unit: 'PPDA',                 dec: 1, invert: true },
+    { key: 'quality', label: 'Chance quality', unit: 'npxG per deep comp.',  dec: 3 }
   ];
   const EXTRA = [
+    { key: 'deep',         label: 'Territory \\u00b7 deep comp. / match', dec: 1 },
+    { key: 'deep_allowed', label: 'Box defence \\u00b7 deep allowed / match', dec: 1 },
     { key: 'pts',     label: 'Points',                dec: 0 },
     { key: 'xpts',    label: 'Expected points',       dec: 1 },
     { key: 'ptsdiff', label: 'Pts \\u2212 xPts (luck)', dec: 1, signed: true },

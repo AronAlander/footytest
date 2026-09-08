@@ -337,12 +337,14 @@ Accents are folded, so "martinez" finds Martínez.
   the same guard the xG headline uses: the two feeds would be describing
   different matches.
 - **Team analytics** — xG table (points vs expected points), a team comparison
-  block (pick 2–3 teams for a percentile radar over six style dimensions —
-  attack, defence, finishing, pressing, territory, box defence — with the raw
-  per-match numbers underneath, deep-linkable via `#club=A,B,C`),
+  block (pick 2–3 teams for a percentile radar over five style dimensions —
+  attack, defence, finishing, pressing, chance quality; five and not six
+  because territory and box defence restated attack and defence at r=0.87 and
+  0.81 over 1,150 club-seasons, so they moved down into the raw numbers — with
+  those per-match numbers underneath, deep-linkable via `#club=A,B,C`),
   pressing-vs-territory scatter (PPDA against deep completions), rolling
   xG-difference form curves. Picking exactly **two** teams turns the comparison
-  into a head-to-head deep dive: a tale-of-the-tape bar duel across ten metrics
+  into a head-to-head deep dive: a tale-of-the-tape bar duel across nine metrics
   (bars split by league-percentile share), this season's actual meetings between
   the clubs with the score and both sides' xG, last-five form chips, points and
   npxGD split by home/away, and both teams' rolling form curves overlaid on one
