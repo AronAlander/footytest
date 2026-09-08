@@ -2765,7 +2765,14 @@ def rolling_sparklines(db, league):
 
     rolling = {}
     for team, values in series.items():
-        if len(values) >= ROLLING_WINDOW:
+        # strictly more than the window, not "at least": a club that has
+        # played exactly ROLLING_WINDOW matches has one window, and one
+        # window is a number rather than a trend. There is no gap between
+        # points to space a line across, and the chart's width was being
+        # divided by that gap -- which took down the nightly of 2026-09-08,
+        # the first time this code met the opening weeks of a season. Such a
+        # club joins the chart on its next match.
+        if len(values) > ROLLING_WINDOW:
             rolling[team] = [
                 sum(values[i - ROLLING_WINDOW + 1:i + 1]) / ROLLING_WINDOW
                 for i in range(ROLLING_WINDOW - 1, len(values))

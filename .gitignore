@@ -4,4 +4,9 @@ report.html
 __pycache__/
 .venv/
 *.sqlite
+# sqlite leaves these beside the database mid-write; an interrupted
+# fetch can leave one behind, and *.sqlite does not match them
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 api_keys.json

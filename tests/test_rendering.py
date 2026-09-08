@@ -6,7 +6,8 @@ arithmetic tests here are not about getting a pretty answer out of a silly
 input, they are about getting any answer at all.
 """
 import build_report
-from conftest import LEAGUE, a_season, add_player, add_shot
+from conftest import (LEAGUE, a_season, add_player, add_shot,
+                      add_understat_matches)
 
 NASTY = "<script>alert(1)</script>"
 AMPER = "Bodø & Glimt"
@@ -128,3 +129,36 @@ def test_a_substitute_on_for_one_minute_does_not_explode_the_rates(db):
     build_report.scope_to_current_season(db)
     men, _ = build_report.defender_rows(db, LEAGUE)
     assert "Cameo Man" not in [m["name"] for m in men]
+
+
+def test_a_club_on_exactly_the_rolling_window_does_not_divide_by_zero(db):
+    """The bug that broke the nightly of 2026-09-08.
+
+    A rolling five-match average over exactly five matches is one number.
+    One number is not a curve: there is no gap between points to space the
+    line across, and the width was being divided by that gap. It fired the
+    first time a big-five club reached its fifth match of the season, which
+    is the first season opening this code has lived through.
+    """
+    from build_report import ROLLING_WINDOW
+    for club in ("AIK", "GAIS", "Sirius"):
+        add_understat_matches(db, club, ROLLING_WINDOW)
+    assert build_report.rolling_sparklines(db, LEAGUE) == "", \
+        "one window is a number, not a trend"
+
+
+def test_a_club_one_match_past_the_window_draws(db):
+    from build_report import ROLLING_WINDOW
+    for club in ("AIK", "GAIS"):
+        add_understat_matches(db, club, ROLLING_WINDOW + 1)
+    assert "AIK" in build_report.rolling_sparklines(db, LEAGUE)
+
+
+def test_clubs_at_and_past_the_window_can_share_a_chart(db):
+    """The uneven case: one club qualifies, another is a match short."""
+    from build_report import ROLLING_WINDOW
+    add_understat_matches(db, "AIK", ROLLING_WINDOW + 2)
+    add_understat_matches(db, "GAIS", ROLLING_WINDOW)
+    html = build_report.rolling_sparklines(db, LEAGUE)
+    assert "AIK" in html
+    assert "GAIS" not in html, "a club with no trend yet is left out, not drawn"

@@ -137,3 +137,21 @@ def scoped(season):
     """The small season as the live page sees it."""
     build_report.scope_to_current_season(season)
     return season
+
+
+def add_understat_matches(db, team, played, league=LEAGUE, season="2026",
+                          npxgd=0.4, pts=3):
+    """`played` finished matches for one club, in the Understat shape.
+
+    Only the columns the season charts read are filled: npxgd drives the
+    rolling curves and pts their ordering.
+    """
+    for n in range(played):
+        db.execute(
+            "INSERT INTO understat_team_matches (season, league, team, "
+            "match_date, home_away, npxgd, pts, scored, missed) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (season, league, team, f"{season}-04-{n + 1:02d}",
+             "h" if n % 2 else "a", npxgd, pts, 1, 0),
+        )
+    db.commit()
