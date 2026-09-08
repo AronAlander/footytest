@@ -692,6 +692,12 @@ td.pcell i.cl { background: color-mix(in srgb, var(--accent) 20%, transparent); 
 td.pcell i.rel { background: color-mix(in srgb, var(--loss) 20%, transparent); }
 td.pcell span { position: relative; }
 .h2h-bar i.b { background: var(--win); margin-left: auto; }
+/* the fixture card settled on home = accent, away = --away for its prediction
+   bar long before this block existed. The tape follows it rather than the team
+   tab's green, so one card never uses two different colours for "away" */
+.fx-tape .h2h-bar i.b { background: var(--away); }
+.fx-tape .h2h-metric { margin: 7px 0; }
+.fx-note { color: var(--text-secondary); font-size: 12px; margin: 2px 0 0; }
 .h2h-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
 @media (max-width: 760px) { .h2h-cols { grid-template-columns: 1fr; } }
 svg .h2h-line { fill: none; stroke-width: 2; }
@@ -2663,6 +2669,49 @@ window.__navRestoring = true;
       .filter(Boolean);
     const vlabel = 'By venue' + (vs.length
       ? ' \u2014 ' + esc(vs[0] === vs[1] ? vs[0] : vs.join(' / ')) : '');
+    // 88 -> "88th": the bracket says where in the league that figure sits,
+    // and an ordinal reads as a rank where a bare number reads as a value
+    const ordn = (p) => {
+      if (p == null) return '–';
+      const t = p % 10, h = p % 100;
+      return p + (t === 1 && h !== 11 ? 'st' : t === 2 && h !== 12 ? 'nd'
+        : t === 3 && h !== 13 ? 'rd' : 'th');
+    };
+    function tapeBlock(fx) {
+      const T = D.tape;
+      if (!T || !T.m) return '';
+      const H = (T.h || {})[fx.home], A = (T.a || {})[fx.away];
+      // one of them has not played enough at this venue for a rank to mean
+      // anything: say nothing rather than rank him off three matches
+      if (!H || !A) return '';
+      const rows = T.m.map((m, i) => {
+        const hv = H[i] || [], av = A[i] || [];
+        if (hv[0] == null || av[0] == null) return '';
+        const hp = hv[1] || 0, ap = av[1] || 0;
+        const share = hp + ap === 0 ? 50 : Math.round(100 * hp / (hp + ap));
+        // m[3] marks a row with a better end; on a style row neither club
+        // leads, whatever the bar looks like
+        const cell = (v, p, side, ahead) =>
+          "<span class='h2h-val " + side + (ahead && m[3] ? ' lead' : '') +
+          "'>" + Number(v).toFixed(m[2]) + " <span class='dim'>(" + ordn(p) +
+          ')</span></span>';
+        return "<div class='h2h-metric'><div class='h2h-lab'>" + esc(m[0]) +
+          ' · ' + esc(m[1]) + "</div><div class='h2h-row'>" +
+          cell(hv[0], hp, 'a', hp > ap) +
+          "<div class='h2h-bar'><i class='a' style='width:" + share +
+          "%'></i><i class='b' style='width:" + (100 - share) + "%'></i></div>" +
+          cell(av[0], ap, 'b', ap > hp) + '</div></div>';
+      }).join('');
+      if (!rows) return '';
+      return "<h4 class='fx-h'>Tale of the tape — home form against " +
+        "away form</h4><div class='fx-tape'>" + rows +
+        "<p class='fx-note'>Each club is drawn only from the matches it has " +
+        'played at the venue this match is at, and ranked against the rest of ' +
+        'the league at that same venue. The bar splits them by those ranks ' +
+        'and the figure beside it is the real one. Only the first two rows ' +
+        'have a better end — on the others a longer bar means more of ' +
+        'that thing, not better at it.</p></div>';
+    }
     card.innerHTML =
       "<div class='fx-head'><h4>" + esc(f.home) + " <span class='dim'>v</span> " +
         esc(f.away) + "</h4><span class='dim'>" + esc(when) + '</span></div>' +
@@ -2670,6 +2719,7 @@ window.__navRestoring = true;
       heads +
       pair('Recent form \u2014 last six, newest first', formStrip(f.home), formStrip(f.away)) +
       pair(vlabel, venueBox(f.home, 'h'), venueBox(f.away, 'a')) +
+      tapeBlock(f) +
       "<h4 class='fx-h'>Head to head</h4>" + h2hBlock(f) +
       pair('Leading attackers', playerBox(f.home), playerBox(f.away));
   }
