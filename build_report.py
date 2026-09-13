@@ -1614,6 +1614,43 @@ def deserved_block(db, league):
     )
 
 
+REPORT_BASE_MIN = 50      # league results before a base rate is worth quoting
+REPORT_PART_SEASON = 0.8  # below this share of the season graded, say so
+
+
+def _report_base_rates(db, league, before):
+    """Home, draw and away shares for this league, from results before `before`.
+
+    The yardstick every forecast has to clear: the model's call against
+    nothing but the knowledge that home sides win more often. Taken over the
+    model's own lookback window and strictly before the first graded match,
+    so the yardstick has seen no result it is being compared on.
+    """
+    since = (date.fromisoformat(before[:10])
+             - timedelta(days=PREDICT_LOOKBACK_DAYS)).isoformat()
+    # Understat carries the big five and FotMob Allsvenskan. The first table
+    # holding the league is the source, so a league present in both could
+    # never be counted twice
+    for table in ("understat_team_matches", "fotmob_team_matches"):
+        if not db.execute(
+            "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone():
+            continue
+        counts = [0, 0, 0]
+        for scored, missed in db.execute(
+            f"SELECT scored, missed FROM main.{table} WHERE league = ? "
+            "AND home_away = 'h' AND scored IS NOT NULL AND missed IS NOT NULL "
+            "AND match_date >= ? AND match_date < ?",
+            (league, since, before[:10]),
+        ):
+            counts[0 if scored > missed else 1 if scored == missed else 2] += 1
+        if sum(counts):
+            total = sum(counts)
+            return [c / total for c in counts] if total >= REPORT_BASE_MIN else None
+    return None
+
+
 def report_card_block(db, league):
     """How the published predictions have actually fared.
 
@@ -1631,6 +1668,11 @@ def report_card_block(db, league):
     hits = brier = 0.0
     early_brier = 0.0
     revised = 0
+    first_date = min(row["match_date"] for row, _, _, _ in graded)
+    last_date = max(row["match_date"] for row, _, _, _ in graded)
+    base = _report_base_rates(db, league, first_date)
+    base_pick = max(range(3), key=lambda i: base[i]) if base else None
+    base_hits = base_brier = 0.0
     buckets = {label: [0, 0.0, 0] for _, _, label in CALIBRATION_BUCKETS}
     for row, _, _, outcome in graded:
         revised += int(row["first_seen"] != row["last_seen"])
@@ -1639,6 +1681,10 @@ def report_card_block(db, league):
         hits += int(pick == outcome)
         brier += sum((p - (1.0 if i == outcome else 0.0)) ** 2
                      for i, p in enumerate(probs))
+        if base:
+            base_hits += int(base_pick == outcome)
+            base_brier += sum((p - (1.0 if i == outcome else 0.0)) ** 2
+                              for i, p in enumerate(base))
         early = prediction_log.probabilities(row, first=True)
         early_brier += sum((p - (1.0 if i == outcome else 0.0)) ** 2
                            for i, p in enumerate(early))
@@ -1653,23 +1699,72 @@ def report_card_block(db, league):
     brier /= n
     early_brier /= n
 
+    # the yardstick column: the same matches, forecast by nothing but how
+    # often this league's home sides win, draw and lose
+    def base_cell(value):
+        return (f"<td class='num dim'>{value}</td>" if base
+                else "<td class='num dim'>\u2013</td>")
+
     # only worth a row once some calls were actually revised before kickoff;
     # early on every first call is still its last and the number just repeats
     early_row = (
         f"<tr><td>Same calls, as first published <span class='dim'>"
         f"(up to two weeks earlier; {revised} of {n} were later revised)</span></td>"
-        f"<td class='num'>{early_brier:.3f}</td></tr>"
+        f"<td class='num'>{early_brier:.3f}</td><td class='num dim'></td></tr>"
     ) if revised else ""
+    base_title = (
+        f"what calling every match from this league's own record would score: "
+        f"home {base[0]:.0%}, draw {base[1]:.0%}, away {base[2]:.0%}, over the "
+        f"four years before the first graded match" if base else
+        "not enough earlier results in this league to build a yardstick from"
+    )
     headline = (
-        "<div class='card'><table><tbody>"
-        f"<tr><td>Predictions graded</td><td class='num'>{n}</td></tr>"
-        f"<tr><td>Top pick correct</td><td class='num'>{accuracy:.0f}%</td></tr>"
-        f"<tr><td>Brier score <span class='dim'>(lower is better; "
-        f"0.647 is guessing by league base rates)</span></td>"
-        f"<td class='num'>{brier:.3f}</td></tr>"
+        "<div class='card'><table><thead><tr><th></th>"
+        "<th class='num'>Model</th>"
+        f"<th class='num' title='{escape(base_title)}'>Home advantage only</th>"
+        "</tr></thead><tbody>"
+        f"<tr><td>Top pick correct</td><td class='num'>{accuracy:.0f}%</td>"
+        + base_cell(f"{base_hits / n * 100:.0f}%") + "</tr>"
+        f"<tr><td>Brier score <span class='dim'>(lower is better)</span></td>"
+        f"<td class='num'>{brier:.3f}</td>"
+        + base_cell(f"{base_brier / n:.3f}") + "</tr>"
         + early_row +
         "</tbody></table></div>"
     )
+
+    # how much of the season these grades are. The log only began when the
+    # site started writing its calls down, and a run of weeks is not a
+    # sample of a season: it can land on the hardest part of one
+    season_row = db.execute(
+        "SELECT season, COUNT(*) FROM matches WHERE league = ? "
+        "AND home_score IS NOT NULL GROUP BY season ORDER BY season DESC LIMIT 1",
+        (league,),
+    ).fetchone()
+    coverage = ""
+    if season_row:
+        season, played = season_row
+        in_season = sum(1 for row, _, _, _ in graded if row["season"] == season)
+        span = (pretty_date(first_date) if first_date == last_date
+                else f"{pretty_date(first_date)} to {pretty_date(last_date)}")
+        coverage = (
+            f"<p class='meta'>{n} {'call' if n == 1 else 'calls'} graded, "
+            f"{span} \u2014 {in_season} of the {played} matches this league "
+            f"has played in {escape(str(season))}.</p>"
+        )
+        if played and in_season < REPORT_PART_SEASON * played:
+            missing = played - in_season
+            coverage += (
+                "<div class='caveat'><strong>Part of a season, not a "
+                "season.</strong> The log began on "
+                f"{pretty_date(first_date)}, so the {missing} "
+                f"{'match' if missing == 1 else 'matches'} before it "
+                f"{'was' if missing == 1 else 'were'} never graded. A run of "
+                "weeks can land on the hardest stretch of a season and read "
+                "worse than the model is \u2014 or the easiest, and read "
+                "better. The home-advantage column is scored on these same "
+                "matches, which is why it is the fairer thing to compare "
+                "against than any number from another stretch.</div>"
+            )
 
     if n < REPORT_CARD_MIN:
         note = (
@@ -1738,9 +1833,29 @@ def report_card_block(db, league):
         "is a stricter test than the backtest, where the model's own "
         "settings were chosen by looking at the matches it is scored on. "
         "The <em>Brier score</em> is the squared error of the whole "
-        "probability split, not just the top pick: 0 is perfect, 0.647 is "
-        "what guessing each league's home/draw/away base rates gets you, "
-        "and the backtest average is 0.583. Calibration is the more "
+        "probability split, not just the top pick: 0 is perfect and the "
+        "backtest average is 0.583. Neither number means much on its own, "
+        "because both move with how predictable the matches were. So each "
+        "sits beside a yardstick scored on <em>the same matches</em>: every "
+        "one of them forecast from nothing but this league's home, draw and "
+        "away shares over the four years before the first graded call. "
+        "Beating that column is the model earning its keep; it is also why "
+        "the card no longer quotes one fixed base-rate figure for every "
+        "league, since home advantage is not the same in any two of them. "
+        + ("The card grades only what was logged, and the log began partway "
+           "through Allsvenskan's season, which matters more than it sounds: "
+           "replaying the model over every Allsvenskan match since 2023, "
+           "August and September were its hardest weeks \u2014 a Brier "
+           "score of 0.631 pooled across those four seasons, against "
+           "0.597 to 0.604 in every other part of the year. A card that has "
+           "only seen those weeks will read worse than the model is. Over "
+           "whole seasons the same replay beats the home-advantage yardstick "
+           "every time \u2014 0.623 against 0.640 in 2024 and 0.605 against "
+           "0.654 in 2025 \u2014 so if this card shows the model behind it, "
+           "that is a statement about the weeks it has seen rather than about "
+           "the model. "
+           if league == "Allsvenskan" else "")
+        + "Calibration is the more "
         "revealing half of the table — a model can pick winners at a "
         "mediocre rate and still be well calibrated, which is what makes "
         "its probabilities usable. Once some calls have been revised "
@@ -1761,7 +1876,7 @@ def report_card_block(db, league):
         "one to predict with."
     )
     return block("Model report card",
-                 note + headline + calibration + recent_table
+                 note + coverage + headline + calibration + recent_table
                  + deserved_block(db, league),
                  about=about)
 

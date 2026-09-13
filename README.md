@@ -165,7 +165,15 @@ Accents are folded, so "martinez" finds Martínez.
   prediction is written to `predictions/log.csv` when it is made and
   frozen the moment a result exists, so the card can show hit rate, Brier
   score, a calibration table (when it says 60%, does it happen 60% of the
-  time?) and the most recent calls with their outcomes. The log is a
+  time?) and the most recent calls with their outcomes. Hit rate and Brier
+  each sit beside a **home-advantage-only** column scored on the same
+  matches — every one forecast from that league's own home, draw and away
+  shares over the four years before the first graded call — because both
+  numbers move with how predictable a run of fixtures was, and a hard
+  stretch otherwise reads as a bad model. The card also says which dates it
+  covers and what share of the season's played matches that is, and flags
+  it when the log began partway through: Allsvenskan's started on 8 August
+  2026, in the weeks a replay since 2023 finds the model's hardest. The log is a
   committed CSV rather than a database table on purpose: `football.sqlite`
   is gitignored and lives in the Actions cache, which has been lost
   before, and a prediction record that can evaporate proves nothing. The
