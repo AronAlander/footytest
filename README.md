@@ -295,7 +295,11 @@ Accents are folded, so "martinez" finds Martínez.
   venue from both clubs, so in the big five it appears around October. A match already played gets a report: the score,
   the **match stats** both feeds keep for those 90 minutes, what the chances
   deserved (Understat's post-match rerun), and what this site said beforehand,
-  graded called it / missed. The stat rows differ by feed rather than being
+  graded called it / missed — and a miss also says what share the call gave
+  the result that did happen, since a draw is almost never the single
+  likeliest of three results and so can only ever be "missed" otherwise.
+  The report card's recent calls carry the same figure in a column of their
+  own. The stat rows differ by feed rather than being
   padded with blanks — the big five get expected goals, non-penalty xG, deep
   completions (passes completed within about 20 metres of goal), PPDA (lower is more
   pressing, so that bar favours the smaller number) and expected points;

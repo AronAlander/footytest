@@ -745,6 +745,7 @@ td.pcell span { position: relative; }
    bar long before this block existed. The tape follows it rather than the team
    tab's green, so one card never uses two different colours for "away" */
 .fx-tape .h2h-bar i.b { background: var(--away); }
+.fx-gave { margin-left: 6px; color: var(--text-secondary); }
 .fx-tape .h2h-metric { margin: 7px 0; }
 .fx-note { color: var(--text-secondary); font-size: 12px; margin: 2px 0 0; }
 .h2h-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
@@ -1810,6 +1811,10 @@ def report_card_block(db, league):
         names = [row["home"], "Draw", row["away"]]
         mark = ("<span title='top pick was right'>✓</span>" if pick == outcome
                 else "<span class='dim' title='top pick missed'>✗</span>")
+        # the chance the call gave what actually happened. On a hit it is
+        # the top pick again; on a miss it is the part a tick cannot show --
+        # a draw at 31% was a real possibility, a draw at 12% was not
+        gave = f"{names[outcome]} {probs[outcome] * 100:.0f}%"
         recent += (
             f"<tr><td class='dim'>{escape(row['match_date'])}</td>"
             f"<td style='text-align:right'>{escape(row['home'])}</td>"
@@ -1817,12 +1822,15 @@ def report_card_block(db, league):
             f"<td>{escape(row['away'])}</td>"
             f"<td class='dim'>said {escape(names[pick])} "
             f"{probs[pick] * 100:.0f}%</td>"
+            f"<td class='dim'>{escape(gave)}</td>"
             f"<td class='num'>{mark}</td></tr>"
         )
     recent_table = (
         "<h4>Recent calls</h4><div class='card'><table><thead><tr>"
         "<th>Date</th><th style='text-align:right'>Home</th><th class='num'>Score</th>"
-        "<th>Away</th><th>Model's top pick</th><th class='num'></th>"
+        "<th>Away</th><th>Model's top pick</th>"
+        "<th title='the chance the call gave to what actually happened'>"
+        "Gave the result</th><th class='num'></th>"
         "</tr></thead><tbody>" + recent + "</tbody></table></div>"
     )
 
@@ -4832,7 +4840,12 @@ def fixtures_panel(db, leagues):
         "score, what the chances were worth on the day, and — the part worth "
         "coming for — <em>what this site said about it beforehand</em>, taken from "
         "the call written down before kickoff and never edited since. It is marked "
-        "called it or missed on the day's actual result. A match that was never in "
+        "called it or missed on the day's actual result, and a miss also says what "
+        "share the call gave the result that did happen. That second number is the "
+        "fairer half of the verdict. It is the only half a draw can ever earn: a draw "
+        "is almost never the single likeliest of three results, so it is almost "
+        "never the call, and a draw given 31% was a real possibility the word "
+        "\u201cmissed\u201d would otherwise hide. A match that was never in "
         "a predictions slate says so rather than inventing a retrospective opinion; "
         "that is usually a promoted club with no top-flight xG history at the time. "
         "Form and squad lists are deliberately left off a report — they would "
@@ -6829,13 +6842,24 @@ window.__navRestoring = true;
     const hit = top === outcome;
     const badge = "<span class='fx-grade " + (hit ? 'ok' : 'no') + "'>" +
       (hit ? 'called it' : 'missed') + '</span>';
+    // "missed" alone says nothing about how near it was: a draw the call gave
+    // 31% and one it gave 12% get the same word. What it gave the result that
+    // happened is the fairer half of the verdict -- and for a draw the only
+    // half that can ever be kind, since a draw is almost never the single
+    // likeliest of three results and so is almost never the call
+    const behind = m.pct.filter((v) => v > m.pct[outcome]).length;
+    const gave = hit ? '' :
+      " <span class='fx-gave'>gave " +
+      (outcome === 1 ? 'the draw' : esc(names[outcome]) + ' winning') + ' ' +
+      m.pct[outcome] + '%' + (behind === 1 ? ', its second choice' : '') +
+      '</span>';
     const when = m.first
       ? (m.first === m.last
           ? 'written down on ' + shortDate(m.first)
           : 'first called ' + shortDate(m.first) + ', last updated ' + shortDate(m.last))
       : '';
     return probBar(m.p, m.pct, '') +
-      "<p class='meta'>Leaned " + esc(names[top]) + ' at ' + m.pct[top] + '% ' + badge +
+      "<p class='meta'>Leaned " + esc(names[top]) + ' at ' + m.pct[top] + '% ' + badge + gave +
       (m.lam ? " <span class='dim'>\\u00b7 forecast " + num(m.lam[0], 1) + '\\u2013' +
         num(m.lam[1], 1) : "<span class='dim'>") +
       (when ? ' \\u00b7 ' + when : '') + '</span></p>';

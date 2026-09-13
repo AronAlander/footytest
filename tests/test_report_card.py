@@ -119,3 +119,25 @@ def test_the_old_fixed_base_rate_is_gone(db, monkeypatch):
     result(db, 800, "2026-08-10", "Home FC", "Away FC", 1, 1)
     with_log(monkeypatch, [call(800, "2026-08-10", (0.4, 0.3, 0.3))])
     assert "0.647" not in build_report.report_card_block(db, LEAGUE)
+
+
+def test_a_missed_draw_shows_what_the_call_gave_it(db, monkeypatch):
+    """A draw is almost never the call, so the tick can never credit one.
+
+    The share the call gave the draw is what shows whether the model saw it
+    coming: 31% was a real possibility even though the top pick was a win.
+    """
+    history(db, 100, home_wins=50, draws=25)
+    result(db, 950, "2026-08-10", "Home FC", "Away FC", 1, 1)
+    with_log(monkeypatch, [call(950, "2026-08-10", (0.45, 0.31, 0.24))])
+    html = build_report.report_card_block(db, LEAGUE)
+    assert "Gave the result" in html
+    assert "Draw 31%" in html
+    assert "said Home FC 45%" in html
+
+
+def test_an_away_win_the_call_missed_shows_its_share(db, monkeypatch):
+    history(db, 100, home_wins=50, draws=25)
+    result(db, 951, "2026-08-11", "Home FC", "Away FC", 0, 2)
+    with_log(monkeypatch, [call(951, "2026-08-11", (0.52, 0.27, 0.21))])
+    assert "Away FC 21%" in build_report.report_card_block(db, LEAGUE)
