@@ -696,6 +696,7 @@ td.pcell span { position: relative; }
    bar long before this block existed. The tape follows it rather than the team
    tab's green, so one card never uses two different colours for "away" */
 .fx-tape .h2h-bar i.b { background: var(--away); }
+.fx-gave { margin-left: 6px; color: var(--text-secondary); }
 .fx-tape .h2h-metric { margin: 7px 0; }
 .fx-note { color: var(--text-secondary); font-size: 12px; margin: 2px 0 0; }
 .h2h-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
@@ -2622,13 +2623,24 @@ window.__navRestoring = true;
     const hit = top === outcome;
     const badge = "<span class='fx-grade " + (hit ? 'ok' : 'no') + "'>" +
       (hit ? 'called it' : 'missed') + '</span>';
+    // "missed" alone says nothing about how near it was: a draw the call gave
+    // 31% and one it gave 12% get the same word. What it gave the result that
+    // happened is the fairer half of the verdict -- and for a draw the only
+    // half that can ever be kind, since a draw is almost never the single
+    // likeliest of three results and so is almost never the call
+    const behind = m.pct.filter((v) => v > m.pct[outcome]).length;
+    const gave = hit ? '' :
+      " <span class='fx-gave'>gave " +
+      (outcome === 1 ? 'the draw' : esc(names[outcome]) + ' winning') + ' ' +
+      m.pct[outcome] + '%' + (behind === 1 ? ', its second choice' : '') +
+      '</span>';
     const when = m.first
       ? (m.first === m.last
           ? 'written down on ' + shortDate(m.first)
           : 'first called ' + shortDate(m.first) + ', last updated ' + shortDate(m.last))
       : '';
     return probBar(m.p, m.pct, '') +
-      "<p class='meta'>Leaned " + esc(names[top]) + ' at ' + m.pct[top] + '% ' + badge +
+      "<p class='meta'>Leaned " + esc(names[top]) + ' at ' + m.pct[top] + '% ' + badge + gave +
       (m.lam ? " <span class='dim'>\u00b7 forecast " + num(m.lam[0], 1) + '\u2013' +
         num(m.lam[1], 1) : "<span class='dim'>") +
       (when ? ' \u00b7 ' + when : '') + '</span></p>';
