@@ -288,6 +288,22 @@ svg .leader { stroke: var(--text-secondary); stroke-width: 1; opacity: 0.45; }
               margin-left: 5px; font-variant-numeric: tabular-nums; }
 .spark .val.pos { color: var(--win); }
 .spark .val.neg { color: var(--loss); }
+/* the projection panels carry two figures per line, so the heading becomes a
+   row rather than a run of text; the club name is the half that truncates */
+.spark .name.split { display: flex; justify-content: space-between;
+                     align-items: baseline; gap: 8px; }
+.spark .who { overflow: hidden; text-overflow: ellipsis; }
+.spark .proj { font-weight: 700; font-size: 13px; white-space: nowrap;
+               font-variant-numeric: tabular-nums; }
+.spark-sub { display: flex; justify-content: space-between; gap: 4px 8px;
+             margin: 0 0 3px; font-size: 11px; color: var(--text-secondary);
+             flex-wrap: wrap; }
+/* the badge stays on one line; the place text is the half that may wrap, so
+   a narrow column reflows instead of pushing the whole grid wider than its
+   card and giving the section a horizontal scrollbar */
+.spark-sub .val { margin-left: 0; white-space: nowrap; }
+svg .spark-kick { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2;
+                  opacity: .65; }
 .spark-legend { font-size: 12.5px; color: var(--text-secondary); margin: 0 2px 14px; }
 svg .spark-area.up { fill: var(--win); opacity: .16; }
 svg .spark-area.down { fill: var(--loss); opacity: .16; }
@@ -897,6 +913,15 @@ def completed_matches(db, league):
            ORDER BY match_date, event_id""",
         (league,),
     ).fetchall()
+
+
+def _short_month(iso):
+    """2026-08-10 -> 10 Aug; the badge has room for nothing longer."""
+    try:
+        d = datetime.strptime(iso[:10], "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return iso or ""
+    return f"{d.day} {d.strftime('%b')}"
 
 
 def pretty_date(iso):
@@ -2333,8 +2358,21 @@ def season_projection_trend(db, league):
     if n_dates < PROJECT_TREND_MIN_DATES:
         return ""
 
-    order = [live["teams"][i] for i in live["order"] if live["teams"][i] in series]
+    # (projected rank, index) — the rank counts the whole projected table, so
+    # a club the log has not reached yet leaves a gap rather than shifting
+    # everyone below it up a place
+    order = [(rank, i) for rank, i in enumerate(live["order"], 1)
+             if live["teams"][i] in series]
     w, h = 220, 64
+
+    # where the season actually started, so a flat pre-season run reads as
+    # "nothing had happened" rather than "nothing changed". Before the first
+    # match the projection is last season's evidence and cannot move.
+    first_snapshot = min(v[0][0] for v in series.values() if v)
+    first_match = db.execute(
+        "SELECT MIN(match_date) FROM matches WHERE league = ? "
+        "AND home_score IS NOT NULL", (league,),
+    ).fetchone()[0]
 
     # each panel scaled to its OWN range, not a shared one: unlike the xG
     # sparklines below, points has no natural shared reference point (no
@@ -2344,7 +2382,8 @@ def season_projection_trend(db, league):
     # badge already carries the cross-team comparison and this chart's job
     # is showing THIS club's own swings, however small
     cells = []
-    for idx, team in enumerate(order):
+    for rank, i in order:
+        team = live["teams"][i]
         values = series[team]
         if len(values) < 2:
             continue
@@ -2367,7 +2406,17 @@ def season_projection_trend(db, league):
             return h - 6 - (v - lo) / (hi - lo) * (h - 12)
 
         step = w / (len(values) - 1)
-        pts = [(i * step, y_of(v[1])) for i, v in enumerate(values)]
+        pts = [(k * step, y_of(v[1])) for k, v in enumerate(values)]
+        # the first snapshot taken once the season was under way
+        kick = ""
+        if first_match:
+            started_at = next((k for k, v in enumerate(values)
+                               if v[0] >= first_match[:10]), None)
+            if started_at is not None and 0 < started_at < len(values) - 1:
+                kx = started_at * step
+                kick = (f"<line class='spark-kick' x1='{kx:.1f}' y1='2' "
+                        f"x2='{kx:.1f}' y2='{h - 2}'><title>first match of "
+                        "the season</title></line>")
         points = " ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
         delta = values[-1][1] - values[0][1]
         # round before classifying: raw Monte Carlo noise can put an
@@ -2386,13 +2435,25 @@ def season_projection_trend(db, league):
             f"{PROJECT_RELEGATED} {v[4] * 100:.0f}%</title></circle>"
             for (x, y), v in zip(pts, values)
         )
+        # where the club stands today against where this is heading. The
+        # arrow is coloured by that move and nothing else: it used to share a
+        # colour with the delta badge, so a club falling from 3rd to 8th while
+        # its points rose got a green downward arrow
+        place = (f"{ordinal(live['now_rank'][i])} now "
+                 f"{trend_arrow(live['now_rank'][i] - rank)} "
+                 f"projected {ordinal(rank)}"
+                 if live.get("started") else f"projected {ordinal(rank)}")
         cells.append(
-            f"<div class='spark'><p class='name'><span class='rank'>{idx + 1}</span> "
-            f"{escape(team)}<span class='val {val_cls}'>{fmt_delta(delta_r, 0)} pts</span></p>"
+            f"<div class='spark'><p class='name split'>"
+            f"<span class='who'>{escape(team)}</span>"
+            f"<span class='proj'>{live['proj'][i]:.0f} pts</span></p>"
+            f"<p class='spark-sub'><span>{place}</span>"
+            f"<span class='val {val_cls}'>{fmt_delta(delta_r, 0)} pts</span></p>"
             f"<svg viewBox='0 0 {w} {h}' width='100%' role='img' "
             f"aria-label='{escape(team)} projected final points over the season'>"
             f"<title>{escape(team)}: projected final points, {values[0][1]:.0f} on "
             f"{escape(values[0][0])} to {values[-1][1]:.0f} on {escape(values[-1][0])}</title>"
+            f"{kick}"
             f"<polyline class='spark-line {sign}' points='{points}'/>"
             f"{dots}"
             f"<circle class='spark-dot {sign}' cx='{pts[-1][0]:.1f}' cy='{pts[-1][1]:.1f}' r='3'/>"
@@ -2402,13 +2463,16 @@ def season_projection_trend(db, league):
         return ""
 
     legend = (
-        f"<p class='spark-legend'>One panel per team, today's projected order · "
-        f"{n_dates} nightly snapshots logged so far · each panel is scaled to "
-        f"its own range, so a small club's swings are as visible as a title "
-        f"contender's — read the badge, not the height, for the size of the "
-        f"move · <span class='pos'>green</span> = projection has risen since "
-        f"its first snapshot, <span class='neg'>red</span> = fallen · hover "
-        f"a dot for that night's title / European / relegation odds</p>"
+        f"<p class='spark-legend'>The line is <strong>projected final "
+        f"points</strong> — not the table, and not points won so far. Under "
+        f"each club: where it sits today, and where this is heading. "
+        f"{n_dates} nightly snapshots, each panel scaled to its own range, so "
+        f"read the badge rather than the height for the size of a move · "
+        f"the badge is the change since the first snapshot on "
+        f"{escape(_short_month(first_snapshot))}: <span class='pos'>green</span> "
+        f"has risen since, <span class='neg'>red</span> fallen · the upright "
+        f"mark is the season's first match · hover a dot for that night's "
+        f"odds</p>"
     )
     chart = f"<div class='chart-card'>{legend}<div class='spark-grid'>{''.join(cells)}</div></div>"
     about = (
@@ -2424,6 +2488,21 @@ def season_projection_trend(db, league):
         "fixtures without a ball being kicked. Hover any dot for that "
         "night's title, European and relegation odds, which move for the "
         "same two reasons.</p>"
+        "<p><strong>Why a club can sit third and be projected eighth.</strong> "
+        "Points already won are kept exactly as they are, but every fixture "
+        "still to play is simulated from the chances a club creates and "
+        "concedes rather than from the results it has had. Three good "
+        "afternoons in August are three points each and no more; they do not "
+        "persuade the simulation that the remaining thirty-five will go the "
+        "same way. So a club can be top of the table on results and mid-table "
+        "on chances, and the two figures under its name will say so. Early in "
+        "a season they disagree most, and the table wins in the end only if "
+        "the chances catch up.</p>"
+        "<p><strong>Before the first match</strong> the projection is last "
+        "season's evidence and nothing else, so it sits perfectly flat — that "
+        "is a projection with nothing to move on, not a club that has stopped "
+        "moving. The faint upright mark on each line is the season's first "
+        "match, so the flat run is easy to tell from a real plateau.</p>"
         "<p><strong>Why not just show probabilities.</strong> Title, "
         "European and relegation odds are usually a flat 0% or 100% for "
         "most of a season for most clubs — a true story for a handful of "

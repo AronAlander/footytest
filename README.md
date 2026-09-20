@@ -228,7 +228,15 @@ Accents are folded, so "martinez" finds Martínez.
   small panel per team, its own line scaled to its own range so a
   mid-table club's real swings are as visible as a title contender's,
   colored green/red for whether the projection has risen or fallen since
-  its first snapshot. `_compute_projection()` — the shared core behind both
+  its first snapshot. Each panel carries the two numbers that make the line
+  mean something: the projected final points it actually draws, and
+  underneath, where the club sits in the table today against where it is
+  projected to finish — Lazio third and projected eighth is the block
+  working, not a bug, since points already won are kept and the remaining
+  fixtures are simulated from chances rather than results. A faint upright
+  mark shows the season's first match, so the flat run before a ball was
+  kicked reads as a projection with nothing to move on rather than a club
+  standing still. `_compute_projection()` — the shared core behind both
   the live table and the log — takes an `as_of` date that excludes
   everything on or after it, including matches played since, which is what
   let `backfill_projection_log.py` reconstruct history for the season
