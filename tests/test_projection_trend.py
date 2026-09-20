@@ -131,3 +131,38 @@ def test_a_club_missing_from_the_log_does_not_shift_the_ranks(db, monkeypatch):
              if r["teams"][i] != CLUBS[0]]
     for rank, i in shown:
         assert f"projected {build_report.ordinal(rank)}" in html
+
+
+def test_a_dot_is_drawn_only_where_the_projection_moved(db, monkeypatch):
+    """A build runs nightly whether or not football was played.
+
+    Drawing a dot per build buried the line under dots that said nothing —
+    on a quiet night the number does not move at all. A dot now marks a
+    night something happened, which is what makes it worth hovering.
+    """
+    _fixtures(db)
+    dates = ["2026-04-02", "2026-04-03", "2026-04-04", "2026-04-05", "2026-05-02"]
+    # flat, flat, a step, flat, another step: two moves out of four nights
+    moving = {d: {club: 50.0 + (5 if d >= "2026-04-04" else 0)
+                  + (7 if d >= "2026-05-02" else 0) for club in CLUBS}
+              for d in dates}
+    rows = {}
+    for d in dates:
+        for club in CLUBS:
+            rows[f"{d}|{LEAGUE}|{club}"] = {
+                "date": d, "league": LEAGUE, "season": "2026", "team": club,
+                "proj_pts": f"{moving[d][club]:.1f}", "title_pct": "0.2",
+                "top4_pct": "0.4", "bottom3_pct": "0.1",
+            }
+    monkeypatch.setattr(projection_log, "load", lambda *a, **k: rows)
+    monkeypatch.setattr(projection_log, "save", lambda *a, **k: None)
+    monkeypatch.setattr(build_report, "PROJECT_SIMS", 200, raising=False)
+    html = build_report.season_projection_trend(db, LEAGUE)
+    # two moved nights plus the always-drawn latest dot, for every club
+    assert html.count("spark-dot") == len(CLUBS) * 3
+
+
+def test_a_flat_line_carries_no_dots_but_its_last(db, monkeypatch):
+    """Before a ball is kicked the projection cannot move."""
+    html = _render(db, monkeypatch, ["2026-03-01", "2026-03-02", "2026-03-03"])
+    assert html.count("spark-dot") == len(CLUBS)

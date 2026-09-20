@@ -2428,12 +2428,25 @@ def season_projection_trend(db, league):
         delta_r = round(delta)
         sign = "up" if delta_r >= 0 else "down"
         val_cls = "pos" if delta_r > 0 else "neg" if delta_r < 0 else "dim"
+        # a dot per nightly build buried the line in dots that said nothing:
+        # a build runs whether or not football was played, and on a quiet
+        # night the projection does not move. Measured over this season's
+        # log, 330 of Serie A's 340 quiet steps were flat to the last
+        # decimal and none moved by more than 0.1. So a dot is drawn only
+        # where the number actually changed — a night after football, for
+        # this club or for one it has still to play. The threshold is half
+        # the stored precision, so it means "changed at all" rather than a
+        # figure anyone had to tune.
+        moved = [k for k in range(1, len(values))
+                 if abs(values[k][1] - values[k - 1][1]) > 0.05]
         dots = "".join(
-            f"<circle class='spark-dot {sign}' cx='{x:.1f}' cy='{y:.1f}' r='1.7'>"
-            f"<title>{escape(v[0])}: {v[1]:.0f} proj pts · title {v[2] * 100:.0f}% "
-            f"· top {PROJECT_EUROPE} {v[3] * 100:.0f}% · bottom "
-            f"{PROJECT_RELEGATED} {v[4] * 100:.0f}%</title></circle>"
-            for (x, y), v in zip(pts, values)
+            f"<circle class='spark-dot {sign}' cx='{pts[k][0]:.1f}' "
+            f"cy='{pts[k][1]:.1f}' r='1.7'>"
+            f"<title>{escape(values[k][0])}: {values[k][1]:.0f} proj pts · title "
+            f"{values[k][2] * 100:.0f}% · top {PROJECT_EUROPE} "
+            f"{values[k][3] * 100:.0f}% · bottom "
+            f"{PROJECT_RELEGATED} {values[k][4] * 100:.0f}%</title></circle>"
+            for k in moved
         )
         # where the club stands today against where this is heading. The
         # arrow is coloured by that move and nothing else: it used to share a
@@ -2470,9 +2483,11 @@ def season_projection_trend(db, league):
         f"read the badge rather than the height for the size of a move · "
         f"the badge is the change since the first snapshot on "
         f"{escape(_short_month(first_snapshot))}: <span class='pos'>green</span> "
-        f"has risen since, <span class='neg'>red</span> fallen · the upright "
-        f"mark is the season's first match · hover a dot for that night's "
-        f"odds</p>"
+        f"has risen since, <span class='neg'>red</span> fallen · the line "
+        f"carries a point for each of the {n_dates} nightly builds but a dot "
+        f"only where the number moved, so the flat stretches are the days "
+        f"between rounds · the upright mark is the season's first match · "
+        f"hover a dot for that night's odds</p>"
     )
     chart = f"<div class='chart-card'>{legend}<div class='spark-grid'>{''.join(cells)}</div></div>"
     about = (

@@ -236,7 +236,12 @@ Accents are folded, so "martinez" finds Martínez.
   fixtures are simulated from chances rather than results. A faint upright
   mark shows the season's first match, so the flat run before a ball was
   kicked reads as a projection with nothing to move on rather than a club
-  standing still. `_compute_projection()` — the shared core behind both
+  standing still. The line carries a point per nightly build but a **dot
+  only where the number moved** — a build runs whether or not football was
+  played, and on a quiet night the projection does not move at all (330 of
+  Serie A's 340 quiet steps this season were flat to the last decimal, and
+  none moved by more than 0.1), so a dot per build buried the line under
+  dots that said nothing. The flat stretches are the days between rounds. `_compute_projection()` — the shared core behind both
   the live table and the log — takes an `as_of` date that excludes
   everything on or after it, including matches played since, which is what
   let `backfill_projection_log.py` reconstruct history for the season
