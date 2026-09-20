@@ -239,6 +239,22 @@ svg .leader { stroke: var(--text-secondary); stroke-width: 1; opacity: 0.45; }
               margin-left: 5px; font-variant-numeric: tabular-nums; }
 .spark .val.pos { color: var(--win); }
 .spark .val.neg { color: var(--loss); }
+/* the projection panels carry two figures per line, so the heading becomes a
+   row rather than a run of text; the club name is the half that truncates */
+.spark .name.split { display: flex; justify-content: space-between;
+                     align-items: baseline; gap: 8px; }
+.spark .who { overflow: hidden; text-overflow: ellipsis; }
+.spark .proj { font-weight: 700; font-size: 13px; white-space: nowrap;
+               font-variant-numeric: tabular-nums; }
+.spark-sub { display: flex; justify-content: space-between; gap: 4px 8px;
+             margin: 0 0 3px; font-size: 11px; color: var(--text-secondary);
+             flex-wrap: wrap; }
+/* the badge stays on one line; the place text is the half that may wrap, so
+   a narrow column reflows instead of pushing the whole grid wider than its
+   card and giving the section a horizontal scrollbar */
+.spark-sub .val { margin-left: 0; white-space: nowrap; }
+svg .spark-kick { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 2;
+                  opacity: .65; }
 .spark-legend { font-size: 12.5px; color: var(--text-secondary); margin: 0 2px 14px; }
 svg .spark-area.up { fill: var(--win); opacity: .16; }
 svg .spark-area.down { fill: var(--loss); opacity: .16; }
