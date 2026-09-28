@@ -62,16 +62,17 @@ jobs:
       # before the fetch: a failure then costs fifteen seconds, asks the
       # feeds for nothing and publishes nothing.
       #
-      # It needs no database and no network, so it cannot fail because a feed
-      # changed -- only because the code did, which is when blocking is
-      # right. pytest is capped below the next major for the same reason: a
-      # release that changed collection would otherwise stop the nightly data
-      # update. Test-only changes are not in the push paths above and are
-      # covered by the nightly run.
+      # Synthetic tests do not call feeds or require the cached database.
+      # Dependency installation still needs the package index; the runner and
+      # dependency versions can also cause failures unrelated to source edits.
+      # A separate test-only workflow covers Python changes and pull requests.
       - name: Run the tests
         run: |
           python -m pip install --quiet "pytest~=9.1"
           python -m pytest -q
+
+      - name: Check browser interactions before publishing
+        run: python browser_smoke.py
 
       # v3 forces one cold start so the run picks up the reseeded database.
       # Bumping this is the ONLY way history reaches the cloud: the nightly

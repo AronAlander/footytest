@@ -10,3 +10,7 @@ __pycache__/
 *.sqlite-wal
 *.sqlite-shm
 api_keys.json
+
+browser-artifacts/
+
+.pytest_cache/

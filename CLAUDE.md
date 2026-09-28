@@ -1,7 +1,7 @@
 # Working on this repo
 
 A football dashboard: SQLite database → one generated HTML page. `build_report.py`
-turns the database into `report.html` and an identical `docs/index.html`, which
+turns the database into a local `report.html`. With `--publish` it also writes `docs/index.html`, which
 GitHub Pages serves at https://aronalander.github.io/footytest/. `README.md`
 describes what the site contains; this file is about how to change it safely.
 
@@ -10,7 +10,8 @@ describes what the site contains; this file is about how to change it safely.
 ```bash
 python update.py            # fetch fresh data, then rebuild everything
 python update.py --strict   # abort before the build if any fetcher failed
-python build_report.py      # rebuild from the database as it stands
+python build_report.py      # local preview; leaves docs/ and prediction logs untouched
+python build_report.py --publish  # publish outputs, only after a fresh fetch
 python build_report.py --changelog   # what the What's new panel will show
 ```
 
@@ -19,22 +20,24 @@ python build_report.py --changelog   # what the What's new panel will show
 
 ## Never publish a page built from stale data
 
-The database is gitignored and lives in the Actions cache, so a local copy is
-usually days old. Building from it rewrites `docs/` **and** `predictions/log.csv`
-— the model's record of what it called before kickoff — with worse data than is
-already live. This has actually happened: on 2026-08-23 a rebuild from a stale
-local copy erased Serie A's opening results from the published site.
+The database is gitignored and lives in the Actions cache; a local copy is
+usually stale. `python build_report.py` now writes only `report.html` and local
+`archive/` previews. It never writes `docs/` or either committed prediction log.
 
-So:
+`report_records.py` separates rendering from persistence. It stages records for
+later panels to read, then persists only after every page in an explicit
+`--publish` build renders successfully. Standalone panel calls are read-only.
+`update.py` fetches first and invokes that publish mode. Keep `--strict` for
+unattended publication: required fixture requests and coverage failures raise.
 
-- `build_report.py` prints a stale-data warning when a source is over
-  `STALE_HOURS` old. Read it. It is not decoration.
-- After building locally to test a code change, `git checkout -- docs predictions`
-  before committing. Commit the generator, not its output.
-- A code change reaches the site on its own: pushing `build_report.py` triggers
-  the workflow, which fetches fresh data, rebuilds every page and commits
-  `docs/`. That is the intended path to production.
-- Only publish pages by hand from a database you just fetched.
+Do not run `--publish` against stale data. Commit source changes, not preview
+output; the workflow fetches fresh data and publishes. The stale-source warning
+still applies, including to an explicit publish build.
+
+New prediction records carry UTC kickoff/recording times and a hash identifying
+the generator source. Calls freeze at kickoff, even when the result is missing;
+unknown times freeze at midnight UTC. Old records retain blank provenance where
+it was never recorded. Do not infer timestamps for them.
 
 ## The nightly workflow
 
@@ -109,6 +112,12 @@ the same code from a different scope and are where cross-season bugs surface.
 
 ## Before pushing: `python -m pytest`
 
+Run `python browser_smoke.py` too (Chrome required; override with `CHROME_BIN`).
+It uses synthetic data and checks live/archive tabs, search, deep links and
+visible player cards from the team panel. Screenshots and DOM are written to
+`browser-artifacts/`. The test-only workflow runs on Python changes and pull
+requests; the publishing workflow runs both checks before fetching.
+
 The suite in `tests/` is the gate. It must pass before a push, and a change
 that adds a block to a page adds its cases to it. The workflow runs it too,
 before it fetches anything — a push to `build_report.py` publishes, so the
@@ -139,7 +148,7 @@ a file:
 
 A test that passes against the broken code is worse than no test. When you
 add one, reintroduce the bug it is meant to catch and watch it fail — every
-test in these files has been checked that way.
+new regression should be checked that way; do not claim unrun mutation checks.
 
 ## Commits
 

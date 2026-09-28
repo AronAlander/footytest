@@ -15,7 +15,7 @@ Requires Python 3.10+ (standard library only, no dependencies):
 python update.py
 ```
 
-That runs the whole pipeline — the three fetchers below, then the report build.
+That runs the whole pipeline — the four fetchers below, then the report build.
 Add `--push` (or just double-click `update.bat`) to also commit `docs/` and push,
 which redeploys the live dashboard. The steps can of course be run individually:
 
@@ -27,18 +27,36 @@ python fetch_preseason.py
 python build_report.py
 ```
 
+`python build_report.py` is a local preview: it writes `report.html` and
+local archives, leaving `docs/` and the committed prediction histories alone.
+`update.py` fetches data and then runs `build_report.py --publish` to produce
+the publishable output. Use `update.py --strict` for unattended updates.
+
+New calls freeze at the recorded UTC kickoff, regardless of result-feed delays.
+Unknown kickoff times freeze at the start of the match date. Publication times
+and a generator-source hash identify new records; older records have no invented
+provenance. Fixture comparisons require five complete measurements per metric;
+missing measurements are not counted as zero.
+
+Projection charts use calendar dates horizontally and print each panel's vertical
+points range. Different panels still have different scales; compare the points
+labels, not slopes. Changes may reflect matches, data corrections or model changes.
+
 ### Tests
 
 ```
 python -m pytest
+python browser_smoke.py
 ```
 
-Needs `pytest`; nothing else, and no database — every test builds the real
+The unit suite needs `pytest`; the browser check additionally needs Chrome
+(`CHROME_BIN` can select it). Neither requires a live database — every test builds the real
 schema out of the fetchers and inserts the few rows it wants, so the suite
 runs on a fresh clone. It covers the three things that have actually broken
 here: a figure the feed omitted being read as a nought, a block reading the
 wrong season on an archive page, and arithmetic on inputs no real season
-would produce.
+would produce. A separate workflow runs tests on Python changes and pull requests;
+the publishing workflow also checks browser interactions before fetching.
 
 The season is picked automatically: both fetchers flip to the new campaign on
 1 August (European seasons run autumn–spring), and the report scopes every table
@@ -363,7 +381,7 @@ Accents are folded, so "martinez" finds Martínez.
   different matches.
 - **Team analytics** — xG table (points vs expected points), a team comparison
   block (pick 2–3 teams for a percentile radar over five style dimensions —
-  attack, defence, finishing, pressing, chance quality; five and not six
+  attack, defence, finishing, pressing, non-penalty expected goals per deep completion; five and not six
   because territory and box defence restated attack and defence at r=0.87 and
   0.81 over 1,150 club-seasons, so they moved down into the raw numbers — with
   those per-match numbers underneath, deep-linkable via `#club=A,B,C`),
