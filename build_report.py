@@ -10,6 +10,7 @@ JavaScript for tabs and the player explorer (works offline from file://).
 """
 
 import json
+import hashlib
 import math
 import random
 import re
@@ -26,6 +27,7 @@ from zoneinfo import ZoneInfo
 
 import prediction_log
 import projection_log
+import report_records
 
 PROJECT_DIR = Path(__file__).parent
 DB_PATH = PROJECT_DIR / "football.sqlite"
@@ -1394,7 +1396,7 @@ def _fixture_lambdas(strengths, mu, home_adv, lg_deep, home, away):
 
 def predictions_block(db, league):
     fixtures = db.execute(
-        """SELECT match_date, round, home_team, away_team, event_id, season
+        """SELECT match_date, round, home_team, away_team, event_id, season, match_time
            FROM matches WHERE league = ? AND home_score IS NULL AND match_date >= ?
            ORDER BY match_date, event_id LIMIT ?""",
         (league, date.today().isoformat(), PREDICT_SHOWN),
@@ -1404,7 +1406,7 @@ def predictions_block(db, league):
     strengths, mu, home_adv, lg_deep = _team_strengths(db, league)
     if not strengths or mu <= 0:
         return ""
-    names = sorted({n for _, _, h, a, _, _ in fixtures for n in (h, a)})
+    names = sorted({n for _, _, h, a, _, _, _ in fixtures for n in (h, a)})
     mapping = _predict_mapping(names, list(strengths))
     unmatched = sorted(n for n in names if mapping.get(n) is None)
     if unmatched:
@@ -1418,12 +1420,12 @@ def predictions_block(db, league):
 
     # the published calls are written down as they are made, so the report
     # card below can grade the site on what it actually said in advance
-    logged = prediction_log.load()
+    logged = report_records.load(prediction_log)
     today = date.today().isoformat()
     tmap = _team_link_map(db, league)
 
     body = ""
-    for match_date, rnd, home, away, event_id, season in fixtures:
+    for match_date, rnd, home, away, event_id, season, match_time in fixtures:
         rnd_label = f"R{rnd}" if rnd else ""
         fx = f" data-fx='{escape(str(event_id))}'"
         mapped_home, mapped_away = mapping.get(home), mapping.get(away)
@@ -1441,7 +1443,10 @@ def predictions_block(db, league):
         p_home, p_draw, p_away = _outcome_probs(lam_home, lam_away)
         prediction_log.record(logged, today, event_id, league, season,
                               match_date, home, away,
-                              (p_home, p_draw, p_away), (lam_home, lam_away))
+                              (p_home, p_draw, p_away), (lam_home, lam_away),
+                              match_time=match_time,
+                              model_version="source-sha256:" + hashlib.sha256(
+                                  Path(__file__).read_text(encoding="utf-8").encode("utf-8")).hexdigest()[:16])
         tip = (f"{home} {p_home * 100:.0f}% · draw {p_draw * 100:.0f}% · "
                f"{away} {p_away * 100:.0f}% (on {n_min}+ matches each)")
         bar = (f"<div class='prob' title='{escape(tip)}'>"
@@ -1453,7 +1458,7 @@ def predictions_block(db, league):
             f"<td>{_team_label(away, tmap)}</td>"
             f"<td class='num dim'>{lam_home:.1f}–{lam_away:.1f}</td></tr>"
         )
-    prediction_log.save(logged)
+    report_records.stage(prediction_log, logged)
     caveat = (
         "<div class='caveat'><strong>A model, not a promise.</strong> These "
         "probabilities come from a small Poisson model over each club's "
@@ -1550,7 +1555,7 @@ def deserved_comparison(db, leagues):
     themselves free of luck, so this measures deviation from a better
     proxy for the truth, not from the truth.
     """
-    logged = prediction_log.load()
+    logged = report_records.load(prediction_log)
     n = hits = agree = 0
     brier = deserved_brier = deserved_hits = 0.0
     for league in leagues:
@@ -1685,7 +1690,7 @@ def report_card_block(db, league):
     model. That makes the numbers small and slow to accumulate, which is
     the price of them meaning anything.
     """
-    logged = prediction_log.load()
+    logged = report_records.load(prediction_log)
     graded = prediction_log.graded(db, logged, league)
     if not graded:
         return ""
@@ -2201,10 +2206,10 @@ def season_projection_block(db, league):
 
     # every build logs today's numbers, so the trend chart below has
     # tomorrow's history to draw from; a same-day rerun just overwrites
-    logged = projection_log.load()
+    logged = report_records.load(projection_log)
     projection_log.record_snapshot(logged, date.today().isoformat(), league,
                                    season, teams, proj, title, europe, drop, sims)
-    projection_log.save(logged)
+    report_records.stage(projection_log, logged)
 
     def pcell(count, cls):
         share = count / sims
@@ -2351,7 +2356,7 @@ def season_projection_trend(db, league):
     if not live:
         return ""
     season = live["season"]
-    logged = projection_log.load()
+    logged = report_records.load(projection_log)
     series = projection_log.series(logged, league, season)
     n_dates = len({r["date"] for r in logged.values()
                   if r["league"] == league and r["season"] == season})
@@ -2367,7 +2372,7 @@ def season_projection_trend(db, league):
 
     # where the season actually started, so a flat pre-season run reads as
     # "nothing had happened" rather than "nothing changed". Before the first
-    # match the projection is last season's evidence and cannot move.
+    # match the projection primarily reflects earlier seasons.
     first_snapshot = min(v[0][0] for v in series.values() if v)
     first_match = db.execute(
         "SELECT MIN(match_date) FROM matches WHERE league = ? "
@@ -2405,15 +2410,18 @@ def season_projection_trend(db, league):
         def y_of(v, lo=lo - pad, hi=hi + pad):
             return h - 6 - (v - lo) / (hi - lo) * (h - 12)
 
-        step = w / (len(values) - 1)
-        pts = [(k * step, y_of(v[1])) for k, v in enumerate(values)]
+        first_day = date.fromisoformat(values[0][0])
+        span_days = max(1, (date.fromisoformat(values[-1][0]) - first_day).days)
+        def x_of(day):
+            return w * (date.fromisoformat(day[:10]) - first_day).days / span_days
+        pts = [(x_of(v[0]), y_of(v[1])) for v in values]
         # the first snapshot taken once the season was under way
         kick = ""
         if first_match:
             started_at = next((k for k, v in enumerate(values)
                                if v[0] >= first_match[:10]), None)
             if started_at is not None and 0 < started_at < len(values) - 1:
-                kx = started_at * step
+                kx = x_of(first_match)
                 kick = (f"<line class='spark-kick' x1='{kx:.1f}' y1='2' "
                         f"x2='{kx:.1f}' y2='{h - 2}'><title>first match of "
                         "the season</title></line>")
@@ -2470,7 +2478,10 @@ def season_projection_trend(db, league):
             f"<polyline class='spark-line {sign}' points='{points}'/>"
             f"{dots}"
             f"<circle class='spark-dot {sign}' cx='{pts[-1][0]:.1f}' cy='{pts[-1][1]:.1f}' r='3'/>"
-            "</svg></div>"
+            "</svg>"
+            f"<p class='spark-sub'><span>{escape(_short_month(values[0][0]))}</span>"
+            f"<span>{escape(_short_month(values[-1][0]))}</span></p>"
+            f"<p class='meta dim'>Vertical scale: {lo - pad:.1f}–{hi + pad:.1f} points</p></div>"
         )
     if not cells:
         return ""
@@ -2485,8 +2496,8 @@ def season_projection_trend(db, league):
         f"{escape(_short_month(first_snapshot))}: <span class='pos'>green</span> "
         f"has risen since, <span class='neg'>red</span> fallen · the line "
         f"carries a point for each of the {n_dates} nightly builds but a dot "
-        f"only where the number moved, so the flat stretches are the days "
-        f"between rounds · the upright mark is the season's first match · "
+        f"only where the number moved. Horizontal spacing follows calendar days; "
+        f"changes can reflect matches, data corrections or model updates · the upright mark is the season's first match · "
         f"hover a dot for that night's odds</p>"
     )
     chart = f"<div class='chart-card'>{legend}<div class='spark-grid'>{''.join(cells)}</div></div>"
@@ -3003,7 +3014,7 @@ def rolling_sparklines(db, league):
     if not rolling:
         return ""
 
-    max_abs = max(abs(v) for values in rolling.values() for v in values)
+    max_abs = max(abs(v) for values in rolling.values() for v in values) or 1.0
     order = [r[0] for r in db.execute(
         "SELECT team FROM understat_team_matches WHERE league = ? "
         "GROUP BY team ORDER BY SUM(pts) DESC, team", (league,)
@@ -4461,7 +4472,7 @@ TAPE_UNDERSTAT = (
     ("Attack", "npxG per match", 2, False, True),
     ("Defence", "npxGA per match", 2, True, True),
     ("Pressing", "PPDA", 1, True, False),
-    ("Chance quality", "npxG per deep completion", 3, False, False),
+    ("xG / deep completion", "non-penalty xG per deep completion", 3, False, False),
 )
 # Allsvenskan comes from FotMob, which publishes no PPDA and no deep
 # completions but does publish rather more of its own. Set-play share is the
@@ -4474,17 +4485,28 @@ TAPE_FOTMOB = (
     ("Set plays", "% of xG from a stopped ball", 0, False, False),
 )
 
+# Each metric requires at least five complete match lines. Paired ratios
+# use the same rows in numerator and denominator; NULL never means zero.
 TAPE_SQL_UNDERSTAT = """
-    SELECT team, COUNT(*), SUM(npxg) / COUNT(*), SUM(npxga) / COUNT(*),
-           AVG(ppda),
-           CASE WHEN SUM(deep) > 0 THEN SUM(npxg) / SUM(deep) END
+    SELECT team, COUNT(*),
+           CASE WHEN COUNT(npxg) >= 5 THEN AVG(npxg) END,
+           CASE WHEN COUNT(npxga) >= 5 THEN AVG(npxga) END,
+           CASE WHEN COUNT(ppda) >= 5 THEN AVG(ppda) END,
+           CASE WHEN COUNT(CASE WHEN npxg IS NOT NULL THEN deep END) >= 5
+                THEN SUM(CASE WHEN deep IS NOT NULL THEN npxg END) /
+                     NULLIF(SUM(CASE WHEN npxg IS NOT NULL THEN deep END), 0) END
       FROM understat_team_matches
      WHERE league = ? AND home_away = ? GROUP BY team
 """
 TAPE_SQL_FOTMOB = """
-    SELECT team, COUNT(*), SUM(npxg) / COUNT(*), SUM(npxga) / COUNT(*),
-           SUM(tackles + interceptions) / COUNT(*),
-           CASE WHEN SUM(xg) > 0 THEN 100.0 * SUM(xg_set_play) / SUM(xg) END
+    SELECT team, COUNT(*),
+           CASE WHEN COUNT(npxg) >= 5 THEN AVG(npxg) END,
+           CASE WHEN COUNT(npxga) >= 5 THEN AVG(npxga) END,
+           CASE WHEN COUNT(tackles + interceptions) >= 5
+                THEN AVG(tackles + interceptions) END,
+           CASE WHEN COUNT(CASE WHEN xg IS NOT NULL THEN xg_set_play END) >= 5
+                THEN 100.0 * SUM(CASE WHEN xg IS NOT NULL THEN xg_set_play END) /
+                     NULLIF(SUM(CASE WHEN xg_set_play IS NOT NULL THEN xg END), 0) END
       FROM fotmob_team_matches
      WHERE league = ? AND home_away = ? GROUP BY team
 """
@@ -4681,7 +4703,7 @@ def load_fixture_data(db, league):
     # Understat's rerun of the same match, keyed the same way
     forecasts = _forecasts_for(db, league, fx_names)
 
-    logged = prediction_log.load()
+    logged = report_records.load(prediction_log)
     out_results = []
     for event_id, mdate, mtime, rnd, home, away, hg, ag in results:
         day = (mdate or "")[:10]
@@ -4830,10 +4852,9 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None,
         "(flipped, so further out = fewer chances allowed). <strong>Finishing</strong> is "
         "goals minus xG — conversion above or below what the chances deserved. "
         "<strong>Pressing</strong> is PPDA flipped (opponent passes allowed per defensive "
-        "action — fewer means a higher press). <strong>Chance quality</strong> is "
-        "non-penalty xG per deep completion: what a side makes of the territory it "
-        "wins, so a team that works the ball to the six-yard box sits far out and one "
-        "that reaches the edge of the area and shoots from there does not.</p>"
+        "action — fewer means a higher press). <strong>xG / deep completion</strong> "
+        "divides non-penalty expected goals by completed passes near goal. It is "
+        "a ratio of two team totals, not expected goals per shot or shot accuracy.</p>"
         "<p><strong>Why five and not six.</strong> It used to draw Territory (deep "
         "completions per match) and Box defence (the same conceded) as two more spokes. "
         "Across 1,150 completed club-seasons Territory correlates with Attack at 0.87 "
@@ -4845,14 +4866,13 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None,
         "Pressing at 0.50.</p>"
         "<p><strong>How to read it.</strong> The shape is the identity: a dominant "
         "pressing side bulges toward Attack–Pressing, a low-block counter team can look "
-        "small here yet still win points on Finishing and Chance quality. The table "
+        "small here yet still differ on Finishing and xG / deep completion. The table "
         "underneath gives the raw per-match numbers behind each axis, the two that left "
         "it, and points against expected points. One caveat on Finishing: it is the one "
         "axis that does not carry — a club's goals-minus-xG repeats from one season to "
         "the next at about 0.22, where Attack repeats at 0.79 — so read it as what "
         "happened rather than as what this side is. Shots on target aren't in the data "
-        "— Understat's team feed doesn't publish them — so chance <em>quality</em> (xG) "
-        "stands in for shot accuracy.</p>"
+        "— Understat's team feed doesn't publish them — so this chart does not measure shot accuracy.</p>"
         "<p><strong>Season by season.</strong> Under a single club, one row per season "
         "as far back as the data goes \u2014 where they finished, the record, goal "
         "difference, xG difference, and points against expected points. The bar is the "
@@ -5966,7 +5986,7 @@ window.__navRestoring = true;
     { key: 'npxga',   label: 'Defence',        unit: 'npxGA / match',        dec: 2, invert: true },
     { key: 'gdiff',   label: 'Finishing',      unit: 'G \\u2212 xG (season)', dec: 1, signed: true },
     { key: 'ppda',    label: 'Pressing',       unit: 'PPDA',                 dec: 1, invert: true },
-    { key: 'quality', label: 'Chance quality', unit: 'npxG per deep comp.',  dec: 3 }
+    { key: 'quality', label: 'xG / deep completion', unit: 'non-penalty xG per deep completion',  dec: 3 }
   ];
   const EXTRA = [
     { key: 'deep',         label: 'Territory \\u00b7 deep comp. / match', dec: 1 },
@@ -7042,7 +7062,9 @@ window.__navRestoring = true;
         "away form</h4><div class='fx-tape'>" + rows +
         "<p class='fx-note'>Each club is drawn only from the matches it has " +
         'played at the venue this match is at, and ranked against the rest of ' +
-        'the league at that same venue. The bar splits them by those ranks ' +
+        'the league at that same venue. Each measure needs five complete match ' +
+        'lines; missing measurements are excluded, not counted as zero. ' +
+        'The bar splits them by those ranks ' +
         'and the figure beside it is the real one. Only the first two rows ' +
         'have a better end \u2014 on the others a longer bar means more of ' +
         'that thing, not better at it.</p></div>';
@@ -8274,7 +8296,7 @@ def keeper_rows(db, league, min_minutes=GK_MIN_MINUTES):
             "minutes": 0.0, "saves": 0.0, "conceded": 0.0, "own": 0,
             "prevented": 0.0, "rating": 0.0, "rated": 0, "dropped": 0,
         })
-        if prevented is None and not quiet:
+        if saves is None or conceded is None or (prevented is None and not quiet):
             # his totals are short this match, and the row says by how many
             k["dropped"] += 1
             dropped += 1
@@ -9285,7 +9307,7 @@ def show_changelog() -> None:
           "that day.")
 
 
-def main() -> None:
+def _build(publish=False) -> None:
     if "--changelog" in sys.argv:
         return show_changelog()
     if not DB_PATH.exists():
@@ -9296,9 +9318,11 @@ def main() -> None:
     warn_if_stale(db)
     scope_to_current_season(db)
     html = build_page(db, season_nav(db), generated)
-    REPORT_PATH.write_text(html, encoding="utf-8")
-    DOCS_PATH.parent.mkdir(exist_ok=True)
-    DOCS_PATH.write_text(html, encoding="utf-8")
+    report_path = REPORT_PATH
+    docs_path = DOCS_PATH if publish else REPORT_PATH
+    report_path.write_text(html, encoding="utf-8")
+    docs_path.parent.mkdir(exist_ok=True)
+    docs_path.write_text(html, encoding="utf-8")
     archive_seasons = [r[0] for r in db.execute(
         "SELECT DISTINCT season FROM main.understat_players "
         "WHERE season < (SELECT MAX(season) FROM main.understat_players) "
@@ -9307,12 +9331,13 @@ def main() -> None:
     frozen_seasons = fotmob_archive_seasons(db)
     db.close()
     print(f"Report written to {REPORT_PATH}")
-    print(f"Dashboard copy written to {DOCS_PATH} (commit it and it's served by GitHub Pages)")
+    if publish:
+        print(f"Dashboard copy written to {docs_path}")
 
     # one frozen page per past season, next to the report and under docs/
     # (the local copy keeps report.html's season dropdown working offline)
     local_dir = PROJECT_DIR / "archive"
-    docs_dir = DOCS_PATH.parent / "archive"
+    docs_dir = DOCS_PATH.parent / "archive" if publish else local_dir
     for target in (local_dir, docs_dir):
         target.mkdir(exist_ok=True)
     for season in archive_seasons:
@@ -9344,6 +9369,14 @@ def main() -> None:
     if frozen_seasons:
         print(f"Season archives written for {len(frozen_seasons)} finished "
               f"FotMob seasons ({', '.join(f'{lg} {s}' for lg, s in frozen_seasons)})")
+
+
+def main() -> None:
+    publish = "--publish" in sys.argv
+    with report_records.capture() as pending:
+        _build(publish=publish)
+        if publish:
+            report_records.persist(pending)
 
 
 if __name__ == "__main__":

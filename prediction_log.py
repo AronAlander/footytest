@@ -19,7 +19,7 @@ across postponements:
   first_seen / p*_first   the earliest call, from up to two weeks out
   last_seen / p*          the freshest call before kickoff, updated on
                           every build while the fixture is unplayed and
-                          frozen the moment a result exists
+                          frozen at the recorded UTC kickoff
 
 Grading uses the frozen last call — the model's best information at
 kickoff. Keeping the first one too costs three columns and answers a
@@ -28,6 +28,7 @@ approaches, or is it just as good a fortnight out?
 """
 
 import csv
+from datetime import datetime, timezone
 from pathlib import Path
 
 LOG_PATH = Path(__file__).resolve().parent / "predictions" / "log.csv"
@@ -36,6 +37,8 @@ FIELDS = [
     "event_id", "league", "season", "match_date", "home", "away",
     "first_seen", "p_home_first", "p_draw_first", "p_away_first",
     "last_seen", "p_home", "p_draw", "p_away", "lam_home", "lam_away",
+    "kickoff_utc", "first_recorded_at", "last_recorded_at",
+    "first_model_version", "model_version",
 ]
 
 
@@ -58,33 +61,56 @@ def save(rows, path=LOG_PATH):
         writer.writerows(ordered)
 
 
-def record(rows, today, event_id, league, season, match_date, home, away,
-           probs, lambdas):
-    """Add or refresh one fixture's prediction.
+def kickoff_utc(match_date, match_time):
+    """TheSportsDB's UTC date/time; unknown times freeze at start of the day.
 
-    Callers only ever pass fixtures that are still unplayed, so a row
-    freezes by itself: once a result lands the fixture stops being
-    offered here and its last stored call can never be touched again.
+    An unknown kickoff must never permit a same-day revision after play began.
     """
+    try:
+        text = f"{match_date[:10]}T{match_time or '00:00:00'}"
+        result = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return result.replace(tzinfo=timezone.utc) if result.tzinfo is None else result.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def record(rows, today, event_id, league, season, match_date, home, away,
+           probs, lambdas, *, match_time=None, now=None, model_version="unknown"):
+    """Record only before kickoff, even if the result feed is delayed.
+
+    Legacy rows keep unknown provenance blank. An already reached stored
+    kickoff stays frozen even if a later payload moves the fixture date.
+    """
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("recording time must be timezone-aware")
+    cutoff = kickoff_utc(match_date, match_time)
     event_id = str(event_id)
-    p_home, p_draw, p_away = (f"{p:.4f}" for p in probs)
     existing = rows.get(event_id)
-    if existing:
-        existing.update({
-            "match_date": match_date, "last_seen": today,
-            "p_home": p_home, "p_draw": p_draw, "p_away": p_away,
-            "lam_home": f"{lambdas[0]:.3f}", "lam_away": f"{lambdas[1]:.3f}",
-        })
-        return
-    rows[event_id] = {
-        "event_id": event_id, "league": league, "season": season,
-        "match_date": match_date, "home": home, "away": away,
-        "first_seen": today, "p_home_first": p_home,
-        "p_draw_first": p_draw, "p_away_first": p_away,
-        "last_seen": today, "p_home": p_home, "p_draw": p_draw,
-        "p_away": p_away,
+    previous_cutoff = (datetime.fromisoformat(existing["kickoff_utc"])
+                       if existing and existing.get("kickoff_utc") else None)
+    if cutoff is None or now >= cutoff or (previous_cutoff and now >= previous_cutoff):
+        return False
+    stamp = now.astimezone(timezone.utc).isoformat(timespec="seconds")
+    p_home, p_draw, p_away = (f"{p:.4f}" for p in probs)
+    values = {
+        "match_date": match_date, "last_seen": stamp[:10],
+        "p_home": p_home, "p_draw": p_draw, "p_away": p_away,
         "lam_home": f"{lambdas[0]:.3f}", "lam_away": f"{lambdas[1]:.3f}",
+        "kickoff_utc": cutoff.isoformat(), "last_recorded_at": stamp,
+        "model_version": model_version,
     }
+    if existing:
+        existing.update(values)
+    else:
+        rows[event_id] = {
+            "event_id": event_id, "league": league, "season": season,
+            "home": home, "away": away, "first_seen": stamp[:10],
+            "p_home_first": p_home, "p_draw_first": p_draw, "p_away_first": p_away,
+            "first_recorded_at": stamp, "first_model_version": model_version,
+            **values,
+        }
+    return True
 
 
 def graded(db, rows, league=None):

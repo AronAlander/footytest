@@ -165,17 +165,40 @@ def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched
 
     all_events = []
     total = with_result = 0
+    failures = []
     for round_number in range(1, league["rounds"] + 1):
         time.sleep(REQUEST_PAUSE)
         url = f"{BASE_URL}/eventsround.php?id={league['id']}&r={round_number}&s={league['season']}"
         try:
-            events = fetch_json(url).get("events") or []
+            payload = fetch_json(url)
+            if "events" not in payload or not isinstance(payload["events"], (list, type(None))):
+                raise ValueError("invalid events response")
+            events = payload["events"] or []
+            if any(not e.get("idEvent") or not e.get("strHomeTeam") or
+                   not e.get("strAwayTeam") for e in events):
+                raise ValueError("incomplete fixture identity")
+            known = {str(r[0]) for r in db.execute(
+                "SELECT event_id FROM matches WHERE league=? AND season=? AND round=?",
+                (league_name, league["season"], round_number))}
+            received = {str(e["idEvent"]) for e in events}
+            # Double round-robin schedules have (rounds + 2) / 4 fixtures
+            # per round. This catches truncated new rounds as well as old ones.
+            expected = (league["rounds"] + 2) // 4
+            if len(received) < expected or len(received) != len(events):
+                raise ValueError(f"expected {expected} distinct fixtures, got {len(received)}")
+            if known - received:
+                raise ValueError(f"response omitted {len(known - received)} stored fixtures")
         except Exception as error:
             print(f"  round {round_number}: FAILED ({error})")
+            failures.append(round_number)
             continue
         all_events.extend(events)
-        total += upsert_matches(db, league_name, events, fetched_at)
         with_result += sum(1 for e in events if e.get("intHomeScore") is not None)
+
+    if failures or not all_events:
+        db.rollback()
+        raise RuntimeError(f"{league_name}: incomplete fixture fetch; failed rounds {failures}")
+    total = upsert_matches(db, league_name, all_events, fetched_at)
 
     (DATA_DIR / f"{slug}_rounds.json").write_text(
         json.dumps({"events": all_events}, indent=2), encoding="utf-8"

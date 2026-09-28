@@ -24,9 +24,9 @@ FETCHERS = ["fetch_data.py", "fetch_understat.py", "fetch_fotmob.py", "fetch_pre
 SITE_URL = "https://aronalander.github.io/footytest/"
 
 
-def run_step(script: str) -> bool:
+def run_step(script: str, *args: str) -> bool:
     print(f"\n{'=' * 60}\n>>> {script}\n{'=' * 60}", flush=True)
-    result = subprocess.run([sys.executable, str(PROJECT_DIR / script)], cwd=PROJECT_DIR)
+    result = subprocess.run([sys.executable, str(PROJECT_DIR / script), *args], cwd=PROJECT_DIR)
     return result.returncode == 0
 
 
@@ -38,8 +38,8 @@ def push_site() -> bool:
     print(f"\n{'=' * 60}\n>>> publish to GitHub Pages\n{'=' * 60}", flush=True)
     # commit docs/ BEFORE pulling: the build just rewrote it, and
     # `git pull --rebase` refuses to run over unstaged changes
-    if git("status", "--porcelain", "docs", capture=True).stdout.strip():
-        git("add", "docs")
+    if git("status", "--porcelain", "docs", "predictions", capture=True).stdout.strip():
+        git("add", "docs", "predictions")
         if git("commit", "-m", f"Update data {date.today().isoformat()}").returncode != 0:
             print("! git commit failed")
             return False
@@ -65,7 +65,7 @@ def main() -> None:
                      "site NOT rebuilt or published")
         print(f"\n! fetch failed for: {', '.join(failed)} -- rebuilding on last good data")
 
-    if not run_step("build_report.py"):
+    if not run_step("build_report.py", "--publish"):
         sys.exit("build_report.py failed -- report and site NOT updated")
 
     if push and not push_site():
