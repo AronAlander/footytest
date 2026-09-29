@@ -344,6 +344,24 @@ svg .spark-dot.open.down { stroke: var(--loss); }
   background: var(--text-primary); transform: translateX(-1px);
 }
 .sim-card .controls { margin: 4px 4px 14px; }
+.fan-card .controls { margin: 4px 4px 10px; display: flex; flex-wrap: wrap;
+                      align-items: baseline; gap: 6px 14px; }
+.fan-head { font-size: 13.5px; color: var(--text-secondary); }
+.fan-head b { font-variant-numeric: tabular-nums; }
+.fan-head .pos { color: var(--win); } .fan-head .neg { color: var(--loss); }
+/* capped like the race chart and the defensive map: the type inside an SVG
+   scales with it, and at full card width it read at eighteen pixels */
+.fan-plot { max-width: 680px; margin: 0 auto; }
+.fan-plot svg { width: 100%; height: auto; display: block; overflow: visible; }
+.fan-key { margin: 8px 4px 2px; font-size: 12px; color: var(--text-secondary); }
+svg .fan-path { fill: none; stroke-width: 1; stroke-opacity: .22; }
+svg .fan-path.top { stroke: var(--win); }
+svg .fan-path.mid { stroke: var(--muted); stroke-opacity: .14; }
+svg .fan-path.bottom { stroke: var(--loss); }
+svg .fan-med { fill: none; stroke: var(--text-primary); stroke-width: 2.2; }
+svg .fan-thr { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+svg .fan-lab, svg .fan-ax { font-size: 11px; fill: var(--text-secondary); }
+@media (max-width: 620px) { svg .fan-lab, svg .fan-ax { font-size: 16px; } }
 .sim-fixtures { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 24px; }
 @media (max-width: 640px) { .sim-fixtures { columns: 1; } }
 .sim-fixtures li { font-size: 13px; padding: 3px 0; white-space: nowrap; }
@@ -2736,6 +2754,245 @@ def _poisson_js():
   });
 })();
 """
+
+
+
+FAN_JS = r"""
+(function () {
+  // a seeded generator: the sample holds still between page loads
+  function seeded(seed) {
+    return function () {
+      seed = (seed + 0x6D2B79F5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function goals(lam, rand) {
+    var L = Math.exp(-lam), k = 0, p = 1;
+    do { k++; p *= rand(); } while (p > L);
+    return k - 1;
+  }
+  function day(s) { return new Date((s || '').slice(0, 10) + 'T00:00:00Z').getTime(); }
+  function median(a) { var b = a.slice().sort(function (x, y) { return x - y; });
+                       return b[Math.floor(b.length / 2)]; }
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(name, attrs) {
+    var e = document.createElementNS(NS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>]/g, function (c) {
+      return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'; });
+  }
+  function short(s) {
+    var m = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var p = String(s).slice(0, 10).split('-');
+    return p.length < 3 ? s : Number(p[2]) + ' ' + m[Number(p[1]) - 1];
+  }
+
+  function play(sim, fan, club) {
+    var n = sim.teams.length;
+    var fx = sim.fixtures.slice().sort(function (a, b) {
+      return (a[4] || '').localeCompare(b[4] || ''); });
+    var days = [];
+    fx.forEach(function (f) {
+      var d = (f[4] || '').slice(0, 10);
+      if (days[days.length - 1] !== d) days.push(d); });
+    var rand = seeded(7919 * (club + 1) + fx.length);
+    var paths = [], where = [], finals = [];
+    for (var s = 0; s < fan.paths; s++) {
+      var pts = sim.basePts.slice(), gd = sim.baseGd.slice();
+      var path = [pts[club]], k = 0;
+      for (var di = 0; di < days.length; di++) {
+        while (k < fx.length && (fx[k][4] || '').slice(0, 10) === days[di]) {
+          var f = fx[k], hg = goals(f[2], rand), ag = goals(f[3], rand);
+          gd[f[0]] += hg - ag; gd[f[1]] += ag - hg;
+          if (hg > ag) pts[f[0]] += 3;
+          else if (hg === ag) { pts[f[0]] += 1; pts[f[1]] += 1; }
+          else pts[f[1]] += 3;
+          k++;
+        }
+        path.push(pts[club]);
+      }
+      var tie = pts.map(function () { return rand(); });
+      var order = pts.map(function (_, i) { return i; }).sort(function (x, y) {
+        return pts[y] - pts[x] || gd[y] - gd[x] || tie[y] - tie[x]; });
+      var rank = order.indexOf(club);
+      where.push(rank < fan.top ? 'top' : rank >= n - fan.bottom ? 'bottom' : 'mid');
+      paths.push(path);
+      finals.push(order.map(function (i) { return pts[i]; }));
+    }
+    return { days: days, paths: paths, where: where, finals: finals, n: n };
+  }
+
+  function draw(card) {
+    var view = card.closest('.lgview');
+    var simEl = view && view.querySelector('.sim-data');
+    var fanEl = card.querySelector('.fan-data');
+    if (!simEl || !fanEl) { card.closest('.block').hidden = true; return; }
+    var sim = JSON.parse(simEl.textContent), fan = JSON.parse(fanEl.textContent);
+    var club = Number(card.querySelector('.fan-pick').value);
+    var run = play(sim, fan, club);
+    if (!run.days.length) return;
+
+    var W = 640, H = 290, L = 36, R = 96, T = 12, B = 26;
+    var t0 = day(fan.today), t1 = Math.max(day(run.days[run.days.length - 1]), t0 + 1);
+    var xs = [L].concat(run.days.map(function (d) {
+      return L + (W - L - R) * Math.max(0, day(d) - t0) / (t1 - t0); }));
+    var lo = Infinity, hi = -Infinity;
+    run.paths.forEach(function (p) { lo = Math.min(lo, p[0]); hi = Math.max(hi, p[p.length - 1]); });
+    var lines = [
+      ['top ' + fan.top, median(run.finals.map(function (f) { return f[fan.top - 1]; }))],
+      ['safety', median(run.finals.map(function (f) { return f[run.n - fan.bottom - 1]; }))]
+    ];
+    lines.forEach(function (l) { if (l[1] > hi && l[1] < hi + 12) hi = l[1]; });
+    hi += 3; lo = Math.max(0, lo - 2);
+    function y(v) { return T + (hi - v) / (hi - lo) * (H - T - B); }
+
+    var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img' });
+    var step = hi - lo > 60 ? 20 : 10;
+    for (var g = Math.ceil(lo / step) * step; g <= hi; g += step) {
+      var tx = el('text', { x: L - 6, y: (y(g) + 4).toFixed(1), 'text-anchor': 'end', 'class': 'fan-ax' });
+      tx.textContent = g; svg.appendChild(tx);
+    }
+    lines.forEach(function (l) {
+      if (l[1] < lo || l[1] > hi) return;
+      svg.appendChild(el('line', { x1: L, x2: W - R, y1: y(l[1]).toFixed(1),
+                                   y2: y(l[1]).toFixed(1), 'class': 'fan-thr' }));
+      var lab = el('text', { x: W - R + 6, y: (y(l[1]) + 4).toFixed(1), 'class': 'fan-lab' });
+      lab.textContent = l[0] + ' ' + l[1]; svg.appendChild(lab);
+    });
+    // grey underneath, so the lines that decide the story sit on top
+    ['mid', 'bottom', 'top'].forEach(function (kind) {
+      run.paths.forEach(function (p, s) {
+        if (run.where[s] !== kind) return;
+        svg.appendChild(el('polyline', { 'class': 'fan-path ' + kind,
+          points: p.map(function (v, i) { return xs[i].toFixed(1) + ',' + y(v).toFixed(1); }).join(' ') }));
+      });
+    });
+    var med = run.paths[0].map(function (_, i) {
+      return median(run.paths.map(function (p) { return p[i]; })); });
+    svg.appendChild(el('polyline', { 'class': 'fan-med',
+      points: med.map(function (v, i) { return xs[i].toFixed(1) + ',' + y(v).toFixed(1); }).join(' ') }));
+    var a = el('text', { x: L, y: H - 6, 'class': 'fan-ax' }); a.textContent = 'now';
+    var b = el('text', { x: W - R, y: H - 6, 'class': 'fan-ax', 'text-anchor': 'end' });
+    b.textContent = short(run.days[run.days.length - 1]);
+    svg.appendChild(a); svg.appendChild(b);
+
+    var name = sim.teams[club];
+    svg.setAttribute('aria-label', name + ': ' + fan.paths + ' simulated seasons, ' +
+      fan.europe[club] + '% finish in the top ' + fan.top + ', ' +
+      fan.drop[club] + '% in the bottom ' + fan.bottom);
+    var plot = card.querySelector('.fan-plot');
+    plot.innerHTML = ''; plot.appendChild(svg);
+    card.querySelector('.fan-head').innerHTML =
+      '<b class="pos">' + fan.europe[club] + '%</b> finish in the top ' + fan.top +
+      ' &middot; <b class="neg">' + fan.drop[club] + '%</b> in the bottom ' +
+      fan.bottom + ' <span class="dim">&middot; ' + esc(name) + ', ' +
+      fan.sims.toLocaleString('en') + ' simulations</span>';
+    card.setAttribute('data-drawn', String(club));
+  }
+
+  function wake(card) {
+    if (card.getAttribute('data-drawn') === card.querySelector('.fan-pick').value) return;
+    draw(card);
+  }
+  document.addEventListener('change', function (e) {
+    var pick = e.target.closest && e.target.closest('.fan-pick');
+    if (pick) draw(pick.closest('.fan-card'));
+  });
+  var cards = document.querySelectorAll('.fan-card');
+  if (!('IntersectionObserver' in window)) {
+    cards.forEach(draw);
+  } else {
+    // played out only when it comes into view: six leagues of seasons that
+    // nobody scrolled to would be work done for nothing
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) wake(en.target); });
+    }, { rootMargin: '200px' });
+    cards.forEach(function (c) { io.observe(c); });
+  }
+})();
+"""
+
+FAN_PATHS = 160   # seasons drawn as lines; the percentages use all of them
+
+
+def season_projection_fan(db, league):
+    """Every way the season could go, drawn for one club at a time.
+
+    The projection above runs thousands of simulated seasons and shows their
+    average. This draws a sample of them as lines: each one a club's points
+    total, fixture date by fixture date, from tonight to the last day,
+    coloured by where that simulated season left it. The spread of the fan
+    is the uncertainty, which the table can only state as a percentage.
+
+    It carries almost nothing of its own. The seasons are played out in the
+    browser from the fixture list and expected goals the "Simulate one
+    season" block below already ships, so the fan costs a club list and two
+    columns of percentages. Those percentages are the server's, over every
+    simulation, so the headline matches the table exactly; the lines are a
+    fixed-seed sample of FAN_PATHS seasons, and the page says so.
+    """
+    r = _compute_projection(db, league)
+    if not r or not r["fixture_lambdas"]:
+        return ""
+    sims = r["sims"]
+    europe = [round(100 * c / sims) for c in r["europe"]]
+    drop = [round(100 * c / sims) for c in r["drop"]]
+    # open on the club whose top-four place is most in doubt: its fan is
+    # the one that visibly straddles a line, which is the point of the chart
+    order = list(r["order"])
+    focus = min(order, key=lambda i: (abs(r["europe"][i] / sims - 0.5),
+                                      order.index(i)))
+    payload = {
+        "order": order, "europe": europe, "drop": drop, "focus": focus,
+        "top": PROJECT_EUROPE, "bottom": PROJECT_RELEGATED,
+        "paths": FAN_PATHS, "sims": sims, "today": date.today().isoformat(),
+    }
+    data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
+    options = "".join(
+        f"<option value='{i}'{' selected' if i == focus else ''}>"
+        f"{escape(r['teams'][i])}</option>" for i in order)
+    body = (
+        "<div class='card fan-card'>"
+        f"<div class='controls'><select class='fan-pick' aria-label='Club'>"
+        f"{options}</select><span class='fan-head'></span></div>"
+        "<div class='fan-plot'></div>"
+        f"<p class='fan-key'>Each faint line is one simulated season \u2014 "
+        f"<span class='pos'>green</span> where the club ends in the top "
+        f"{PROJECT_EUROPE}, <span class='neg'>red</span> where it ends in the "
+        f"bottom {PROJECT_RELEGATED}, grey in between. The bold line is the "
+        f"middle one. The dashed lines are what it takes: the points the "
+        f"{ordinal(PROJECT_EUROPE)}-placed club and the last club above the "
+        f"bottom {PROJECT_RELEGATED} end on, in the middle simulated season. "
+        f"The percentages count all {sims:,} simulations; the lines are "
+        f"{FAN_PATHS} of them.</p>"
+        f"<script type='application/json' class='fan-data'>{data}</script>"
+        "</div>"
+    )
+    about = (
+        "<p><strong>What it shows.</strong> The projection above plays the rest "
+        "of the season thousands of times and reports the average. This draws "
+        f"{FAN_PATHS} of those seasons for one club, each as its points total "
+        "from tonight to the last day, so the spread is something you can see "
+        "rather than a percentage you have to trust. A tight fan is a club whose "
+        "season is largely settled; a wide one could still go either way.</p>"
+        "<p><strong>Why every line climbs.</strong> Points only ever go up, so "
+        "the fan rises left to right whatever happens. What matters is where "
+        "its mouth lands against the two dashed lines on the right \u2014 how "
+        f"much of it clears the top-{PROJECT_EUROPE} line, and how much sinks "
+        f"below the one above the bottom {PROJECT_RELEGATED}.</p>"
+        "<p><strong>Where it comes from.</strong> The same expected goals, the "
+        "same fixture list and the same points already won as the table and the "
+        "one-season simulator on this page. Nothing new is modelled; the seasons "
+        "are simply played out in your browser and drawn instead of averaged. "
+        "The sample is seeded, so it holds still until the next nightly build "
+        "changes the numbers underneath it.</p>"
+    )
+    return block("Every way the season could go", body, about=about)
 
 
 def season_projection_simulator(db, league):
@@ -7611,6 +7868,7 @@ def league_section(db, league):
         + predictions_block(db, league)
         + season_projection_block(db, league)
         + season_projection_distribution(db, league)
+        + season_projection_fan(db, league)
         + season_projection_simulator(db, league)
         + season_projection_trend(db, league)
         + report_card_block(db, league)
@@ -9259,7 +9517,7 @@ def build_page(db, nav, generated, archive_label=None, frozen=None):
         f"<div class='badges'>{badges}</div>{SEARCH_BAR}{whats_new}</header>"
         + nav + lg_bar + tab_bar + panel_html
         + f"<footer>{footer}</footer></div>{SEARCH_HTML}"
-        f"<script>{EXPLORER_JS}{_poisson_js()}</script></body></html>"
+        f"<script>{EXPLORER_JS}{_poisson_js()}{FAN_JS}</script></body></html>"
     )
 
 
