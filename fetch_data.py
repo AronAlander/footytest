@@ -150,6 +150,43 @@ def save_standings(db: sqlite3.Connection, league: str, season: str, rows: list)
     return count
 
 
+def forget_superseded(db, league_name, season, round_number, event_ids):
+    """Drop fixtures the feed has stopped listing for a round it still fills.
+
+    A complete round that no longer names a fixture we stored has not been
+    truncated -- the feed has re-issued it. Ligue 1 round 23 replaced
+    "Rennes v Paris Saint-Germain" with the same match at the other venue
+    under a fresh id, which is housekeeping, not a broken response.
+
+    Treating it as fatal wedged the nightly permanently rather than for a
+    night: the superseded row stayed in the table, so every later run found
+    it missing from the feed again and failed the same check.
+
+    A fixture that has been PLAYED is kept instead of deleted, and named in
+    the output. Losing a stored result to a feed hiccup would be worse than
+    carrying a duplicate for a day, and it is rare enough to be worth a
+    human looking at it.
+    """
+    dropped, kept = [], []
+    for event_id in event_ids:
+        row = db.execute(
+            "SELECT home_score, away_score FROM matches WHERE event_id = ?",
+            (event_id,),
+        ).fetchone()
+        if row and (row[0] is not None or row[1] is not None):
+            kept.append(event_id)
+            continue
+        db.execute("DELETE FROM matches WHERE event_id = ?", (event_id,))
+        dropped.append(event_id)
+    if dropped:
+        print(f"  round {round_number}: {len(dropped)} fixture(s) re-issued by "
+              f"the feed, forgetting {', '.join(dropped)}")
+    if kept:
+        print(f"  round {round_number}: ! the feed no longer lists "
+              f"{', '.join(kept)}, which already had a result — kept")
+    return dropped, kept
+
+
 def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched_at: str) -> None:
     print(f"\n=== {league_name} (season {league['season']}) ===")
     slug = league_name.lower().replace(" ", "_")
@@ -174,6 +211,10 @@ def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched
             if "events" not in payload or not isinstance(payload["events"], (list, type(None))):
                 raise ValueError("invalid events response")
             events = payload["events"] or []
+            # an empty round is never a re-issue, whatever the arithmetic
+            # below makes of it: a league that has a round has fixtures in it
+            if not events:
+                raise ValueError("no fixtures in response")
             if any(not e.get("idEvent") or not e.get("strHomeTeam") or
                    not e.get("strAwayTeam") for e in events):
                 raise ValueError("incomplete fixture identity")
@@ -186,8 +227,12 @@ def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched
             expected = (league["rounds"] + 2) // 4
             if len(received) < expected or len(received) != len(events):
                 raise ValueError(f"expected {expected} distinct fixtures, got {len(received)}")
-            if known - received:
-                raise ValueError(f"response omitted {len(known - received)} stored fixtures")
+            superseded = sorted(known - received)
+            if superseded:
+                # the round is full (checked above), so these have been
+                # replaced rather than dropped
+                forget_superseded(db, league_name, league["season"],
+                                  round_number, superseded)
         except Exception as error:
             print(f"  round {round_number}: FAILED ({error})")
             failures.append(round_number)
