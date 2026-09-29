@@ -338,6 +338,11 @@ svg .fan-path.top { stroke: var(--win); }
 svg .fan-path.mid { stroke: var(--muted); stroke-opacity: .14; }
 svg .fan-path.bottom { stroke: var(--loss); }
 svg .fan-med { fill: none; stroke: var(--text-primary); stroke-width: 2.2; }
+/* what has already happened: drawn at once, never traced, because it is not
+   one of the possibilities */
+svg .fan-past { fill: none; stroke: var(--text-primary); stroke-width: 2.6;
+                stroke-linejoin: round; }
+svg .fan-today { stroke: var(--border); stroke-width: 1.2; }
 svg .fan-thr { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
 svg .fan-lab, svg .fan-ax { font-size: 11px; fill: var(--text-secondary); }
 @media (max-width: 620px) { svg .fan-lab, svg .fan-ax { font-size: 16px; } }
@@ -3502,11 +3507,17 @@ window.__navRestoring = true;
     if (!run.days.length) return;
 
     var W = 640, H = 290, L = 36, R = 96, T = 12, B = 26;
-    var t0 = day(fan.today), t1 = Math.max(day(run.days[run.days.length - 1]), t0 + 1);
-    var xs = [L].concat(run.days.map(function (d) {
-      return L + (W - L - R) * Math.max(0, day(d) - t0) / (t1 - t0); }));
+    var DAY = 86400000, now = day(fan.today);
+    var past = (fan.hist && fan.hist[club]) || [];
+    // the timeline runs from the opening day when there is a past to show,
+    // so the season reads as one: what happened, then what might
+    var t0 = fan.start && past.length > 1 ? day(fan.start) : now;
+    var t1 = Math.max(day(run.days[run.days.length - 1]), now + DAY);
+    function xAt(t) { return L + (W - L - R) * (Math.max(t0, t) - t0) / (t1 - t0); }
+    var xs = [xAt(now)].concat(run.days.map(function (d) { return xAt(Math.max(day(d), now)); }));
     var lo = Infinity, hi = -Infinity;
     run.paths.forEach(function (p) { lo = Math.min(lo, p[0]); hi = Math.max(hi, p[p.length - 1]); });
+    if (past.length > 1) lo = 0;
     var lines = [
       ['top ' + fan.top, median(run.finals.map(function (f) { return f[fan.top - 1]; }))],
       ['safety', median(run.finals.map(function (f) { return f[run.n - fan.bottom - 1]; }))]
@@ -3540,7 +3551,20 @@ window.__navRestoring = true;
       return median(run.paths.map(function (p) { return p[i]; })); });
     svg.appendChild(el('polyline', { 'class': 'fan-med',
       points: med.map(function (v, i) { return xs[i].toFixed(1) + ',' + y(v).toFixed(1); }).join(' ') }));
-    var a = el('text', { x: L, y: H - 6, 'class': 'fan-ax' }); a.textContent = 'now';
+    if (past.length > 1) {
+      var tx0 = xAt(now);
+      svg.appendChild(el('line', { x1: tx0.toFixed(1), x2: tx0.toFixed(1), y1: T,
+                                   y2: H - B, 'class': 'fan-today' }));
+      var tl = el('text', { x: (tx0 + 4).toFixed(1), y: T + 10, 'class': 'fan-ax' });
+      tl.textContent = 'today'; svg.appendChild(tl);
+      var pp = past.map(function (h) {
+        return xAt(t0 + h[0] * DAY).toFixed(1) + ',' + y(h[1]).toFixed(1); });
+      // joined exactly to where every simulated season begins
+      pp.push(tx0.toFixed(1) + ',' + y(sim.basePts[club]).toFixed(1));
+      svg.appendChild(el('polyline', { 'class': 'fan-past', points: pp.join(' ') }));
+    }
+    var a = el('text', { x: L, y: H - 6, 'class': 'fan-ax' });
+    a.textContent = past.length > 1 ? short(fan.start) : 'now';
     var b = el('text', { x: W - R, y: H - 6, 'class': 'fan-ax', 'text-anchor': 'end' });
     b.textContent = short(run.days[run.days.length - 1]);
     svg.appendChild(a); svg.appendChild(b);
