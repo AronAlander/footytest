@@ -389,6 +389,11 @@ svg .fan-path.top { stroke: var(--win); }
 svg .fan-path.mid { stroke: var(--muted); stroke-opacity: .14; }
 svg .fan-path.bottom { stroke: var(--loss); }
 svg .fan-med { fill: none; stroke: var(--text-primary); stroke-width: 2.2; }
+/* what has already happened: drawn at once, never traced, because it is not
+   one of the possibilities */
+svg .fan-past { fill: none; stroke: var(--text-primary); stroke-width: 2.6;
+                stroke-linejoin: round; }
+svg .fan-today { stroke: var(--border); stroke-width: 1.2; }
 svg .fan-thr { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
 svg .fan-lab, svg .fan-ax { font-size: 11px; fill: var(--text-secondary); }
 @media (max-width: 620px) { svg .fan-lab, svg .fan-ax { font-size: 16px; } }
@@ -2944,11 +2949,17 @@ FAN_JS = r"""
     if (!run.days.length) return;
 
     var W = 640, H = 290, L = 36, R = 96, T = 12, B = 26;
-    var t0 = day(fan.today), t1 = Math.max(day(run.days[run.days.length - 1]), t0 + 1);
-    var xs = [L].concat(run.days.map(function (d) {
-      return L + (W - L - R) * Math.max(0, day(d) - t0) / (t1 - t0); }));
+    var DAY = 86400000, now = day(fan.today);
+    var past = (fan.hist && fan.hist[club]) || [];
+    // the timeline runs from the opening day when there is a past to show,
+    // so the season reads as one: what happened, then what might
+    var t0 = fan.start && past.length > 1 ? day(fan.start) : now;
+    var t1 = Math.max(day(run.days[run.days.length - 1]), now + DAY);
+    function xAt(t) { return L + (W - L - R) * (Math.max(t0, t) - t0) / (t1 - t0); }
+    var xs = [xAt(now)].concat(run.days.map(function (d) { return xAt(Math.max(day(d), now)); }));
     var lo = Infinity, hi = -Infinity;
     run.paths.forEach(function (p) { lo = Math.min(lo, p[0]); hi = Math.max(hi, p[p.length - 1]); });
+    if (past.length > 1) lo = 0;
     var lines = [
       ['top ' + fan.top, median(run.finals.map(function (f) { return f[fan.top - 1]; }))],
       ['safety', median(run.finals.map(function (f) { return f[run.n - fan.bottom - 1]; }))]
@@ -2982,7 +2993,20 @@ FAN_JS = r"""
       return median(run.paths.map(function (p) { return p[i]; })); });
     svg.appendChild(el('polyline', { 'class': 'fan-med',
       points: med.map(function (v, i) { return xs[i].toFixed(1) + ',' + y(v).toFixed(1); }).join(' ') }));
-    var a = el('text', { x: L, y: H - 6, 'class': 'fan-ax' }); a.textContent = 'now';
+    if (past.length > 1) {
+      var tx0 = xAt(now);
+      svg.appendChild(el('line', { x1: tx0.toFixed(1), x2: tx0.toFixed(1), y1: T,
+                                   y2: H - B, 'class': 'fan-today' }));
+      var tl = el('text', { x: (tx0 + 4).toFixed(1), y: T + 10, 'class': 'fan-ax' });
+      tl.textContent = 'today'; svg.appendChild(tl);
+      var pp = past.map(function (h) {
+        return xAt(t0 + h[0] * DAY).toFixed(1) + ',' + y(h[1]).toFixed(1); });
+      // joined exactly to where every simulated season begins
+      pp.push(tx0.toFixed(1) + ',' + y(sim.basePts[club]).toFixed(1));
+      svg.appendChild(el('polyline', { 'class': 'fan-past', points: pp.join(' ') }));
+    }
+    var a = el('text', { x: L, y: H - 6, 'class': 'fan-ax' });
+    a.textContent = past.length > 1 ? short(fan.start) : 'now';
     var b = el('text', { x: W - R, y: H - 6, 'class': 'fan-ax', 'text-anchor': 'end' });
     b.textContent = short(run.days[run.days.length - 1]);
     svg.appendChild(a); svg.appendChild(b);
@@ -3026,6 +3050,46 @@ FAN_JS = r"""
 FAN_PATHS = 160   # seasons drawn as lines; the percentages use all of them
 
 
+def _fan_history(db, league, teams):
+    """Each club's real points total so far, match by match.
+
+    Returns (start date, per-club list of [days since start, points]), in the
+    projection's own club order. The points are summed exactly the way
+    _compute_projection sums base_pts -- same rows, same filter, same rule --
+    so every history ends on the figure its fan starts from and the solid
+    line joins the fan without a step. Stored as day offsets rather than
+    dates because a full season of them for every club is most of what this
+    adds to the page. (None, []) before a ball has been kicked.
+    """
+    found = _projection_fixtures(db, league)
+    if not found:
+        return None, []
+    _season, rows = found
+    played = [r for r in rows if r[2] is not None and r[3] is not None and r[4]]
+    if not played:
+        return None, []
+    start = min(r[4][:10] for r in played)
+    first = date.fromisoformat(start)
+    idx = {t: i for i, t in enumerate(teams)}
+    pts = [0] * len(teams)
+    hist = [[[0, 0]] for _ in teams]
+    for home, away, hs, as_, when in sorted(played, key=lambda r: r[4]):
+        h, a = idx.get(home), idx.get(away)
+        if h is None or a is None:
+            continue
+        if hs > as_:
+            pts[h] += 3
+        elif hs == as_:
+            pts[h] += 1
+            pts[a] += 1
+        else:
+            pts[a] += 3
+        off = (date.fromisoformat(when[:10]) - first).days
+        for i in (h, a):
+            hist[i].append([off, pts[i]])
+    return start, hist
+
+
 def season_projection_fan(db, league):
     """Every way the season could go, drawn for one club at a time.
 
@@ -3053,10 +3117,12 @@ def season_projection_fan(db, league):
     order = list(r["order"])
     focus = min(order, key=lambda i: (abs(r["europe"][i] / sims - 0.5),
                                       order.index(i)))
+    start, history = _fan_history(db, league, r["teams"])
     payload = {
         "order": order, "europe": europe, "drop": drop, "focus": focus,
         "top": PROJECT_EUROPE, "bottom": PROJECT_RELEGATED,
         "paths": FAN_PATHS, "sims": sims, "today": date.today().isoformat(),
+        "start": start, "hist": history,
     }
     data = json.dumps(payload, separators=(",", ":")).replace("</", "<\\/")
     options = "".join(
@@ -3067,7 +3133,9 @@ def season_projection_fan(db, league):
         f"<div class='controls'><select class='fan-pick' aria-label='Club'>"
         f"{options}</select><span class='fan-head'></span></div>"
         "<div class='fan-plot'></div>"
-        f"<p class='fan-key'>Each faint line is one simulated season \u2014 "
+        f"<p class='fan-key'>The solid line on the left is the club's real "
+        f"points so far this season; the fan starts where it ends, today. "
+        f"Each faint line is one simulated season \u2014 "
         f"<span class='pos'>green</span> where the club ends in the top "
         f"{PROJECT_EUROPE}, <span class='neg'>red</span> where it ends in the "
         f"bottom {PROJECT_RELEGATED}, grey in between. The bold line is the "
@@ -3086,6 +3154,13 @@ def season_projection_fan(db, league):
         "from tonight to the last day, so the spread is something you can see "
         "rather than a percentage you have to trust. A tight fan is a club whose "
         "season is largely settled; a wide one could still go either way.</p>"
+        "<p><strong>Where the fan starts.</strong> From the club's actual points "
+        "today, not from the start of the season: matches already played are "
+        "finished, so every simulated season shares them, and only what is still "
+        "to be played is simulated. The solid line to the left of the fan is that "
+        "past \u2014 the real points total match by match since the opening day "
+        "\u2014 so the chart reads as one season, fact on the left and the "
+        "possibilities on the right, with the join marked as today.</p>"
         "<p><strong>Why every line climbs.</strong> Points only ever go up, so "
         "the fan rises left to right whatever happens. What matters is where "
         "its mouth lands against the two dashed lines on the right \u2014 how "
