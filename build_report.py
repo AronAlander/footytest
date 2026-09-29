@@ -314,6 +314,11 @@ svg .spark-line.up { stroke: var(--win); }
 svg .spark-line.down { stroke: var(--loss); }
 svg .spark-dot.up { fill: var(--win); }
 svg .spark-dot.down { fill: var(--loss); }
+/* a form-curve point averaged over fewer matches than the full window */
+svg .spark-line.spark-partial { stroke-dasharray: 3 3; }
+svg .spark-dot.open { fill: var(--card); stroke-width: 1.2; }
+svg .spark-dot.open.up { stroke: var(--win); }
+svg .spark-dot.open.down { stroke: var(--loss); }
 .range-grid { display: flex; flex-direction: column; gap: 3px; }
 .range-row { display: flex; align-items: center; gap: 10px; }
 .range-name {
@@ -3001,18 +3006,24 @@ def rolling_sparklines(db, league):
 
     rolling = {}
     for team, values in series.items():
-        # strictly more than the window, not "at least": a club that has
-        # played exactly ROLLING_WINDOW matches has one window, and one
-        # window is a number rather than a trend. There is no gap between
-        # points to space a line across, and the chart's width was being
-        # divided by that gap -- which took down the nightly of 2026-09-08,
-        # the first time this code met the opening weeks of a season. Such a
-        # club joins the chart on its next match.
-        if len(values) > ROLLING_WINDOW:
-            rolling[team] = [
-                sum(values[i - ROLLING_WINDOW + 1:i + 1]) / ROLLING_WINDOW
-                for i in range(ROLLING_WINDOW - 1, len(values))
-            ]
+        # an expanding window until a club has ROLLING_WINDOW matches, then a
+        # rolling one: point i averages the last min(i + 1, ROLLING_WINDOW)
+        # matches. The old rule waited for a full window and one match more
+        # before drawing anything, which left the form curves blank or showing
+        # two clubs of twenty for the first six rounds of every big-five
+        # season -- on 28 September La Liga had all twenty, Serie A two,
+        # Ligue 1 one and the Premier League and Bundesliga none.
+        #
+        # One match is still one number and no line, so a club needs two.
+        # That keeps impossible the case that took the nightly down on
+        # 2026-09-08: a single point has no gap to space a line across.
+        if len(values) < 2:
+            continue
+        rolling[team] = [
+            sum(values[max(0, i - ROLLING_WINDOW + 1):i + 1])
+            / min(i + 1, ROLLING_WINDOW)
+            for i in range(len(values))
+        ]
     if not rolling:
         return ""
 
@@ -3040,20 +3051,38 @@ def rolling_sparklines(db, league):
         last = values[-1]
         sign = "up" if last >= 0 else "down"
         val_cls = "pos" if last > 0 else "neg" if last < 0 else "dim"
-        # one small dot per matchday so single matches are visible on the curve;
-        # rolling index i covers the window ending at matchday ROLLING_WINDOW + i
+        # point i covers matchday i + 1. Until the window has filled it is an
+        # average of fewer matches, so it is drawn dashed and its dot hollow:
+        # a two-match average is a real number but not yet a form line, and
+        # it should not look as settled as one
+        full_from = ROLLING_WINDOW - 1
+        filling = pts[:full_from + 1] if full_from > 0 else []
+        settled = pts[full_from:]
         dots = "".join(
-            f"<circle class='spark-dot {'up' if v >= 0 else 'down'}' "
+            f"<circle class='spark-dot {'up' if v >= 0 else 'down'}"
+            f"{' open' if i < full_from else ''}' "
             f"cx='{x:.1f}' cy='{y:.1f}' r='1.7'>"
-            f"<title>matchday {ROLLING_WINDOW + i}: {fmt_delta(v, 2)}</title></circle>"
+            f"<title>matchday {i + 1}: {fmt_delta(v, 2)}"
+            f"{f' (over {i + 1} matches)' if i < full_from else ''}</title></circle>"
             for i, (v, (x, y)) in enumerate(zip(values, pts))
         )
+
+        def lines(seg, extra=""):
+            if len(seg) < 2:
+                return ""
+            p = " ".join(f"{x:.1f},{y:.1f}" for x, y in seg)
+            return (
+                f"<polyline class='spark-line up{extra}' points='{p}' "
+                f"clip-path='url(#sp-{lg_slug}-{idx}t)'/>"
+                f"<polyline class='spark-line down{extra}' points='{p}' "
+                f"clip-path='url(#sp-{lg_slug}-{idx}b)'/>"
+            )
         cells.append(
             f"<div class='spark'><p class='name'><span class='rank'>{idx + 1}</span> "
             f"{escape(team)}<span class='val {val_cls}'>{fmt_delta(last, 2)}</span></p>"
             f"<svg viewBox='0 0 {w} {h}' width='100%' role='img' "
             f"aria-label='{escape(team)} rolling xG difference'>"
-            f"<title>{escape(team)}: rolling {ROLLING_WINDOW}-match npxGD, "
+            f"<title>{escape(team)}: rolling npxGD over up to {ROLLING_WINDOW} matches, "
             f"season range {fmt_delta(min(values), 2)} to {fmt_delta(max(values), 2)}, "
             f"latest {fmt_delta(last, 2)}</title>"
             f"<defs>"
@@ -3064,19 +3093,21 @@ def rolling_sparklines(db, league):
             f"<polygon class='spark-area up' points='{area}' clip-path='url(#sp-{lg_slug}-{idx}t)'/>"
             f"<polygon class='spark-area down' points='{area}' clip-path='url(#sp-{lg_slug}-{idx}b)'/>"
             f"<line class='zeroline' x1='0' y1='{mid}' x2='{w}' y2='{mid}'/>"
-            f"<polyline class='spark-line up' points='{points}' clip-path='url(#sp-{lg_slug}-{idx}t)'/>"
-            f"<polyline class='spark-line down' points='{points}' clip-path='url(#sp-{lg_slug}-{idx}b)'/>"
+            f"{lines(filling, ' spark-partial')}{lines(settled)}"
             f"{dots}"
             f"<circle class='spark-dot {sign}' cx='{pts[-1][0]:.1f}' cy='{pts[-1][1]:.1f}' r='3'/>"
             "</svg></div>"
         )
     legend = (
-        f"<p class='spark-legend'>One panel per team, final-table order · each runs "
-        f"matchday {ROLLING_WINDOW} → {n_matches}, the faint vertical line is "
-        f"mid-season · <span class='pos'>green above zero</span> = out-creating "
-        f"opponents, <span class='neg'>red below</span> = out-created · all panels "
-        f"share the same ±{max_abs:.1f} scale · one dot per matchday (hover for its "
-        f"value), the big dot and number = latest {ROLLING_WINDOW}-match window</p>"
+        f"<p class='spark-legend'>One panel per team, table order · each runs from "
+        f"its first match to its latest, up to matchday {n_matches}; the faint "
+        f"vertical line is halfway · <span class='pos'>green above zero</span> = "
+        f"out-creating opponents, <span class='neg'>red below</span> = "
+        f"out-created · all panels share the same ±{max_abs:.1f} scale · one dot "
+        f"per matchday · the <strong>dashed start with hollow dots</strong> is "
+        f"an average of fewer than {ROLLING_WINDOW} matches, until a club has "
+        f"played enough to fill the window · the big dot and number are the "
+        f"latest value</p>"
     )
     chart = f"<div class='chart-card'>{legend}<div class='spark-grid'>{''.join(cells)}</div></div>"
     about = (
@@ -3091,6 +3122,14 @@ def rolling_sparklines(db, league):
         "that clicked after a coaching change, a relegated team that was actually "
         "improving. The number after each name is the latest value; hover a curve for its "
         "season range.</p>"
+        f"<p><strong>The start of a season.</strong> A club's curve begins at its "
+        f"second match rather than its {ROLLING_WINDOW + 1}th. Until it has played "
+        f"{ROLLING_WINDOW}, each point is the average of every match so far \u2014 "
+        f"its first two, then its first three \u2014 and is drawn dashed with a "
+        f"hollow dot, because a two-match average is a real figure but a much "
+        f"shakier one than a {ROLLING_WINDOW}-match average. The line turns solid "
+        f"where the window fills, and from there on it rolls: each point is the "
+        f"last {ROLLING_WINDOW} matches.</p>"
     )
     return block("Form curves — rolling xG difference", chart, about)
 

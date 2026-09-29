@@ -17,7 +17,15 @@ from test_projection_trend import _render
 def test_zero_trend_has_a_finite_flat_line(db):
     add_understat_matches(db, 'Balanced', 6, npxgd=0)
     html = b.rolling_sparklines(db, LEAGUE)
-    assert "points='0.0,32.0 220.0,32.0'" in html
+    # every point sits on the zero line, however many there are, and the
+    # all-zero scale did not divide by zero on the way
+    ys = {pt.split(',')[1] for poly in re.findall(r"class='spark-line up[^']*' points='([^']+)'", html)
+          for pt in poly.split()}
+    assert ys == {'32.0'}
+    import math
+    coords = [float(c) for poly in re.findall(r"points='([^']+)'", html)
+              for pt in poly.split() for c in pt.split(',')]
+    assert coords and all(math.isfinite(c) for c in coords)
 
 
 def test_partial_measurements_do_not_count_as_zero(db):

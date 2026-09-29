@@ -132,19 +132,20 @@ def test_a_substitute_on_for_one_minute_does_not_explode_the_rates(db):
 
 
 def test_a_club_on_exactly_the_rolling_window_does_not_divide_by_zero(db):
-    """The bug that broke the nightly of 2026-09-08.
+    """The bug that broke the nightly of 2026-09-08, kept impossible.
 
-    A rolling five-match average over exactly five matches is one number.
-    One number is not a curve: there is no gap between points to space the
-    line across, and the width was being divided by that gap. It fired the
-    first time a big-five club reached its fifth match of the season, which
-    is the first season opening this code has lived through.
+    The chart's width is divided by the gap between a club's points, so a
+    club with a single point has no gap and cannot be drawn. That used to be
+    a club on exactly ROLLING_WINDOW matches; under the expanding window it
+    is a club on exactly one, and both must build without raising.
     """
     from build_report import ROLLING_WINDOW
     for club in ("AIK", "GAIS", "Sirius"):
+        add_understat_matches(db, club, 1)
+    assert build_report.rolling_sparklines(db, LEAGUE) == "",         "one match is a number, not a trend"
+    for club in ("Hammarby", "Malmo"):
         add_understat_matches(db, club, ROLLING_WINDOW)
-    assert build_report.rolling_sparklines(db, LEAGUE) == "", \
-        "one window is a number, not a trend"
+    assert "Hammarby" in build_report.rolling_sparklines(db, LEAGUE)
 
 
 def test_a_club_one_match_past_the_window_draws(db):
@@ -155,10 +156,10 @@ def test_a_club_one_match_past_the_window_draws(db):
 
 
 def test_clubs_at_and_past_the_window_can_share_a_chart(db):
-    """The uneven case: one club qualifies, another is a match short."""
+    """The uneven case: one club has a full window, another does not yet."""
     from build_report import ROLLING_WINDOW
     add_understat_matches(db, "AIK", ROLLING_WINDOW + 2)
-    add_understat_matches(db, "GAIS", ROLLING_WINDOW)
+    add_understat_matches(db, "GAIS", ROLLING_WINDOW - 2)
     html = build_report.rolling_sparklines(db, LEAGUE)
     assert "AIK" in html
-    assert "GAIS" not in html, "a club with no trend yet is left out, not drawn"
+    assert "GAIS" in html, "a club short of a full window is drawn, dashed"
