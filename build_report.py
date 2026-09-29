@@ -76,6 +76,36 @@ CSS = """
     --shadow: 0 1px 2px rgba(0,0,0,.5), 0 4px 16px rgba(0,0,0,.35);
   }
 }
+/* ---- motion -------------------------------------------------------------
+   Charts draw themselves in the first time they scroll into view: lines are
+   traced, dots fade up, bars open from the left. Only marks move -- no figure
+   is ever hidden or delayed, which is why the prediction bar, whose
+   percentages sit inside its segments, is left out. All of it sits behind
+   the .motion class, which the script adds only when it can finish the job:
+   with the script blocked or failing, nothing is ever hidden. */
+@media (prefers-reduced-motion: no-preference) {
+  .motion .block:not(.in) :is(.spark-line, .xr-line, .h2h-line, .fan-path,
+                              .fan-med) { opacity: 0; }
+  .motion .block:not(.in) svg circle { opacity: 0; }
+  .motion .block svg circle { transition: opacity .45s ease .35s; }
+  /* the open end has to be an inset too: a browser cannot interpolate from
+     inset() to none, and the bars would simply appear */
+  .motion :is(.hist-bar, .h2h-bar, .dm-bar, .ms-bar, .pcell > i) {
+    clip-path: inset(0 0 0 0);
+    transition: clip-path .7s cubic-bezier(.2, .7, .2, 1); }
+  .motion .block:not(.in) :is(.hist-bar, .h2h-bar, .dm-bar, .ms-bar,
+                              .pcell > i) { clip-path: inset(0 100% 0 0); }
+  /* visible must never depend on an animation finishing. Clip and opacity
+     run on the compositor, which a background tab may stall; once the
+     animation has had its time, .done cancels whatever is still in flight
+     and everything lands on its visible end state */
+  .motion .block.done :is(.hist-bar, .h2h-bar, .dm-bar, .ms-bar, .pcell > i),
+  .motion .block.done svg circle { transition: none; }
+}
+/* a printout is not scrolled, so nothing it contains may wait to be */
+@media print {
+  .motion .block:not(.in) * { opacity: 1 !important; clip-path: none !important; }
+}
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
@@ -2666,6 +2696,82 @@ def season_projection_distribution(db, league):
         "figure above (points and rank are different simulation outputs).</p>"
     )
     return block("How wide is that projection?", chart, about=about)
+
+
+MOTION_JS = r"""
+(function () {
+  // no observer, or a reader who has asked for less motion: draw nothing in,
+  // and never add the class that would hide anything waiting to be drawn
+  if (!('IntersectionObserver' in window)) return;
+  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var root = document.documentElement;
+  root.classList.add('motion');
+
+  var LINES = '.spark-line, .xr-line, .h2h-line, .fan-path, .fan-med';
+  function trace(scope) {
+    var found = scope.matches && scope.matches(LINES) ? [scope] : [];
+    if (scope.querySelectorAll) found = found.concat([].slice.call(scope.querySelectorAll(LINES)));
+    found.forEach(function (ln) {
+      if (ln.__traced) return;
+      ln.__traced = true;
+      // a dashed line keeps its dashes: tracing borrows the dash pattern,
+      // and the dashed start of a form curve means something
+      if (getComputedStyle(ln).strokeDasharray !== 'none') return;
+      var len;
+      try { len = ln.getTotalLength(); } catch (e) { return; }
+      if (!len || !isFinite(len)) return;
+      ln.style.strokeDasharray = len;
+      ln.style.strokeDashoffset = len;
+      ln.getBoundingClientRect();
+      ln.style.transition = 'stroke-dashoffset 900ms cubic-bezier(.2,.7,.2,1)';
+      ln.style.strokeDashoffset = '0';
+      // put the line back as it was once drawn. transitionend is not
+      // guaranteed -- a browser may skip it for a tab in the background, and
+      // headless Chrome does not send it at all -- so a timer does it too
+      var tidy = function () {
+        ln.style.strokeDasharray = '';
+        ln.style.strokeDashoffset = '';
+        ln.style.transition = '';
+      };
+      ln.addEventListener('transitionend', tidy, { once: true });
+      setTimeout(tidy, 1000);
+    });
+  }
+
+  function start() {
+    var seen = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        seen.unobserve(en.target);
+        en.target.classList.add('in');
+        trace(en.target);
+        setTimeout(function () { en.target.classList.add('done'); }, 1300);
+      });
+    }, { rootMargin: '0px 0px -8% 0px' });
+    document.querySelectorAll('.block').forEach(function (b) { seen.observe(b); });
+
+    // charts drawn after the page loads -- a match report opened, a club
+    // picked in the fan -- are traced as they arrive if their block is on
+    // screen already; if it is not, the observer above gets to them
+    new MutationObserver(function (records) {
+      records.forEach(function (r) {
+        r.addedNodes.forEach(function (node) {
+          if (node.nodeType !== 1) return;
+          var block = node.closest && node.closest('.block');
+          if (block && block.classList.contains('in')) trace(node);
+        });
+      });
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+  function safely() {
+    // if anything here fails, take the class off again: hidden marks with no
+    // observer left to reveal them would be worse than no motion at all
+    try { start(); } catch (e) { root.classList.remove('motion'); }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', safely);
+  else safely();
+})();
+"""
 
 
 def _poisson_js():
@@ -9511,7 +9617,10 @@ def build_page(db, nav, generated, archive_label=None, frozen=None):
     return (
         f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
         f"<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        f"<title>{escape(title)}</title><style>{CSS}</style></head><body><div class='wrap'>"
+        f"<title>{escape(title)}</title><style>{CSS}</style>"
+        # in the head, so motion is switched on before the first paint and a
+        # chart below the fold is never drawn once only to vanish and redraw
+        f"<script>{MOTION_JS}</script></head><body><div class='wrap'>"
         f"<header class='hero'><h1>Football dashboard</h1>"
         f"<p class='tagline'>{tagline}</p>"
         f"<div class='badges'>{badges}</div>{SEARCH_BAR}{whats_new}</header>"
