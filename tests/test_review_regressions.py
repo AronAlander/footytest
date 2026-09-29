@@ -143,8 +143,11 @@ def test_projection_horizontal_spacing_uses_elapsed_days(db, monkeypatch):
     html = _render(db, monkeypatch, ['2026-04-01', '2026-04-02', '2026-04-11'])
     points = re.search(r"class='spark-line [^']+' points='([^']+)'", html).group(1)
     assert [float(p.split(',')[0]) for p in points.split()] == [0, 22, 220]
-    assert 'Vertical scale:' in html
+    # the per-panel scale and date lines were forty repeated lines of text
+    # on a twenty-panel chart; the span is stated once, in the legend
+    assert 'Vertical scale:' not in html
     assert 'calendar days' in html
+    assert html.count('from 1 Apr to 11 Apr') == 1
     assert 'flat stretches are the days between rounds' not in html
 
 

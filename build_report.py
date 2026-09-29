@@ -2374,6 +2374,7 @@ def season_projection_trend(db, league):
     # "nothing had happened" rather than "nothing changed". Before the first
     # match the projection primarily reflects earlier seasons.
     first_snapshot = min(v[0][0] for v in series.values() if v)
+    last_snapshot = max(v[-1][0] for v in series.values() if v)
     first_match = db.execute(
         "SELECT MIN(match_date) FROM matches WHERE league = ? "
         "AND home_score IS NOT NULL", (league,),
@@ -2478,10 +2479,7 @@ def season_projection_trend(db, league):
             f"<polyline class='spark-line {sign}' points='{points}'/>"
             f"{dots}"
             f"<circle class='spark-dot {sign}' cx='{pts[-1][0]:.1f}' cy='{pts[-1][1]:.1f}' r='3'/>"
-            "</svg>"
-            f"<p class='spark-sub'><span>{escape(_short_month(values[0][0]))}</span>"
-            f"<span>{escape(_short_month(values[-1][0]))}</span></p>"
-            f"<p class='meta dim'>Vertical scale: {lo - pad:.1f}–{hi + pad:.1f} points</p></div>"
+            "</svg></div>"
         )
     if not cells:
         return ""
@@ -2496,9 +2494,13 @@ def season_projection_trend(db, league):
         f"{escape(_short_month(first_snapshot))}: <span class='pos'>green</span> "
         f"has risen since, <span class='neg'>red</span> fallen · the line "
         f"carries a point for each of the {n_dates} nightly builds but a dot "
-        f"only where the number moved. Horizontal spacing follows calendar days; "
-        f"changes can reflect matches, data corrections or model updates · the upright mark is the season's first match · "
-        f"hover a dot for that night's odds</p>"
+        f"only where the number moved · every line runs from "
+        f"{escape(_short_month(first_snapshot))} to "
+        f"{escape(_short_month(last_snapshot))}, spaced by calendar days, so a "
+        f"night the build did not run leaves a gap rather than squeezing time "
+        f"· a move usually follows football, but can also be a data "
+        f"correction or a change to the model · the upright mark is the "
+        f"season's first match · hover a dot for that night's odds</p>"
     )
     chart = f"<div class='chart-card'>{legend}<div class='spark-grid'>{''.join(cells)}</div></div>"
     about = (
@@ -4472,7 +4474,7 @@ TAPE_UNDERSTAT = (
     ("Attack", "npxG per match", 2, False, True),
     ("Defence", "npxGA per match", 2, True, True),
     ("Pressing", "PPDA", 1, True, False),
-    ("xG / deep completion", "non-penalty xG per deep completion", 3, False, False),
+    ("Territory conversion", "non-penalty xG per deep completion", 3, False, False),
 )
 # Allsvenskan comes from FotMob, which publishes no PPDA and no deep
 # completions but does publish rather more of its own. Set-play share is the
@@ -4852,9 +4854,13 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None,
         "(flipped, so further out = fewer chances allowed). <strong>Finishing</strong> is "
         "goals minus xG — conversion above or below what the chances deserved. "
         "<strong>Pressing</strong> is PPDA flipped (opponent passes allowed per defensive "
-        "action — fewer means a higher press). <strong>xG / deep completion</strong> "
-        "divides non-penalty expected goals by completed passes near goal. It is "
-        "a ratio of two team totals, not expected goals per shot or shot accuracy.</p>"
+        "action — fewer means a higher press). <strong>Territory conversion</strong> "
+        "divides non-penalty expected goals by deep completions \u2014 completed "
+        "passes near goal \u2014 so it is how much of a chance a side makes of the "
+        "ground it wins. It is a ratio of two team totals, not expected goals per "
+        "shot and not shot accuracy; the site uses \u201cchance quality\u201d for "
+        "expected goals itself, which is why this spoke no longer borrows the "
+        "phrase.</p>"
         "<p><strong>Why five and not six.</strong> It used to draw Territory (deep "
         "completions per match) and Box defence (the same conceded) as two more spokes. "
         "Across 1,150 completed club-seasons Territory correlates with Attack at 0.87 "
@@ -4866,7 +4872,7 @@ def team_compare(teams_by_lg, tm_by_lg, form_by_lg, hist_by_lg=None,
         "Pressing at 0.50.</p>"
         "<p><strong>How to read it.</strong> The shape is the identity: a dominant "
         "pressing side bulges toward Attack–Pressing, a low-block counter team can look "
-        "small here yet still differ on Finishing and xG / deep completion. The table "
+        "small here yet still differ on Finishing and Territory conversion. The table "
         "underneath gives the raw per-match numbers behind each axis, the two that left "
         "it, and points against expected points. One caveat on Finishing: it is the one "
         "axis that does not carry — a club's goals-minus-xG repeats from one season to "
@@ -5986,7 +5992,7 @@ window.__navRestoring = true;
     { key: 'npxga',   label: 'Defence',        unit: 'npxGA / match',        dec: 2, invert: true },
     { key: 'gdiff',   label: 'Finishing',      unit: 'G \\u2212 xG (season)', dec: 1, signed: true },
     { key: 'ppda',    label: 'Pressing',       unit: 'PPDA',                 dec: 1, invert: true },
-    { key: 'quality', label: 'xG / deep completion', unit: 'non-penalty xG per deep completion',  dec: 3 }
+    { key: 'quality', label: 'Territory conversion', unit: 'non-penalty xG per deep completion',  dec: 3 }
   ];
   const EXTRA = [
     { key: 'deep',         label: 'Territory \\u00b7 deep comp. / match', dec: 1 },

@@ -149,7 +149,7 @@ def test_the_big_five_get_understat_metrics(db):
     an_understat_league(db)
     t = build_report.fixture_tape(db, BIG5)
     assert [m[0] for m in t["m"]] == ["Attack", "Defence", "Pressing",
-                                      "xG / deep completion"]
+                                      "Territory conversion"]
     # PPDA is inverted too: the club allowing fewest passes presses most
     assert t["h"]["Club 9"][2][1] == 100
 
