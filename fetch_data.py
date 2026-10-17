@@ -231,6 +231,9 @@ def fetch_league(db: sqlite3.Connection, league_name: str, league: dict,
     slug = league_name.lower().replace(" ", "_")
 
     table_url = f"{BASE_URL}/lookuptable.php?l={league['id']}&s={league['season']}"
+    # paced like every round: without it this follows the previous league's
+    # last round at once, an eleventh request inside the minute
+    time.sleep(REQUEST_PAUSE)
     try:
         payload = fetch_json(table_url)
         (DATA_DIR / f"{slug}_table.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
