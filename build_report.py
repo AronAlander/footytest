@@ -680,6 +680,20 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .sp-key { width: 11px; height: 11px; vertical-align: -1px; overflow: visible; }
 .sp-kh { fill: none; stroke: var(--muted); stroke-width: .9; }
 .sp-kg { fill: #0a7d24; stroke: var(--card); stroke-width: .9; }
+/* the history wall: wider than a phone, so it scrolls inside its card like
+   every other wide table here, with the club names pinned on the left */
+.hw-wrap { overflow-x: auto; }
+.hw { border-collapse: separate; border-spacing: 2px; font-size: 11px; }
+.hw th { font-weight: 500; color: var(--text-secondary); font-size: 10.5px;
+         text-transform: none; letter-spacing: 0; padding: 0 2px; }
+.hw th.hw-s span { font-size: 9.5px; font-weight: 400; }
+.hw th.hw-club { text-align: right; padding-right: 8px; white-space: nowrap;
+                 position: sticky; left: 0; background: var(--card); z-index: 1; }
+.hw td { min-width: 30px; height: 19px; padding: 0; text-align: center;
+         border-radius: 3px; color: var(--text-primary);
+         font-variant-numeric: tabular-nums; }
+.hw td.hw-gap { background: transparent; }
+.hw td.hw-now { outline: 1px dashed var(--text-secondary); outline-offset: -1px; }
 .ws-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
            gap: 14px 22px; }
 .ws-name { margin: 0 0 4px; font-size: 12.5px; color: var(--text-primary);
@@ -8827,6 +8841,111 @@ def score_state_block(db, league):
                  f"<div class='ws-grid'>{cells}</div></div>", about)
 
 
+def _wall_colour(pos, size):
+    """Green near the top, red near the bottom, the card colour in between.
+
+    Mixed into the card colour rather than picked as fixed shades, so the
+    same rule works in the light and dark themes without a second palette.
+    """
+    frac = (pos - 1) / max(1, size - 1)
+    if frac < 0.5:
+        return f"color-mix(in oklab, var(--win) {round(100 - frac * 200)}%, var(--card))"
+    return f"color-mix(in oklab, var(--loss) {round((frac - 0.5) * 200)}%, var(--card))"
+
+
+def history_wall(db, league):
+    """Every club that has played in the division, every season stored.
+
+    A view of load_club_history, so it inherits that function's cap: an
+    archive page shows the seasons up to its own and nothing after.
+    """
+    table = ("main.understat_team_matches" if league in UNDERSTAT_LEAGUES
+             else "main.fotmob_team_matches")
+    if table.endswith("fotmob_team_matches") and not fotmob_available(db):
+        return ""
+    everyone = [unescape(t) for (t,) in db.execute(
+        f"SELECT DISTINCT team FROM {table} WHERE league = ?", (league,))]
+    hist = load_club_history(db, league, everyone)
+    seasons = hist.get("seasons") or []
+    if len(seasons) < 2:
+        return ""      # one season is a table, not a history
+    clubs = hist["clubs"]
+
+    # the last column is "so far" only on the live page, while it is being
+    # played: the newest season stored, and someone short of a full fixture
+    # list. An archive's last season is finished, and so is Ligue 1's
+    # abandoned 2019/20, which never reached a full schedule
+    newest = db.execute(f"SELECT MAX(season) FROM {table} WHERE league = ?",
+                        (league,)).fetchone()[0]
+    last = seasons[-1]
+    live = _season_label(league, newest) == last and any(
+        r[0] == last and r[3] < 2 * (r[2] - 1) for rows in clubs.values() for r in rows)
+
+    def avg(c):
+        return sum((r[1] - 1) / max(1, r[2] - 1) for r in clubs[c]) / len(clubs[c])
+    order = sorted(clubs, key=lambda c: (-len(clubs[c]), avg(c), c))
+
+    head = "".join(
+        f"<th class='hw-s{' hw-now' if live and s == last else ''}'>"
+        f"{escape(s[-5:] if '/' in s else s)}"
+        f"{'<br><span>so far</span>' if live and s == last else ''}</th>"
+        for s in seasons)
+    body = ""
+    for club in order:
+        by = {r[0]: r for r in clubs[club]}
+        cells = ""
+        for s in seasons:
+            r = by.get(s)
+            if not r:
+                cells += "<td class='hw-gap'></td>"
+                continue
+            _s, pos, size, played, _w, _d, _l, _gd, _xgd, pts, xpts = r
+            now = " hw-now" if live and s == last else ""
+            luck = pts - xpts
+            sign = "+" if luck >= 0 else "\u2212"
+            cells += (
+                f"<td class='hw-c{now}' style='background:{_wall_colour(pos, size)}' "
+                f"title='{escape(club)}, {escape(s)}: {ordinal(pos)} of {size} \u00b7 "
+                f"{pts} pts from {played} \u00b7 "
+                f"{sign}{abs(luck):.1f} against expected"
+                f"{' (so far)' if now else ''}'>{pos}</td>")
+        body += f"<tr><th class='hw-club'>{escape(club)}</th>{cells}</tr>"
+    first = escape(seasons[0])
+    legend = (
+        f"<p class='spark-legend'>One row per club that has played in the "
+        f"division since {first}, one column per season. The number is where it "
+        f"finished \u2014 green towards the top, red towards the bottom \u2014 and "
+        f"a blank is a season spent outside the division. Hover a cell for "
+        f"points, and points against what the chances were worth."
+        + (" The last column is the season being played, so far." if live else "")
+        + "</p>")
+    about = (
+        "<p><strong>What it shows.</strong> Every club the division has had "
+        "since the data begins, and where each finished every season. Read "
+        "across a row for one club's decade; read down a column for one season's "
+        "table. Bands of green across the top are the clubs that never left it, "
+        "the red diagonals are relegations, and a single bright cell in a pale "
+        "row is a season nobody saw coming.</p>"
+        "<p><strong>Order.</strong> Clubs with the most seasons in the division "
+        "come first, then by average finishing place, so the ever-presents sit "
+        "together at the top and the clubs that came and went gather below.</p>"
+        "<p><strong>Points against expected.</strong> The colour is the "
+        "finishing place and nothing else. Each cell's tooltip adds how far the "
+        "points ran ahead of or behind what the chances were worth \u2014 the "
+        "luck in the result. It is kept out of the colour because a picture "
+        "trying to say two things at once says neither.</p>"
+        "<p><strong>One caveat.</strong> Positions are computed from the stored "
+        "results, so they do not know about points deductions \u2014 Everton and "
+        "Nottingham Forest in 2023/24, and Juventus in 2022/23, finished lower "
+        "than this puts them. On an archive page the wall stops at that page's "
+        "season.</p>"
+    )
+    return block("Every season since " + seasons[0],
+                 f"<div class='chart-card'>{legend}<div class='hw-wrap'>"
+                 f"<table class='hw'><thead><tr><th></th>{head}</tr></thead>"
+                 f"<tbody>{body}</tbody></table></div></div>", about)
+
+
 def teams_panel(db, leagues, archive=False):
     tables = "".join(
         lgview(lg, xg_table(db, lg), i == 0) for i, lg in enumerate(leagues)
@@ -8857,6 +8976,8 @@ def teams_panel(db, leagues, archive=False):
                        {lg: load_squads(db, lg, [t["team"] for t in teams_by_lg[lg]])
                         for lg in leagues})
         + charts
+        + "".join(lgview(lg, history_wall(db, lg), i == 0)
+                  for i, lg in enumerate(leagues))
     )
 
 
