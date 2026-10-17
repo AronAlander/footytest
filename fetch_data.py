@@ -19,8 +19,25 @@ from pathlib import Path
 
 API_KEY = "123"  # TheSportsDB public test key, fine for development
 BASE_URL = f"https://www.thesportsdb.com/api/v1/json/{API_KEY}"
-REQUEST_PAUSE = 2.1  # test key allows ~30 requests/minute
-RETRY_WAIT = 35      # seconds to back off after HTTP 429
+# Measured on 2026-10-17, not taken from documentation. The test key allows
+# about ten requests a minute: at 2.1s apart it threw 429 after 9 to 11
+# requests every time, four times running, and at 6.2s apart 26 in a row
+# went through. The old comment here said thirty a minute, which may once
+# have been true and is not now -- the nightly started failing on the 16th.
+REQUEST_PAUSE = 6.2
+# A throttle is a fixed two-minute lockout: it cleared after 120.5, 120.6,
+# 120.7 and 120.6 seconds, and asking again during it neither shortens nor
+# extends it. So one wait just past it is all the patience that helps; the
+# 20/40/80 ladder this replaces only ever succeeded on its third wait, and
+# 60 of its 140 seconds were spent waiting inside a lockout it could not end.
+RETRY_WAIT = 125
+RETRY_ATTEMPTS = 2
+# The key in BASE_URL is TheSportsDB's public test key, so the rate limit is
+# shared with every other project using it: a 429 says the world was busy,
+# not that we asked too fast. Pacing alone cannot avoid it, which is why a
+# round we fail to reach falls back on what is already stored rather than
+# stopping the night -- see fetch_league.
+MAX_UNREACHED = 3    # ... but this many unreachable rounds is a real outage
 
 LEAGUES = {
     # Allsvenskan is back (2026-07-17): FotMob supplies its xG via
@@ -83,7 +100,7 @@ CREATE TABLE IF NOT EXISTS standings (
 """
 
 
-def fetch_json(url: str, retries: int = 3) -> dict:
+def fetch_json(url: str, retries: int = RETRY_ATTEMPTS) -> dict:
     request = urllib.request.Request(url, headers={"User-Agent": "football-analytics/0.3"})
     for attempt in range(retries):
         try:
@@ -91,7 +108,7 @@ def fetch_json(url: str, retries: int = 3) -> dict:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             if error.code == 429 and attempt < retries - 1:
-                print(f"    rate limited, waiting {RETRY_WAIT}s...")
+                print(f"    rate limited, waiting {RETRY_WAIT}s for the lockout to clear...")
                 time.sleep(RETRY_WAIT)
             else:
                 raise
@@ -203,6 +220,7 @@ def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched
     all_events = []
     total = with_result = 0
     failures = []
+    unreached = []
     for round_number in range(1, league["rounds"] + 1):
         time.sleep(REQUEST_PAUSE)
         url = f"{BASE_URL}/eventsround.php?id={league['id']}&r={round_number}&s={league['season']}"
@@ -234,8 +252,34 @@ def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched
                 forget_superseded(db, league_name, league["season"],
                                   round_number, superseded)
         except Exception as error:
-            print(f"  round {round_number}: FAILED ({error})")
-            failures.append(round_number)
+            # A round that answered with something wrong is a failure: the
+            # response is evidence, and bad evidence must not reach the
+            # database. A round we could not reach at all is different --
+            # usually the shared test key being throttled -- and there is
+            # no evidence either way. Falling back on the fixtures already
+            # stored for it costs nothing: they are last night's answer to
+            # the same question, and the upsert below only ever adds or
+            # updates, so leaving them alone leaves them intact.
+            # Only a network-level error counts as "could not reach".
+            # Anything else -- a malformed response, or a bug in the checks
+            # above -- is evidence, and must stop the run rather than be
+            # mistaken for a busy afternoon. URLError, HTTPError and
+            # TimeoutError are all OSError; our own checks raise ValueError.
+            if not isinstance(error, OSError):
+                print(f"  round {round_number}: FAILED ({error})")
+                failures.append(round_number)
+                continue
+            stored = db.execute(
+                "SELECT COUNT(*) FROM matches WHERE league=? AND season=? AND round=?",
+                (league_name, league["season"], round_number)).fetchone()[0]
+            if not stored:
+                # never seen it, so there is nothing to fall back on
+                print(f"  round {round_number}: FAILED ({error}; nothing stored)")
+                failures.append(round_number)
+                continue
+            print(f"  round {round_number}: unreachable ({error}), "
+                  f"keeping {stored} stored fixture(s)")
+            unreached.append(round_number)
             continue
         all_events.extend(events)
         with_result += sum(1 for e in events if e.get("intHomeScore") is not None)
@@ -243,12 +287,23 @@ def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched
     if failures or not all_events:
         db.rollback()
         raise RuntimeError(f"{league_name}: incomplete fixture fetch; failed rounds {failures}")
+    if len(unreached) > MAX_UNREACHED:
+        # a handful of throttled rounds is a busy afternoon; this many is an
+        # outage, and publishing as though the schedule were fresh would be
+        # a lie about how current the page is
+        db.rollback()
+        raise RuntimeError(
+            f"{league_name}: {len(unreached)} rounds unreachable "
+            f"({', '.join(map(str, unreached))}); refusing to publish stale fixtures")
     total = upsert_matches(db, league_name, all_events, fetched_at)
 
     (DATA_DIR / f"{slug}_rounds.json").write_text(
         json.dumps({"events": all_events}, indent=2), encoding="utf-8"
     )
-    print(f"  rounds 1-{league['rounds']}: {total} matches upserted ({with_result} with results)")
+    stale = (f", {len(unreached)} round(s) kept from last run"
+             if unreached else "")
+    print(f"  rounds 1-{league['rounds']}: {total} matches upserted "
+          f"({with_result} with results{stale})")
 
 
 def main() -> None:

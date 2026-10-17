@@ -32,7 +32,10 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # the fixture fetch is paced to TheSportsDB's ten requests a minute,
+    # 22 minutes of the run on its own; the rest is ~8. 60 leaves room for
+    # a few of its two-minute lockouts without the job being killed
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
