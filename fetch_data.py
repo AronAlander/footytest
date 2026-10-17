@@ -12,9 +12,10 @@ Usage:
 
 import json
 import sqlite3
+import sys
 import time
 import urllib.request
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 API_KEY = "123"  # TheSportsDB public test key, fine for development
@@ -38,6 +39,13 @@ RETRY_ATTEMPTS = 2
 # round we fail to reach falls back on what is already stored rather than
 # stopping the night -- see fetch_league.
 MAX_UNREACHED = 3    # ... but this many unreachable rounds is a real outage
+# A round whose every fixture has a result, the last of them more than this
+# many days ago, is not asked for again on an ordinary night: nothing in it
+# is going to change, and at ten requests a minute every request is worth
+# 6.2 seconds of a run that has a time limit. A late correction to an old
+# result is still caught, by the full sweep below.
+SETTLED_DAYS = 7
+FULL_SWEEP_WEEKDAY = 0   # Monday: every round of every league is re-checked
 
 LEAGUES = {
     # Allsvenskan is back (2026-07-17): FotMob supplies its xG via
@@ -204,7 +212,21 @@ def forget_superseded(db, league_name, season, round_number, event_ids):
     return dropped, kept
 
 
-def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched_at: str) -> None:
+def settled_rounds(db, league_name, season, today):
+    """Rounds that are finished, and finished long enough ago to leave alone."""
+    cutoff = (today - timedelta(days=SETTLED_DAYS)).isoformat()
+    rows = db.execute(
+        """SELECT round FROM matches
+           WHERE league = ? AND season = ? AND round IS NOT NULL
+           GROUP BY round
+           HAVING SUM(home_score IS NULL OR away_score IS NULL) = 0
+              AND MAX(match_date) < ?""",
+        (league_name, season, cutoff)).fetchall()
+    return {r[0] for r in rows}
+
+
+def fetch_league(db: sqlite3.Connection, league_name: str, league: dict,
+                 fetched_at: str, full: bool = True, today=None) -> None:
     print(f"\n=== {league_name} (season {league['season']}) ===")
     slug = league_name.lower().replace(" ", "_")
 
@@ -221,7 +243,13 @@ def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched
     total = with_result = 0
     failures = []
     unreached = []
+    skip = (set() if full else
+            settled_rounds(db, league_name, league["season"], today or date.today()))
+    asked = 0
     for round_number in range(1, league["rounds"] + 1):
+        if round_number in skip:
+            continue
+        asked += 1
         time.sleep(REQUEST_PAUSE)
         url = f"{BASE_URL}/eventsround.php?id={league['id']}&r={round_number}&s={league['season']}"
         try:
@@ -284,7 +312,9 @@ def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched
         all_events.extend(events)
         with_result += sum(1 for e in events if e.get("intHomeScore") is not None)
 
-    if failures or not all_events:
+    # nothing new is only a fault if something was asked for: a league whose
+    # every round is settled has nothing to fetch, and that is the point
+    if failures or (asked and not all_events):
         db.rollback()
         raise RuntimeError(f"{league_name}: incomplete fixture fetch; failed rounds {failures}")
     if len(unreached) > MAX_UNREACHED:
@@ -302,6 +332,8 @@ def fetch_league(db: sqlite3.Connection, league_name: str, league: dict, fetched
     )
     stale = (f", {len(unreached)} round(s) kept from last run"
              if unreached else "")
+    if skip:
+        stale += f", {len(skip)} settled round(s) not re-checked"
     print(f"  rounds 1-{league['rounds']}: {total} matches upserted "
           f"({with_result} with results{stale})")
 
@@ -312,8 +344,13 @@ def main() -> None:
     db.executescript(SCHEMA)
     fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+    today = date.today()
+    full = "--full" in sys.argv or today.weekday() == FULL_SWEEP_WEEKDAY
+    print("full sweep: every round re-checked" if full else
+          f"settled rounds skipped (finished over {SETTLED_DAYS} days ago); "
+          "the full sweep runs on Mondays or with --full")
     for league_name, league in LEAGUES.items():
-        fetch_league(db, league_name, league, fetched_at)
+        fetch_league(db, league_name, league, fetched_at, full=full, today=today)
         db.commit()
 
     totals = db.execute(
