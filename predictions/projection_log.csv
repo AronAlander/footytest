@@ -1857,7 +1857,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Augsburg,43.5,0.0000,0.0076,0.0388
 2026-10-14,Bundesliga,2026-2027,Augsburg,43.5,0.0000,0.0076,0.0388
 2026-10-15,Bundesliga,2026-2027,Augsburg,43.5,0.0000,0.0076,0.0388
-2026-10-17,Bundesliga,2026-2027,Augsburg,42.1,0.0000,0.0064,0.0550
+2026-10-17,Bundesliga,2026-2027,Augsburg,42.1,0.0000,0.0064,0.0514
 2026-08-10,Bundesliga,2026-2027,Bayer Leverkusen,63.1,0.0212,0.7342,0.0000
 2026-08-11,Bundesliga,2026-2027,Bayer Leverkusen,63.1,0.0212,0.7342,0.0000
 2026-08-12,Bundesliga,2026-2027,Bayer Leverkusen,63.1,0.0212,0.7342,0.0000
@@ -2125,7 +2125,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Borussia Mönchengladbach,30.5,0.0000,0.0000,0.5996
 2026-10-14,Bundesliga,2026-2027,Borussia Mönchengladbach,30.5,0.0000,0.0000,0.5996
 2026-10-15,Bundesliga,2026-2027,Borussia Mönchengladbach,30.5,0.0000,0.0000,0.5996
-2026-10-17,Bundesliga,2026-2027,Borussia Mönchengladbach,30.4,0.0000,0.0000,0.6178
+2026-10-17,Bundesliga,2026-2027,Borussia Mönchengladbach,30.4,0.0000,0.0000,0.6050
 2026-08-10,Bundesliga,2026-2027,Eintracht Frankfurt,46.0,0.0000,0.0422,0.0462
 2026-08-11,Bundesliga,2026-2027,Eintracht Frankfurt,46.0,0.0000,0.0422,0.0462
 2026-08-12,Bundesliga,2026-2027,Eintracht Frankfurt,46.0,0.0000,0.0422,0.0462
@@ -2192,7 +2192,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Eintracht Frankfurt,42.8,0.0000,0.0058,0.0578
 2026-10-14,Bundesliga,2026-2027,Eintracht Frankfurt,42.8,0.0000,0.0058,0.0578
 2026-10-15,Bundesliga,2026-2027,Eintracht Frankfurt,42.8,0.0000,0.0058,0.0578
-2026-10-17,Bundesliga,2026-2027,Eintracht Frankfurt,44.5,0.0000,0.0096,0.0328
+2026-10-17,Bundesliga,2026-2027,Eintracht Frankfurt,44.5,0.0000,0.0096,0.0296
 2026-08-10,Bundesliga,2026-2027,Elversberg,34.3,0.0000,0.0002,0.4518
 2026-08-11,Bundesliga,2026-2027,Elversberg,34.3,0.0000,0.0002,0.4518
 2026-08-12,Bundesliga,2026-2027,Elversberg,34.3,0.0000,0.0002,0.4518
@@ -2259,7 +2259,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Elversberg,38.2,0.0000,0.0010,0.1632
 2026-10-14,Bundesliga,2026-2027,Elversberg,38.2,0.0000,0.0010,0.1632
 2026-10-15,Bundesliga,2026-2027,Elversberg,38.2,0.0000,0.0010,0.1632
-2026-10-17,Bundesliga,2026-2027,Elversberg,39.8,0.0000,0.0004,0.1210
+2026-10-17,Bundesliga,2026-2027,Elversberg,39.8,0.0000,0.0004,0.1156
 2026-08-10,Bundesliga,2026-2027,Freiburg,42.9,0.0000,0.0154,0.0922
 2026-08-11,Bundesliga,2026-2027,Freiburg,42.9,0.0000,0.0154,0.0922
 2026-08-12,Bundesliga,2026-2027,Freiburg,42.9,0.0000,0.0154,0.0922
@@ -2393,7 +2393,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Hamburg,33.7,0.0000,0.0000,0.4110
 2026-10-14,Bundesliga,2026-2027,Hamburg,33.7,0.0000,0.0000,0.4110
 2026-10-15,Bundesliga,2026-2027,Hamburg,33.7,0.0000,0.0000,0.4110
-2026-10-17,Bundesliga,2026-2027,Hamburg,33.7,0.0000,0.0002,0.4244
+2026-10-17,Bundesliga,2026-2027,Hamburg,33.7,0.0000,0.0002,0.4074
 2026-08-10,Bundesliga,2026-2027,Hoffenheim,51.2,0.0000,0.1482,0.0096
 2026-08-11,Bundesliga,2026-2027,Hoffenheim,51.2,0.0000,0.1482,0.0096
 2026-08-12,Bundesliga,2026-2027,Hoffenheim,51.2,0.0000,0.1482,0.0096
@@ -2460,7 +2460,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Hoffenheim,45.3,0.0000,0.0156,0.0266
 2026-10-14,Bundesliga,2026-2027,Hoffenheim,45.3,0.0000,0.0156,0.0266
 2026-10-15,Bundesliga,2026-2027,Hoffenheim,45.3,0.0000,0.0156,0.0266
-2026-10-17,Bundesliga,2026-2027,Hoffenheim,45.5,0.0000,0.0166,0.0228
+2026-10-17,Bundesliga,2026-2027,Hoffenheim,45.5,0.0000,0.0166,0.0212
 2026-08-10,Bundesliga,2026-2027,Köln,41.6,0.0000,0.0092,0.1180
 2026-08-11,Bundesliga,2026-2027,Köln,41.6,0.0000,0.0092,0.1180
 2026-08-12,Bundesliga,2026-2027,Köln,41.6,0.0000,0.0092,0.1180
@@ -2527,7 +2527,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Köln,43.0,0.0000,0.0072,0.0462
 2026-10-14,Bundesliga,2026-2027,Köln,43.0,0.0000,0.0072,0.0462
 2026-10-15,Bundesliga,2026-2027,Köln,43.0,0.0000,0.0072,0.0462
-2026-10-17,Bundesliga,2026-2027,Köln,41.5,0.0000,0.0040,0.0746
+2026-10-17,Bundesliga,2026-2027,Köln,41.5,0.0000,0.0040,0.0680
 2026-08-10,Bundesliga,2026-2027,Mainz,48.6,0.0000,0.0796,0.0200
 2026-08-11,Bundesliga,2026-2027,Mainz,48.6,0.0000,0.0796,0.0200
 2026-08-12,Bundesliga,2026-2027,Mainz,48.6,0.0000,0.0796,0.0200
@@ -2594,7 +2594,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Mainz,50.6,0.0000,0.0734,0.0034
 2026-10-14,Bundesliga,2026-2027,Mainz,50.6,0.0000,0.0734,0.0034
 2026-10-15,Bundesliga,2026-2027,Mainz,50.6,0.0000,0.0734,0.0034
-2026-10-17,Bundesliga,2026-2027,Mainz,51.9,0.0004,0.1106,0.0016
+2026-10-17,Bundesliga,2026-2027,Mainz,51.9,0.0004,0.1104,0.0016
 2026-08-10,Bundesliga,2026-2027,Paderborn,34.5,0.0000,0.0008,0.4378
 2026-08-11,Bundesliga,2026-2027,Paderborn,34.5,0.0000,0.0008,0.4378
 2026-08-12,Bundesliga,2026-2027,Paderborn,34.5,0.0000,0.0008,0.4378
@@ -2661,7 +2661,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Paderborn,30.4,0.0000,0.0000,0.6058
 2026-10-14,Bundesliga,2026-2027,Paderborn,30.4,0.0000,0.0000,0.6058
 2026-10-15,Bundesliga,2026-2027,Paderborn,30.4,0.0000,0.0000,0.6058
-2026-10-17,Bundesliga,2026-2027,Paderborn,32.5,0.0000,0.0000,0.4862
+2026-10-17,Bundesliga,2026-2027,Paderborn,30.5,0.0000,0.0000,0.6000
 2026-08-10,Bundesliga,2026-2027,RB Leipzig,58.9,0.0062,0.4898,0.0004
 2026-08-11,Bundesliga,2026-2027,RB Leipzig,58.9,0.0062,0.4898,0.0004
 2026-08-12,Bundesliga,2026-2027,RB Leipzig,58.9,0.0062,0.4898,0.0004
@@ -2795,7 +2795,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Schalke 04,31.5,0.0000,0.0000,0.5358
 2026-10-14,Bundesliga,2026-2027,Schalke 04,31.5,0.0000,0.0000,0.5358
 2026-10-15,Bundesliga,2026-2027,Schalke 04,31.5,0.0000,0.0000,0.5358
-2026-10-17,Bundesliga,2026-2027,Schalke 04,30.5,0.0000,0.0000,0.6166
+2026-10-17,Bundesliga,2026-2027,Schalke 04,30.5,0.0000,0.0000,0.6060
 2026-08-10,Bundesliga,2026-2027,Stuttgart,61.1,0.0112,0.6240,0.0002
 2026-08-11,Bundesliga,2026-2027,Stuttgart,61.1,0.0112,0.6240,0.0002
 2026-08-12,Bundesliga,2026-2027,Stuttgart,61.1,0.0112,0.6240,0.0002
@@ -2862,7 +2862,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Stuttgart,55.3,0.0006,0.2252,0.0002
 2026-10-14,Bundesliga,2026-2027,Stuttgart,55.3,0.0006,0.2252,0.0002
 2026-10-15,Bundesliga,2026-2027,Stuttgart,55.3,0.0006,0.2252,0.0002
-2026-10-17,Bundesliga,2026-2027,Stuttgart,54.6,0.0004,0.1950,0.0008
+2026-10-17,Bundesliga,2026-2027,Stuttgart,54.6,0.0004,0.1948,0.0008
 2026-08-10,Bundesliga,2026-2027,Union Berlin,39.7,0.0000,0.0060,0.1804
 2026-08-11,Bundesliga,2026-2027,Union Berlin,39.7,0.0000,0.0060,0.1804
 2026-08-12,Bundesliga,2026-2027,Union Berlin,39.7,0.0000,0.0060,0.1804
@@ -2929,7 +2929,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Union Berlin,33.2,0.0000,0.0000,0.4428
 2026-10-14,Bundesliga,2026-2027,Union Berlin,33.2,0.0000,0.0000,0.4428
 2026-10-15,Bundesliga,2026-2027,Union Berlin,33.2,0.0000,0.0000,0.4428
-2026-10-17,Bundesliga,2026-2027,Union Berlin,33.6,0.0000,0.0000,0.4352
+2026-10-17,Bundesliga,2026-2027,Union Berlin,33.6,0.0000,0.0000,0.4194
 2026-08-10,Bundesliga,2026-2027,Werder Bremen,37.7,0.0000,0.0036,0.2586
 2026-08-11,Bundesliga,2026-2027,Werder Bremen,37.7,0.0000,0.0036,0.2586
 2026-08-12,Bundesliga,2026-2027,Werder Bremen,37.7,0.0000,0.0036,0.2586
@@ -2996,7 +2996,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Bundesliga,2026-2027,Werder Bremen,42.1,0.0000,0.0058,0.0686
 2026-10-14,Bundesliga,2026-2027,Werder Bremen,42.1,0.0000,0.0058,0.0686
 2026-10-15,Bundesliga,2026-2027,Werder Bremen,42.1,0.0000,0.0058,0.0686
-2026-10-17,Bundesliga,2026-2027,Werder Bremen,40.1,0.0000,0.0020,0.1110
+2026-10-17,Bundesliga,2026-2027,Werder Bremen,41.1,0.0000,0.0024,0.0738
 2026-08-10,La Liga,2026-2027,Athletic Bilbao,56.6,0.0012,0.1730,0.0118
 2026-08-11,La Liga,2026-2027,Athletic Bilbao,56.6,0.0012,0.1730,0.0118
 2026-08-12,La Liga,2026-2027,Athletic Bilbao,56.6,0.0012,0.1730,0.0118
@@ -3063,7 +3063,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Athletic Bilbao,58.5,0.0000,0.1182,0.0010
 2026-10-14,La Liga,2026-2027,Athletic Bilbao,58.5,0.0000,0.1182,0.0010
 2026-10-15,La Liga,2026-2027,Athletic Bilbao,58.5,0.0000,0.1182,0.0010
-2026-10-17,La Liga,2026-2027,Athletic Bilbao,58.5,0.0000,0.1174,0.0006
+2026-10-17,La Liga,2026-2027,Athletic Bilbao,58.6,0.0000,0.1178,0.0006
 2026-08-10,La Liga,2026-2027,Atlético Madrid,66.6,0.0246,0.6498,0.0000
 2026-08-11,La Liga,2026-2027,Atlético Madrid,66.6,0.0246,0.6498,0.0000
 2026-08-12,La Liga,2026-2027,Atlético Madrid,66.6,0.0246,0.6498,0.0000
@@ -3130,7 +3130,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Atlético Madrid,76.2,0.0098,0.9416,0.0000
 2026-10-14,La Liga,2026-2027,Atlético Madrid,76.2,0.0098,0.9416,0.0000
 2026-10-15,La Liga,2026-2027,Atlético Madrid,76.2,0.0098,0.9416,0.0000
-2026-10-17,La Liga,2026-2027,Atlético Madrid,77.4,0.0122,0.9654,0.0000
+2026-10-17,La Liga,2026-2027,Atlético Madrid,77.9,0.0132,0.9686,0.0000
 2026-08-10,La Liga,2026-2027,Barcelona,84.8,0.7702,0.9972,0.0000
 2026-08-11,La Liga,2026-2027,Barcelona,84.8,0.7700,0.9972,0.0000
 2026-08-12,La Liga,2026-2027,Barcelona,84.8,0.7700,0.9972,0.0000
@@ -3197,7 +3197,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Barcelona,96.2,0.9430,1.0000,0.0000
 2026-10-14,La Liga,2026-2027,Barcelona,96.2,0.9430,1.0000,0.0000
 2026-10-15,La Liga,2026-2027,Barcelona,96.2,0.9430,1.0000,0.0000
-2026-10-17,La Liga,2026-2027,Barcelona,96.3,0.9432,1.0000,0.0000
+2026-10-17,La Liga,2026-2027,Barcelona,96.3,0.9428,1.0000,0.0000
 2026-08-10,La Liga,2026-2027,Celta Vigo,53.4,0.0006,0.0808,0.0224
 2026-08-11,La Liga,2026-2027,Celta Vigo,53.4,0.0006,0.0808,0.0224
 2026-08-12,La Liga,2026-2027,Celta Vigo,53.4,0.0006,0.0808,0.0224
@@ -3264,7 +3264,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Celta Vigo,48.3,0.0000,0.0062,0.0326
 2026-10-14,La Liga,2026-2027,Celta Vigo,48.3,0.0000,0.0062,0.0326
 2026-10-15,La Liga,2026-2027,Celta Vigo,48.3,0.0000,0.0062,0.0326
-2026-10-17,La Liga,2026-2027,Celta Vigo,48.4,0.0000,0.0082,0.0370
+2026-10-17,La Liga,2026-2027,Celta Vigo,48.4,0.0000,0.0078,0.0354
 2026-08-10,La Liga,2026-2027,Deportivo Alavés,48.9,0.0002,0.0290,0.0840
 2026-08-11,La Liga,2026-2027,Deportivo Alavés,48.9,0.0002,0.0290,0.0840
 2026-08-12,La Liga,2026-2027,Deportivo Alavés,48.9,0.0002,0.0290,0.0840
@@ -3331,7 +3331,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Deportivo Alavés,51.8,0.0000,0.0162,0.0106
 2026-10-14,La Liga,2026-2027,Deportivo Alavés,51.8,0.0000,0.0162,0.0106
 2026-10-15,La Liga,2026-2027,Deportivo Alavés,51.8,0.0000,0.0162,0.0106
-2026-10-17,La Liga,2026-2027,Deportivo Alavés,51.8,0.0000,0.0186,0.0116
+2026-10-17,La Liga,2026-2027,Deportivo Alavés,51.8,0.0000,0.0178,0.0108
 2026-08-10,La Liga,2026-2027,Deportivo de A Coruña,39.0,0.0000,0.0004,0.4662
 2026-08-11,La Liga,2026-2027,Deportivo de A Coruña,39.0,0.0000,0.0004,0.4662
 2026-08-12,La Liga,2026-2027,Deportivo de A Coruña,39.0,0.0000,0.0004,0.4662
@@ -3398,7 +3398,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Deportivo de A Coruña,40.8,0.0000,0.0000,0.2292
 2026-10-14,La Liga,2026-2027,Deportivo de A Coruña,40.8,0.0000,0.0000,0.2292
 2026-10-15,La Liga,2026-2027,Deportivo de A Coruña,40.8,0.0000,0.0000,0.2292
-2026-10-17,La Liga,2026-2027,Deportivo de A Coruña,40.2,0.0000,0.0002,0.2634
+2026-10-17,La Liga,2026-2027,Deportivo de A Coruña,40.2,0.0000,0.0002,0.2610
 2026-08-10,La Liga,2026-2027,Elche,41.9,0.0000,0.0028,0.3138
 2026-08-11,La Liga,2026-2027,Elche,41.9,0.0000,0.0028,0.3138
 2026-08-12,La Liga,2026-2027,Elche,41.9,0.0000,0.0028,0.3138
@@ -3465,7 +3465,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Elche,40.0,0.0000,0.0000,0.2856
 2026-10-14,La Liga,2026-2027,Elche,40.0,0.0000,0.0000,0.2856
 2026-10-15,La Liga,2026-2027,Elche,40.0,0.0000,0.0000,0.2856
-2026-10-17,La Liga,2026-2027,Elche,40.5,0.0000,0.0002,0.2460
+2026-10-17,La Liga,2026-2027,Elche,40.5,0.0000,0.0002,0.2424
 2026-08-10,La Liga,2026-2027,Espanyol,41.4,0.0000,0.0030,0.3400
 2026-08-11,La Liga,2026-2027,Espanyol,41.4,0.0000,0.0030,0.3400
 2026-08-12,La Liga,2026-2027,Espanyol,41.4,0.0000,0.0030,0.3400
@@ -3532,7 +3532,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Espanyol,43.5,0.0000,0.0004,0.1294
 2026-10-14,La Liga,2026-2027,Espanyol,43.5,0.0000,0.0004,0.1294
 2026-10-15,La Liga,2026-2027,Espanyol,43.5,0.0000,0.0004,0.1294
-2026-10-17,La Liga,2026-2027,Espanyol,42.5,0.0000,0.0008,0.1684
+2026-10-17,La Liga,2026-2027,Espanyol,41.7,0.0000,0.0006,0.1980
 2026-08-10,La Liga,2026-2027,Getafe,41.9,0.0000,0.0014,0.2946
 2026-08-11,La Liga,2026-2027,Getafe,41.9,0.0000,0.0014,0.2946
 2026-08-12,La Liga,2026-2027,Getafe,41.9,0.0000,0.0014,0.2946
@@ -3599,7 +3599,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Getafe,38.3,0.0000,0.0000,0.3818
 2026-10-14,La Liga,2026-2027,Getafe,38.3,0.0000,0.0000,0.3818
 2026-10-15,La Liga,2026-2027,Getafe,38.3,0.0000,0.0000,0.3818
-2026-10-17,La Liga,2026-2027,Getafe,38.4,0.0000,0.0000,0.3598
+2026-10-17,La Liga,2026-2027,Getafe,38.4,0.0000,0.0000,0.3538
 2026-08-10,La Liga,2026-2027,Levante,48.6,0.0000,0.0298,0.0892
 2026-08-11,La Liga,2026-2027,Levante,48.6,0.0000,0.0298,0.0892
 2026-08-12,La Liga,2026-2027,Levante,48.6,0.0000,0.0298,0.0892
@@ -3666,7 +3666,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Levante,45.3,0.0000,0.0018,0.0884
 2026-10-14,La Liga,2026-2027,Levante,45.3,0.0000,0.0018,0.0884
 2026-10-15,La Liga,2026-2027,Levante,45.3,0.0000,0.0018,0.0884
-2026-10-17,La Liga,2026-2027,Levante,44.6,0.0000,0.0012,0.1046
+2026-10-17,La Liga,2026-2027,Levante,44.6,0.0000,0.0012,0.1028
 2026-08-10,La Liga,2026-2027,Málaga,39.2,0.0000,0.0010,0.4442
 2026-08-11,La Liga,2026-2027,Málaga,39.2,0.0000,0.0010,0.4442
 2026-08-12,La Liga,2026-2027,Málaga,39.2,0.0000,0.0010,0.4442
@@ -3733,7 +3733,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Málaga,21.6,0.0000,0.0000,0.9932
 2026-10-14,La Liga,2026-2027,Málaga,21.6,0.0000,0.0000,0.9932
 2026-10-15,La Liga,2026-2027,Málaga,21.6,0.0000,0.0000,0.9932
-2026-10-17,La Liga,2026-2027,Málaga,21.6,0.0000,0.0000,0.9954
+2026-10-17,La Liga,2026-2027,Málaga,21.6,0.0000,0.0000,0.9952
 2026-08-10,La Liga,2026-2027,Osasuna,50.7,0.0004,0.0442,0.0468
 2026-08-11,La Liga,2026-2027,Osasuna,50.7,0.0004,0.0442,0.0468
 2026-08-12,La Liga,2026-2027,Osasuna,50.7,0.0004,0.0442,0.0468
@@ -3800,7 +3800,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Osasuna,43.8,0.0000,0.0002,0.1348
 2026-10-14,La Liga,2026-2027,Osasuna,43.8,0.0000,0.0002,0.1348
 2026-10-15,La Liga,2026-2027,Osasuna,43.8,0.0000,0.0002,0.1348
-2026-10-17,La Liga,2026-2027,Osasuna,43.6,0.0000,0.0008,0.1382
+2026-10-17,La Liga,2026-2027,Osasuna,43.7,0.0000,0.0008,0.1342
 2026-08-10,La Liga,2026-2027,Racing de Santander,39.1,0.0000,0.0006,0.4646
 2026-08-11,La Liga,2026-2027,Racing de Santander,39.1,0.0000,0.0006,0.4646
 2026-08-12,La Liga,2026-2027,Racing de Santander,39.1,0.0000,0.0006,0.4646
@@ -3867,7 +3867,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Racing de Santander,37.6,0.0000,0.0000,0.4460
 2026-10-14,La Liga,2026-2027,Racing de Santander,37.6,0.0000,0.0000,0.4460
 2026-10-15,La Liga,2026-2027,Racing de Santander,37.6,0.0000,0.0000,0.4460
-2026-10-17,La Liga,2026-2027,Racing de Santander,37.9,0.0000,0.0000,0.4200
+2026-10-17,La Liga,2026-2027,Racing de Santander,37.9,0.0000,0.0000,0.4158
 2026-08-10,La Liga,2026-2027,Rayo Vallecano,54.7,0.0004,0.1062,0.0162
 2026-08-11,La Liga,2026-2027,Rayo Vallecano,54.7,0.0004,0.1062,0.0162
 2026-08-12,La Liga,2026-2027,Rayo Vallecano,54.7,0.0004,0.1062,0.0162
@@ -3934,7 +3934,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Rayo Vallecano,51.3,0.0000,0.0164,0.0158
 2026-10-14,La Liga,2026-2027,Rayo Vallecano,51.3,0.0000,0.0164,0.0158
 2026-10-15,La Liga,2026-2027,Rayo Vallecano,51.3,0.0000,0.0164,0.0158
-2026-10-17,La Liga,2026-2027,Rayo Vallecano,51.5,0.0000,0.0142,0.0126
+2026-10-17,La Liga,2026-2027,Rayo Vallecano,51.5,0.0000,0.0142,0.0122
 2026-08-10,La Liga,2026-2027,Real Betis,60.2,0.0030,0.3106,0.0028
 2026-08-11,La Liga,2026-2027,Real Betis,60.2,0.0030,0.3106,0.0028
 2026-08-12,La Liga,2026-2027,Real Betis,60.2,0.0030,0.3106,0.0028
@@ -4001,7 +4001,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Real Betis,68.5,0.0002,0.6474,0.0000
 2026-10-14,La Liga,2026-2027,Real Betis,68.5,0.0002,0.6474,0.0000
 2026-10-15,La Liga,2026-2027,Real Betis,68.5,0.0002,0.6474,0.0000
-2026-10-17,La Liga,2026-2027,Real Betis,68.4,0.0002,0.6658,0.0000
+2026-10-17,La Liga,2026-2027,Real Betis,68.5,0.0002,0.6644,0.0000
 2026-08-10,La Liga,2026-2027,Real Madrid,76.2,0.1836,0.9492,0.0000
 2026-08-11,La Liga,2026-2027,Real Madrid,76.2,0.1838,0.9492,0.0000
 2026-08-12,La Liga,2026-2027,Real Madrid,76.2,0.1838,0.9492,0.0000
@@ -4068,7 +4068,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Real Madrid,82.4,0.0470,0.9928,0.0000
 2026-10-14,La Liga,2026-2027,Real Madrid,82.4,0.0470,0.9928,0.0000
 2026-10-15,La Liga,2026-2027,Real Madrid,82.4,0.0470,0.9928,0.0000
-2026-10-17,La Liga,2026-2027,Real Madrid,82.3,0.0444,0.9920,0.0000
+2026-10-17,La Liga,2026-2027,Real Madrid,82.3,0.0438,0.9918,0.0000
 2026-08-10,La Liga,2026-2027,Real Sociedad,49.9,0.0000,0.0358,0.0604
 2026-08-11,La Liga,2026-2027,Real Sociedad,49.9,0.0000,0.0358,0.0604
 2026-08-12,La Liga,2026-2027,Real Sociedad,49.9,0.0000,0.0358,0.0604
@@ -4135,7 +4135,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Real Sociedad,52.8,0.0000,0.0248,0.0088
 2026-10-14,La Liga,2026-2027,Real Sociedad,52.8,0.0000,0.0248,0.0088
 2026-10-15,La Liga,2026-2027,Real Sociedad,52.8,0.0000,0.0248,0.0088
-2026-10-17,La Liga,2026-2027,Real Sociedad,52.7,0.0000,0.0232,0.0070
+2026-10-17,La Liga,2026-2027,Real Sociedad,52.7,0.0000,0.0228,0.0068
 2026-08-10,La Liga,2026-2027,Sevilla,42.1,0.0000,0.0032,0.2876
 2026-08-11,La Liga,2026-2027,Sevilla,42.1,0.0000,0.0032,0.2876
 2026-08-12,La Liga,2026-2027,Sevilla,42.1,0.0000,0.0032,0.2876
@@ -4269,7 +4269,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Valencia,41.3,0.0000,0.0000,0.2222
 2026-10-14,La Liga,2026-2027,Valencia,41.3,0.0000,0.0000,0.2222
 2026-10-15,La Liga,2026-2027,Valencia,41.3,0.0000,0.0000,0.2222
-2026-10-17,La Liga,2026-2027,Valencia,41.2,0.0000,0.0004,0.2224
+2026-10-17,La Liga,2026-2027,Valencia,41.2,0.0000,0.0004,0.2180
 2026-08-10,La Liga,2026-2027,Villarreal,64.4,0.0156,0.5422,0.0000
 2026-08-11,La Liga,2026-2027,Villarreal,64.4,0.0156,0.5422,0.0000
 2026-08-12,La Liga,2026-2027,Villarreal,64.4,0.0156,0.5422,0.0000
@@ -4336,7 +4336,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,La Liga,2026-2027,Villarreal,61.7,0.0000,0.2248,0.0002
 2026-10-14,La Liga,2026-2027,Villarreal,61.7,0.0000,0.2248,0.0002
 2026-10-15,La Liga,2026-2027,Villarreal,61.7,0.0000,0.2248,0.0002
-2026-10-17,La Liga,2026-2027,Villarreal,60.5,0.0000,0.1816,0.0006
+2026-10-17,La Liga,2026-2027,Villarreal,60.6,0.0000,0.1814,0.0006
 2026-08-10,Ligue 1,2026-2027,Angers,28.0,0.0000,0.0000,0.7704
 2026-08-11,Ligue 1,2026-2027,Angers,28.0,0.0000,0.0000,0.7704
 2026-08-12,Ligue 1,2026-2027,Angers,28.0,0.0000,0.0000,0.7704
@@ -5609,7 +5609,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Arsenal,82.0,0.4456,0.9956,0.0000
 2026-10-14,Premier League,2026-2027,Arsenal,82.0,0.4456,0.9956,0.0000
 2026-10-15,Premier League,2026-2027,Arsenal,82.0,0.4456,0.9956,0.0000
-2026-10-17,Premier League,2026-2027,Arsenal,82.1,0.5254,0.9960,0.0000
+2026-10-17,Premier League,2026-2027,Arsenal,82.1,0.4464,0.9962,0.0000
 2026-08-10,Premier League,2026-2027,Aston Villa,56.3,0.0018,0.1422,0.0124
 2026-08-11,Premier League,2026-2027,Aston Villa,56.3,0.0018,0.1422,0.0124
 2026-08-12,Premier League,2026-2027,Aston Villa,56.3,0.0018,0.1422,0.0124
@@ -5676,7 +5676,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Aston Villa,47.8,0.0000,0.0182,0.0768
 2026-10-14,Premier League,2026-2027,Aston Villa,47.8,0.0000,0.0182,0.0768
 2026-10-15,Premier League,2026-2027,Aston Villa,47.8,0.0000,0.0182,0.0768
-2026-10-17,Premier League,2026-2027,Aston Villa,48.1,0.0000,0.0202,0.0750
+2026-10-17,Premier League,2026-2027,Aston Villa,48.1,0.0000,0.0200,0.0724
 2026-08-10,Premier League,2026-2027,Bournemouth,58.7,0.0062,0.2224,0.0042
 2026-08-11,Premier League,2026-2027,Bournemouth,58.7,0.0062,0.2224,0.0042
 2026-08-12,Premier League,2026-2027,Bournemouth,58.7,0.0062,0.2224,0.0042
@@ -5743,7 +5743,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Bournemouth,51.3,0.0000,0.0546,0.0326
 2026-10-14,Premier League,2026-2027,Bournemouth,51.3,0.0000,0.0546,0.0326
 2026-10-15,Premier League,2026-2027,Bournemouth,51.3,0.0000,0.0546,0.0326
-2026-10-17,Premier League,2026-2027,Bournemouth,51.4,0.0002,0.0532,0.0304
+2026-10-17,Premier League,2026-2027,Bournemouth,51.4,0.0002,0.0500,0.0304
 2026-08-10,Premier League,2026-2027,Brentford,54.2,0.0008,0.0862,0.0190
 2026-08-11,Premier League,2026-2027,Brentford,54.2,0.0008,0.0862,0.0190
 2026-08-12,Premier League,2026-2027,Brentford,54.2,0.0008,0.0862,0.0190
@@ -5810,7 +5810,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Brentford,57.3,0.0006,0.2042,0.0048
 2026-10-14,Premier League,2026-2027,Brentford,57.3,0.0006,0.2042,0.0048
 2026-10-15,Premier League,2026-2027,Brentford,57.3,0.0006,0.2042,0.0048
-2026-10-17,Premier League,2026-2027,Brentford,56.9,0.0008,0.1858,0.0034
+2026-10-17,Premier League,2026-2027,Brentford,59.0,0.0010,0.2646,0.0016
 2026-08-10,Premier League,2026-2027,Brighton and Hove Albion,57.3,0.0022,0.1772,0.0066
 2026-08-11,Premier League,2026-2027,Brighton and Hove Albion,57.3,0.0022,0.1772,0.0066
 2026-08-12,Premier League,2026-2027,Brighton and Hove Albion,57.3,0.0022,0.1772,0.0066
@@ -5877,7 +5877,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Brighton and Hove Albion,65.2,0.0144,0.6248,0.0000
 2026-10-14,Premier League,2026-2027,Brighton and Hove Albion,65.2,0.0144,0.6248,0.0000
 2026-10-15,Premier League,2026-2027,Brighton and Hove Albion,65.2,0.0144,0.6248,0.0000
-2026-10-17,Premier League,2026-2027,Brighton and Hove Albion,65.2,0.0136,0.6370,0.0000
+2026-10-17,Premier League,2026-2027,Brighton and Hove Albion,65.3,0.0102,0.6224,0.0000
 2026-08-10,Premier League,2026-2027,Chelsea,56.7,0.0022,0.1538,0.0066
 2026-08-11,Premier League,2026-2027,Chelsea,56.7,0.0022,0.1538,0.0066
 2026-08-12,Premier League,2026-2027,Chelsea,56.7,0.0022,0.1538,0.0066
@@ -5944,7 +5944,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Chelsea,57.6,0.0008,0.2132,0.0048
 2026-10-14,Premier League,2026-2027,Chelsea,57.6,0.0008,0.2132,0.0048
 2026-10-15,Premier League,2026-2027,Chelsea,57.6,0.0008,0.2132,0.0048
-2026-10-17,Premier League,2026-2027,Chelsea,59.2,0.0014,0.2800,0.0018
+2026-10-17,Premier League,2026-2027,Chelsea,60.1,0.0018,0.3156,0.0016
 2026-08-10,Premier League,2026-2027,Coventry City,37.5,0.0000,0.0006,0.5296
 2026-08-11,Premier League,2026-2027,Coventry City,37.5,0.0000,0.0006,0.5296
 2026-08-12,Premier League,2026-2027,Coventry City,37.5,0.0000,0.0006,0.5296
@@ -6011,7 +6011,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Coventry City,31.3,0.0000,0.0000,0.8472
 2026-10-14,Premier League,2026-2027,Coventry City,31.3,0.0000,0.0000,0.8472
 2026-10-15,Premier League,2026-2027,Coventry City,31.3,0.0000,0.0000,0.8472
-2026-10-17,Premier League,2026-2027,Coventry City,31.3,0.0000,0.0000,0.8530
+2026-10-17,Premier League,2026-2027,Coventry City,31.3,0.0000,0.0000,0.8542
 2026-08-10,Premier League,2026-2027,Crystal Palace,49.7,0.0002,0.0316,0.0624
 2026-08-11,Premier League,2026-2027,Crystal Palace,49.7,0.0002,0.0316,0.0624
 2026-08-12,Premier League,2026-2027,Crystal Palace,49.7,0.0002,0.0316,0.0624
@@ -6078,7 +6078,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Crystal Palace,46.1,0.0000,0.0128,0.1252
 2026-10-14,Premier League,2026-2027,Crystal Palace,46.1,0.0000,0.0128,0.1252
 2026-10-15,Premier League,2026-2027,Crystal Palace,46.1,0.0000,0.0128,0.1252
-2026-10-17,Premier League,2026-2027,Crystal Palace,45.9,0.0000,0.0100,0.1218
+2026-10-17,Premier League,2026-2027,Crystal Palace,45.8,0.0000,0.0100,0.1250
 2026-08-10,Premier League,2026-2027,Everton,46.2,0.0000,0.0106,0.1318
 2026-08-11,Premier League,2026-2027,Everton,46.2,0.0000,0.0106,0.1320
 2026-08-12,Premier League,2026-2027,Everton,46.2,0.0000,0.0106,0.1320
@@ -6145,7 +6145,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Everton,51.3,0.0000,0.0536,0.0298
 2026-10-14,Premier League,2026-2027,Everton,51.3,0.0000,0.0536,0.0298
 2026-10-15,Premier League,2026-2027,Everton,51.3,0.0000,0.0536,0.0298
-2026-10-17,Premier League,2026-2027,Everton,50.0,0.0002,0.0340,0.0442
+2026-10-17,Premier League,2026-2027,Everton,48.8,0.0000,0.0244,0.0590
 2026-08-10,Premier League,2026-2027,Fulham,47.2,0.0000,0.0162,0.1054
 2026-08-11,Premier League,2026-2027,Fulham,47.2,0.0000,0.0162,0.1054
 2026-08-12,Premier League,2026-2027,Fulham,47.2,0.0000,0.0162,0.1054
@@ -6212,7 +6212,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Fulham,40.6,0.0000,0.0028,0.3372
 2026-10-14,Premier League,2026-2027,Fulham,40.6,0.0000,0.0028,0.3372
 2026-10-15,Premier League,2026-2027,Fulham,40.6,0.0000,0.0028,0.3372
-2026-10-17,Premier League,2026-2027,Fulham,40.0,0.0000,0.0006,0.3536
+2026-10-17,Premier League,2026-2027,Fulham,42.1,0.0000,0.0016,0.2548
 2026-08-10,Premier League,2026-2027,Hull City,37.3,0.0000,0.0004,0.5410
 2026-08-11,Premier League,2026-2027,Hull City,37.3,0.0000,0.0004,0.5410
 2026-08-12,Premier League,2026-2027,Hull City,37.3,0.0000,0.0004,0.5410
@@ -6279,7 +6279,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Hull City,46.9,0.0000,0.0156,0.0924
 2026-10-14,Premier League,2026-2027,Hull City,46.9,0.0000,0.0156,0.0924
 2026-10-15,Premier League,2026-2027,Hull City,46.9,0.0000,0.0156,0.0924
-2026-10-17,Premier League,2026-2027,Hull City,46.6,0.0000,0.0146,0.0926
+2026-10-17,Premier League,2026-2027,Hull City,45.6,0.0000,0.0070,0.1164
 2026-08-10,Premier League,2026-2027,Ipswich Town,24.8,0.0000,0.0000,0.9708
 2026-08-11,Premier League,2026-2027,Ipswich Town,24.8,0.0000,0.0000,0.9708
 2026-08-12,Premier League,2026-2027,Ipswich Town,24.8,0.0000,0.0000,0.9708
@@ -6346,7 +6346,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Ipswich Town,36.9,0.0000,0.0000,0.5782
 2026-10-14,Premier League,2026-2027,Ipswich Town,36.9,0.0000,0.0000,0.5782
 2026-10-15,Premier League,2026-2027,Ipswich Town,36.9,0.0000,0.0000,0.5782
-2026-10-17,Premier League,2026-2027,Ipswich Town,37.5,0.0000,0.0006,0.5394
+2026-10-17,Premier League,2026-2027,Ipswich Town,36.5,0.0000,0.0000,0.6034
 2026-08-10,Premier League,2026-2027,Leeds United,50.8,0.0004,0.0396,0.0404
 2026-08-11,Premier League,2026-2027,Leeds United,50.8,0.0004,0.0396,0.0404
 2026-08-12,Premier League,2026-2027,Leeds United,50.8,0.0004,0.0396,0.0404
@@ -6413,7 +6413,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Leeds United,52.1,0.0002,0.0624,0.0234
 2026-10-14,Premier League,2026-2027,Leeds United,52.1,0.0002,0.0624,0.0234
 2026-10-15,Premier League,2026-2027,Leeds United,52.1,0.0002,0.0624,0.0234
-2026-10-17,Premier League,2026-2027,Leeds United,52.1,0.0000,0.0636,0.0244
+2026-10-17,Premier League,2026-2027,Leeds United,52.1,0.0000,0.0608,0.0244
 2026-08-10,Premier League,2026-2027,Liverpool,66.9,0.0448,0.6316,0.0000
 2026-08-11,Premier League,2026-2027,Liverpool,66.9,0.0448,0.6316,0.0000
 2026-08-12,Premier League,2026-2027,Liverpool,66.9,0.0448,0.6316,0.0000
@@ -6480,7 +6480,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Liverpool,62.5,0.0040,0.4630,0.0002
 2026-10-14,Premier League,2026-2027,Liverpool,62.5,0.0040,0.4630,0.0002
 2026-10-15,Premier League,2026-2027,Liverpool,62.5,0.0040,0.4630,0.0002
-2026-10-17,Premier League,2026-2027,Liverpool,62.0,0.0042,0.4314,0.0010
+2026-10-17,Premier League,2026-2027,Liverpool,61.0,0.0024,0.3630,0.0014
 2026-08-10,Premier League,2026-2027,Manchester City,76.3,0.3082,0.9384,0.0000
 2026-08-11,Premier League,2026-2027,Manchester City,76.3,0.3082,0.9384,0.0000
 2026-08-12,Premier League,2026-2027,Manchester City,76.3,0.3082,0.9384,0.0000
@@ -6547,7 +6547,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Manchester City,83.0,0.5338,0.9958,0.0000
 2026-10-14,Premier League,2026-2027,Manchester City,83.0,0.5338,0.9958,0.0000
 2026-10-15,Premier League,2026-2027,Manchester City,83.0,0.5338,0.9958,0.0000
-2026-10-17,Premier League,2026-2027,Manchester City,81.3,0.4528,0.9926,0.0000
+2026-10-17,Premier League,2026-2027,Manchester City,83.3,0.5368,0.9962,0.0000
 2026-08-10,Premier League,2026-2027,Manchester United,62.9,0.0180,0.4174,0.0004
 2026-08-11,Premier League,2026-2027,Manchester United,62.9,0.0180,0.4174,0.0004
 2026-08-12,Premier League,2026-2027,Manchester United,62.9,0.0180,0.4174,0.0004
@@ -6614,7 +6614,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Manchester United,57.6,0.0002,0.2222,0.0046
 2026-10-14,Premier League,2026-2027,Manchester United,57.6,0.0002,0.2222,0.0046
 2026-10-15,Premier League,2026-2027,Manchester United,57.6,0.0002,0.2222,0.0046
-2026-10-17,Premier League,2026-2027,Manchester United,57.7,0.0014,0.2224,0.0026
+2026-10-17,Premier League,2026-2027,Manchester United,57.6,0.0012,0.2158,0.0028
 2026-08-10,Premier League,2026-2027,Newcastle United,55.3,0.0018,0.1174,0.0146
 2026-08-11,Premier League,2026-2027,Newcastle United,55.3,0.0018,0.1174,0.0146
 2026-08-12,Premier League,2026-2027,Newcastle United,55.3,0.0018,0.1174,0.0146
@@ -6681,7 +6681,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Newcastle United,50.8,0.0002,0.0480,0.0390
 2026-10-14,Premier League,2026-2027,Newcastle United,50.8,0.0002,0.0480,0.0390
 2026-10-15,Premier League,2026-2027,Newcastle United,50.8,0.0002,0.0480,0.0390
-2026-10-17,Premier League,2026-2027,Newcastle United,51.0,0.0000,0.0442,0.0356
+2026-10-17,Premier League,2026-2027,Newcastle United,51.0,0.0000,0.0404,0.0340
 2026-08-10,Premier League,2026-2027,Nottingham Forest,46.7,0.0000,0.0126,0.1184
 2026-08-11,Premier League,2026-2027,Nottingham Forest,46.7,0.0000,0.0126,0.1184
 2026-08-12,Premier League,2026-2027,Nottingham Forest,46.7,0.0000,0.0126,0.1184
@@ -6748,7 +6748,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Nottingham Forest,46.4,0.0002,0.0114,0.1050
 2026-10-14,Premier League,2026-2027,Nottingham Forest,46.4,0.0002,0.0114,0.1050
 2026-10-15,Premier League,2026-2027,Nottingham Forest,46.4,0.0002,0.0114,0.1050
-2026-10-17,Premier League,2026-2027,Nottingham Forest,46.2,0.0000,0.0116,0.1182
+2026-10-17,Premier League,2026-2027,Nottingham Forest,46.2,0.0000,0.0104,0.1180
 2026-08-10,Premier League,2026-2027,Sunderland,41.3,0.0000,0.0022,0.3210
 2026-08-11,Premier League,2026-2027,Sunderland,41.3,0.0000,0.0022,0.3208
 2026-08-12,Premier League,2026-2027,Sunderland,41.3,0.0000,0.0022,0.3208
@@ -6815,7 +6815,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Sunderland,39.8,0.0000,0.0002,0.3850
 2026-10-14,Premier League,2026-2027,Sunderland,39.8,0.0000,0.0002,0.3850
 2026-10-15,Premier League,2026-2027,Sunderland,39.8,0.0000,0.0002,0.3850
-2026-10-17,Premier League,2026-2027,Sunderland,39.8,0.0000,0.0012,0.3934
+2026-10-17,Premier League,2026-2027,Sunderland,39.8,0.0000,0.0008,0.3928
 2026-08-10,Premier League,2026-2027,Tottenham Hotspur,46.5,0.0000,0.0132,0.1154
 2026-08-11,Premier League,2026-2027,Tottenham Hotspur,46.5,0.0000,0.0132,0.1154
 2026-08-12,Premier League,2026-2027,Tottenham Hotspur,46.5,0.0000,0.0132,0.1154
@@ -6882,7 +6882,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Premier League,2026-2027,Tottenham Hotspur,41.0,0.0000,0.0016,0.3138
 2026-10-14,Premier League,2026-2027,Tottenham Hotspur,41.0,0.0000,0.0016,0.3138
 2026-10-15,Premier League,2026-2027,Tottenham Hotspur,41.0,0.0000,0.0016,0.3138
-2026-10-17,Premier League,2026-2027,Tottenham Hotspur,41.0,0.0000,0.0010,0.3096
+2026-10-17,Premier League,2026-2027,Tottenham Hotspur,41.0,0.0000,0.0008,0.3078
 2026-08-10,Serie A,2026-2027,AC Milan,63.0,0.0062,0.1910,0.0000
 2026-08-11,Serie A,2026-2027,AC Milan,63.0,0.0062,0.1910,0.0000
 2026-08-12,Serie A,2026-2027,AC Milan,63.0,0.0062,0.1910,0.0000
@@ -6949,7 +6949,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,AC Milan,66.7,0.0046,0.2580,0.0000
 2026-10-14,Serie A,2026-2027,AC Milan,66.7,0.0046,0.2580,0.0000
 2026-10-15,Serie A,2026-2027,AC Milan,66.7,0.0046,0.2580,0.0000
-2026-10-17,Serie A,2026-2027,AC Milan,66.2,0.0040,0.2548,0.0000
+2026-10-17,Serie A,2026-2027,AC Milan,66.2,0.0040,0.2546,0.0000
 2026-08-10,Serie A,2026-2027,Atalanta,68.3,0.0250,0.4380,0.0000
 2026-08-11,Serie A,2026-2027,Atalanta,68.3,0.0250,0.4380,0.0000
 2026-08-12,Serie A,2026-2027,Atalanta,68.3,0.0250,0.4380,0.0000
@@ -7016,7 +7016,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Atalanta,60.1,0.0002,0.0590,0.0004
 2026-10-14,Serie A,2026-2027,Atalanta,60.1,0.0002,0.0590,0.0004
 2026-10-15,Serie A,2026-2027,Atalanta,60.1,0.0002,0.0590,0.0004
-2026-10-17,Serie A,2026-2027,Atalanta,59.6,0.0006,0.0710,0.0004
+2026-10-17,Serie A,2026-2027,Atalanta,59.6,0.0004,0.0708,0.0004
 2026-08-10,Serie A,2026-2027,Bologna,51.8,0.0004,0.0138,0.0118
 2026-08-11,Serie A,2026-2027,Bologna,51.8,0.0004,0.0138,0.0118
 2026-08-12,Serie A,2026-2027,Bologna,51.8,0.0004,0.0138,0.0118
@@ -7150,7 +7150,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Cagliari,47.2,0.0000,0.0000,0.0180
 2026-10-14,Serie A,2026-2027,Cagliari,47.2,0.0000,0.0000,0.0180
 2026-10-15,Serie A,2026-2027,Cagliari,47.2,0.0000,0.0000,0.0180
-2026-10-17,Serie A,2026-2027,Cagliari,47.1,0.0000,0.0006,0.0218
+2026-10-17,Serie A,2026-2027,Cagliari,47.1,0.0000,0.0006,0.0216
 2026-08-10,Serie A,2026-2027,Como,71.7,0.0602,0.6302,0.0000
 2026-08-11,Serie A,2026-2027,Como,71.7,0.0602,0.6302,0.0000
 2026-08-12,Serie A,2026-2027,Como,71.7,0.0602,0.6302,0.0000
@@ -7217,7 +7217,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Como,71.3,0.0194,0.5134,0.0000
 2026-10-14,Serie A,2026-2027,Como,71.3,0.0194,0.5134,0.0000
 2026-10-15,Serie A,2026-2027,Como,71.3,0.0194,0.5134,0.0000
-2026-10-17,Serie A,2026-2027,Como,71.3,0.0216,0.5630,0.0000
+2026-10-17,Serie A,2026-2027,Como,71.3,0.0220,0.5666,0.0000
 2026-08-10,Serie A,2026-2027,Fiorentina,49.5,0.0000,0.0054,0.0258
 2026-08-11,Serie A,2026-2027,Fiorentina,49.5,0.0000,0.0054,0.0258
 2026-08-12,Serie A,2026-2027,Fiorentina,49.5,0.0000,0.0054,0.0258
@@ -7485,7 +7485,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Inter Milan,88.1,0.7844,0.9940,0.0000
 2026-10-14,Serie A,2026-2027,Inter Milan,88.1,0.7844,0.9940,0.0000
 2026-10-15,Serie A,2026-2027,Inter Milan,88.1,0.7844,0.9940,0.0000
-2026-10-17,Serie A,2026-2027,Inter Milan,87.8,0.7882,0.9942,0.0000
+2026-10-17,Serie A,2026-2027,Inter Milan,87.8,0.7878,0.9940,0.0000
 2026-08-10,Serie A,2026-2027,Juventus,76.7,0.1714,0.8436,0.0000
 2026-08-11,Serie A,2026-2027,Juventus,76.7,0.1712,0.8436,0.0000
 2026-08-12,Serie A,2026-2027,Juventus,76.7,0.1712,0.8436,0.0000
@@ -7552,7 +7552,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Juventus,76.9,0.0880,0.8232,0.0000
 2026-10-14,Serie A,2026-2027,Juventus,76.9,0.0880,0.8232,0.0000
 2026-10-15,Serie A,2026-2027,Juventus,76.9,0.0880,0.8232,0.0000
-2026-10-17,Serie A,2026-2027,Juventus,76.7,0.0910,0.8304,0.0000
+2026-10-17,Serie A,2026-2027,Juventus,76.7,0.0912,0.8286,0.0000
 2026-08-10,Serie A,2026-2027,Lazio,52.3,0.0002,0.0118,0.0092
 2026-08-11,Serie A,2026-2027,Lazio,52.3,0.0002,0.0118,0.0092
 2026-08-12,Serie A,2026-2027,Lazio,52.3,0.0002,0.0118,0.0092
@@ -7619,7 +7619,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Lazio,62.4,0.0008,0.1044,0.0000
 2026-10-14,Serie A,2026-2027,Lazio,62.4,0.0008,0.1044,0.0000
 2026-10-15,Serie A,2026-2027,Lazio,62.4,0.0008,0.1044,0.0000
-2026-10-17,Serie A,2026-2027,Lazio,62.4,0.0016,0.1194,0.0002
+2026-10-17,Serie A,2026-2027,Lazio,62.4,0.0014,0.1180,0.0002
 2026-08-10,Serie A,2026-2027,Lecce,34.0,0.0000,0.0000,0.5298
 2026-08-11,Serie A,2026-2027,Lecce,34.0,0.0000,0.0000,0.5298
 2026-08-12,Serie A,2026-2027,Lecce,34.0,0.0000,0.0000,0.5298
@@ -7686,7 +7686,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Lecce,31.2,0.0000,0.0000,0.6568
 2026-10-14,Serie A,2026-2027,Lecce,31.2,0.0000,0.0000,0.6568
 2026-10-15,Serie A,2026-2027,Lecce,31.2,0.0000,0.0000,0.6568
-2026-10-17,Serie A,2026-2027,Lecce,30.9,0.0000,0.0000,0.6748
+2026-10-17,Serie A,2026-2027,Lecce,30.9,0.0000,0.0000,0.6754
 2026-08-10,Serie A,2026-2027,Monza,28.3,0.0000,0.0000,0.8360
 2026-08-11,Serie A,2026-2027,Monza,28.3,0.0000,0.0000,0.8364
 2026-08-12,Serie A,2026-2027,Monza,28.3,0.0000,0.0000,0.8364
@@ -7753,7 +7753,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Monza,35.8,0.0000,0.0000,0.3510
 2026-10-14,Serie A,2026-2027,Monza,35.8,0.0000,0.0000,0.3510
 2026-10-15,Serie A,2026-2027,Monza,35.8,0.0000,0.0000,0.3510
-2026-10-17,Serie A,2026-2027,Monza,35.6,0.0000,0.0000,0.3708
+2026-10-17,Serie A,2026-2027,Monza,35.6,0.0000,0.0000,0.3714
 2026-08-10,Serie A,2026-2027,Napoli,69.0,0.0314,0.4626,0.0000
 2026-08-11,Serie A,2026-2027,Napoli,69.0,0.0314,0.4622,0.0000
 2026-08-12,Serie A,2026-2027,Napoli,69.0,0.0314,0.4622,0.0000
@@ -7820,7 +7820,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Napoli,69.6,0.0108,0.4164,0.0000
 2026-10-14,Serie A,2026-2027,Napoli,69.6,0.0108,0.4164,0.0000
 2026-10-15,Serie A,2026-2027,Napoli,69.6,0.0108,0.4164,0.0000
-2026-10-17,Serie A,2026-2027,Napoli,67.4,0.0046,0.3204,0.0000
+2026-10-17,Serie A,2026-2027,Napoli,67.4,0.0050,0.3192,0.0000
 2026-08-10,Serie A,2026-2027,Parma,35.0,0.0000,0.0000,0.4808
 2026-08-11,Serie A,2026-2027,Parma,35.0,0.0000,0.0000,0.4808
 2026-08-12,Serie A,2026-2027,Parma,35.0,0.0000,0.0000,0.4808
@@ -7887,7 +7887,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Parma,31.0,0.0000,0.0000,0.6368
 2026-10-14,Serie A,2026-2027,Parma,31.0,0.0000,0.0000,0.6368
 2026-10-15,Serie A,2026-2027,Parma,31.0,0.0000,0.0000,0.6368
-2026-10-17,Serie A,2026-2027,Parma,30.8,0.0000,0.0000,0.6718
+2026-10-17,Serie A,2026-2027,Parma,30.8,0.0000,0.0000,0.6710
 2026-08-10,Serie A,2026-2027,Roma,68.0,0.0224,0.4162,0.0000
 2026-08-11,Serie A,2026-2027,Roma,68.0,0.0224,0.4166,0.0000
 2026-08-12,Serie A,2026-2027,Roma,68.0,0.0224,0.4166,0.0000
@@ -7954,7 +7954,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Roma,77.0,0.0918,0.8288,0.0000
 2026-10-14,Serie A,2026-2027,Roma,77.0,0.0918,0.8288,0.0000
 2026-10-15,Serie A,2026-2027,Roma,77.0,0.0918,0.8288,0.0000
-2026-10-17,Serie A,2026-2027,Roma,76.7,0.0884,0.8356,0.0000
+2026-10-17,Serie A,2026-2027,Roma,76.7,0.0882,0.8370,0.0000
 2026-08-10,Serie A,2026-2027,Sassuolo,45.6,0.0000,0.0018,0.0734
 2026-08-11,Serie A,2026-2027,Sassuolo,45.5,0.0000,0.0018,0.0734
 2026-08-12,Serie A,2026-2027,Sassuolo,45.5,0.0000,0.0018,0.0734
@@ -8021,7 +8021,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Sassuolo,49.6,0.0000,0.0010,0.0100
 2026-10-14,Serie A,2026-2027,Sassuolo,49.6,0.0000,0.0010,0.0100
 2026-10-15,Serie A,2026-2027,Sassuolo,49.6,0.0000,0.0010,0.0100
-2026-10-17,Serie A,2026-2027,Sassuolo,47.1,0.0000,0.0006,0.0212
+2026-10-17,Serie A,2026-2027,Sassuolo,47.1,0.0000,0.0006,0.0214
 2026-08-10,Serie A,2026-2027,Torino,42.8,0.0000,0.0006,0.1304
 2026-08-11,Serie A,2026-2027,Torino,42.8,0.0000,0.0006,0.1302
 2026-08-12,Serie A,2026-2027,Torino,42.8,0.0000,0.0006,0.1302
@@ -8088,7 +8088,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Torino,43.6,0.0000,0.0002,0.0680
 2026-10-14,Serie A,2026-2027,Torino,43.6,0.0000,0.0002,0.0680
 2026-10-15,Serie A,2026-2027,Torino,43.6,0.0000,0.0002,0.0680
-2026-10-17,Serie A,2026-2027,Torino,43.2,0.0000,0.0002,0.0714
+2026-10-17,Serie A,2026-2027,Torino,43.2,0.0000,0.0002,0.0704
 2026-08-10,Serie A,2026-2027,Udinese,45.9,0.0000,0.0024,0.0564
 2026-08-11,Serie A,2026-2027,Udinese,45.9,0.0000,0.0024,0.0564
 2026-08-12,Serie A,2026-2027,Udinese,45.9,0.0000,0.0024,0.0564
@@ -8155,7 +8155,7 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Udinese,40.3,0.0000,0.0000,0.1482
 2026-10-14,Serie A,2026-2027,Udinese,40.3,0.0000,0.0000,0.1482
 2026-10-15,Serie A,2026-2027,Udinese,40.3,0.0000,0.0000,0.1482
-2026-10-17,Serie A,2026-2027,Udinese,40.2,0.0000,0.0000,0.1532
+2026-10-17,Serie A,2026-2027,Udinese,40.2,0.0000,0.0000,0.1536
 2026-08-10,Serie A,2026-2027,Venezia,37.7,0.0000,0.0000,0.3328
 2026-08-11,Serie A,2026-2027,Venezia,37.7,0.0000,0.0000,0.3328
 2026-08-12,Serie A,2026-2027,Venezia,37.7,0.0000,0.0000,0.3328
@@ -8222,4 +8222,4 @@ date,league,season,team,proj_pts,title_pct,top4_pct,bottom3_pct
 2026-10-13,Serie A,2026-2027,Venezia,28.7,0.0000,0.0000,0.7718
 2026-10-14,Serie A,2026-2027,Venezia,28.7,0.0000,0.0000,0.7718
 2026-10-15,Serie A,2026-2027,Venezia,28.7,0.0000,0.0000,0.7718
-2026-10-17,Serie A,2026-2027,Venezia,30.9,0.0000,0.0000,0.6682
+2026-10-17,Serie A,2026-2027,Venezia,30.9,0.0000,0.0000,0.6684
