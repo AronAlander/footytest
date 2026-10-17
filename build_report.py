@@ -680,6 +680,29 @@ tr.fx-link:focus-visible td:last-child::after { opacity: 1; }
 .sp-key { width: 11px; height: 11px; vertical-align: -1px; overflow: visible; }
 .sp-kh { fill: none; stroke: var(--muted); stroke-width: .9; }
 .sp-kg { fill: #0a7d24; stroke: var(--card); stroke-width: .9; }
+.ws-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+           gap: 14px 22px; }
+.ws-name { margin: 0 0 4px; font-size: 12.5px; color: var(--text-primary);
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-name .rank { color: var(--text-secondary); font-weight: 600; font-size: 11px; }
+.ws-bar { display: flex; height: 7px; border-radius: 2px; overflow: hidden;
+          margin: 0 0 4px; }
+.ws-bar i { display: block; height: 100%; }
+.ws-s0, .ws-s0-k { background: var(--win); }
+.ws-s1, .ws-s1-k { background: var(--draw); }
+.ws-s2, .ws-s2-k { background: var(--loss); }
+.ws-s0-k, .ws-s1-k, .ws-s2-k { color: #fff; padding: 0 4px; border-radius: 3px; }
+.ws-fo-k { color: var(--accent); font-weight: 600; }
+.ws-ag-k { color: var(--away); font-weight: 600; }
+.ws-cell svg { width: 100%; height: auto; display: block; overflow: visible; }
+svg .ws-rule { stroke: var(--border); stroke-width: 1; }
+svg .ws-ax { font-size: 9.5px; fill: var(--text-secondary); }
+svg .ws-ax.ws-thin { opacity: .35; }
+svg .ws-line { fill: none; stroke-width: 2; }
+svg .ws-line.ws-fo { stroke: var(--accent); }
+svg .ws-line.ws-ag { stroke: var(--away); }
+svg circle.ws-fo { fill: var(--accent); }
+svg circle.ws-ag { fill: var(--away); }
 .dm-wrap { max-width: 640px; margin: 0 auto 4px; }
 .dm-ylab, .dm-xlab { font-size: 11px; color: var(--text-secondary); }
 .dm-ylab { margin: 0 0 2px; }
@@ -8622,13 +8645,195 @@ def shot_profile(db, league):
                  f"<div class='chart-card'>{legend}"
                  f"<div class='sp-grid'>{cells}</div></div>", about)
 
+WS_MIN_MINUTES = 180     # two full matches in a state before its rate is shown
+WS_STATES = ("ahead", "level", "behind")
+
+
+def _score_states(db, league):
+    """{club: {"min": [3], "for": [3], "against": [3]}}, ahead/level/behind.
+
+    Built from the shot maps, whose goals reproduce every Allsvenskan final
+    score of 2026 exactly -- 159 of 159 when this was written -- so the state
+    at any moment is exact rather than inferred. The clock is the race
+    chart's: each half's stoppage is placed after its last minute, its
+    length taken from the latest shot struck in it, which is a lower bound
+    and the only measure the feed keeps. A shot is judged by the score
+    before it, so the shot that scores counts in the state it changed, and
+    a shot in the same minute as a goal counts in the state before that
+    goal -- the feed records the minute but not the second.
+
+    Non-penalty xG: a penalty is awarded, not created, and would make a
+    single foul look like a change of approach. Own goals carry no xG and
+    are counted only as goals, for the side they were scored for.
+    """
+    teams_of = {}
+    for mid, team in db.execute(
+            "SELECT match_id, team FROM fotmob_team_matches WHERE league = ? "
+            "AND scored IS NOT NULL", (league,)):
+        teams_of.setdefault(mid, []).append(team)
+    shots = {}
+    for mid, team, minute, added, period, xg, situ, outcome, og in db.execute(
+            "SELECT match_id, team, minute, minute_added, period, xg, situation, "
+            "outcome, is_own_goal FROM fotmob_match_shots WHERE league = ?",
+            (league,)):
+        shots.setdefault(mid, []).append(
+            (team, minute or 0, added or 0, period, xg, situ, outcome, og))
+
+    out = {}
+    for mid, rows in shots.items():
+        pair = teams_of.get(mid, [])
+        if len(pair) != 2:
+            continue
+        s1 = max([a for _t, _m, a, p, *_r in rows if p == "FirstHalf"] or [0])
+        s2 = max([a for _t, _m, a, p, *_r in rows if p == "SecondHalf"] or [0])
+
+        def clock(m, a, p, s1=s1):
+            return m + a if p == "FirstHalf" else 45 + s1 + (m - 45) + a
+
+        other = {pair[0]: pair[1], pair[1]: pair[0]}
+        goals = sorted(
+            (clock(m, a, p), other[t] if og else t)
+            for t, m, a, p, _x, _s, outc, og in rows if outc == "Goal")
+
+        def state(at, side, goals=goals):
+            margin = sum(1 if who == side else -1 for c, who in goals if c < at)
+            return 0 if margin > 0 else 1 if margin == 0 else 2
+
+        edges = [0.0] + [c for c, _w in goals] + [90.0 + s1 + s2]
+        for side in pair:
+            rec = out.setdefault(side, {"min": [0.0] * 3, "for": [0.0] * 3,
+                                        "against": [0.0] * 3})
+            for a, b in zip(edges, edges[1:]):
+                if b > a:
+                    rec["min"][state((a + b) / 2, side)] += b - a
+        for t, m, a, p, xg, situ, _o, og in rows:
+            if og or xg is None or situ == "Penalty" or t not in other:
+                continue
+            c = clock(m, a, p)
+            out[t]["for"][state(c, t)] += xg
+            out[other[t]]["against"][state(c, other[t])] += xg
+    return out
+
+
+def score_state_block(db, league):
+    """Chances created and conceded per 90 when ahead, level and behind."""
+    if league in UNDERSTAT_LEAGUES:
+        return ""      # no shot times for the big five, so no game states
+    if not db.execute(
+        "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?",
+        ("fotmob_match_shots",),
+    ).fetchone():
+        return ""
+    states = _score_states(db, league)
+    if len(states) < 4:
+        return ""
+    order = [t for (t,) in db.execute(
+        "SELECT team FROM fotmob_team_matches WHERE league = ? AND scored IS NOT NULL "
+        "GROUP BY team ORDER BY SUM(pts) DESC, SUM(scored) - SUM(missed) DESC, team",
+        (league,)) if t in states]
+
+    def rate(rec, key, i):
+        m = rec["min"][i]
+        return rec[key][i] * 90 / m if m >= WS_MIN_MINUTES else None
+
+    top = max([2.0] + [rate(r, k, i) or 0 for r in states.values()
+                       for k in ("for", "against") for i in range(3)])
+    top = math.ceil(top * 2) / 2
+    W, H, L, R, T, B = 210, 100, 24, 14, 8, 18
+    xs = [L, (L + W - R) / 2, W - R]
+
+    def y(v):
+        return T + (top - v) / top * (H - T - B)
+
+    cells = ""
+    for rank, club in enumerate(order, 1):
+        rec = states[club]
+        mins = rec["min"]
+        total = sum(mins) or 1
+        bar = "".join(
+            f"<i class='ws-s{i}' style='width:{100 * mins[i] / total:.1f}%' "
+            f"title='{WS_STATES[i]} for {mins[i]:.0f} minutes'></i>"
+            for i in range(3))
+        svg = (f"<svg viewBox='0 0 {W} {H}' role='img' aria-label='"
+               f"{escape(club)}: chances created and conceded per 90 when ahead, "
+               f"level and behind'>")
+        for g in range(0, int(top) + 1):
+            svg += (f"<line class='ws-rule' x1='{L}' x2='{W - R}' y1='{y(g):.1f}' "
+                    f"y2='{y(g):.1f}'/><text class='ws-ax' x='{L - 4}' "
+                    f"y='{y(g) + 3:.1f}' text-anchor='end'>{g}</text>")
+        for key, cls in (("against", "ag"), ("for", "fo")):
+            pts = [(xs[i], y(rate(rec, key, i)), rate(rec, key, i), i)
+                   for i in range(3) if rate(rec, key, i) is not None]
+            if len(pts) > 1:
+                svg += (f"<polyline class='ws-line ws-{cls}' points='"
+                        + " ".join(f"{x:.1f},{v:.1f}" for x, v, _r, _i in pts) + "'/>")
+            for x, v, r, i in pts:
+                svg += (f"<circle class='ws-{cls}' cx='{x:.1f}' cy='{v:.1f}' r='2.8'>"
+                        f"<title>{escape(club)}, {WS_STATES[i]}: "
+                        f"{'created' if key == 'for' else 'conceded'} {r:.2f} npxG "
+                        f"per 90, over {mins[i]:.0f} minutes</title></circle>")
+        for i, lab in enumerate(WS_STATES):
+            anchor = ("start", "middle", "end")[i]
+            thin = "" if mins[i] >= WS_MIN_MINUTES else " ws-thin"
+            svg += (f"<text class='ws-ax{thin}' x='{xs[i]:.1f}' y='{H - 4}' "
+                    f"text-anchor='{anchor}'>{lab}</text>")
+        svg += "</svg>"
+        cells += (f"<div class='ws-cell'><p class='ws-name'><span class='rank'>"
+                  f"{rank}</span> {escape(club)}</p>"
+                  f"<span class='ws-bar'>{bar}</span>{svg}</div>")
+
+    legend = (
+        "<p class='spark-legend'>One panel per club, table order. "
+        "<span class='ws-fo-k'>Blue</span>: chances it created per 90 minutes; "
+        "<span class='ws-ag-k'>orange</span>: chances it conceded per 90 \u2014 "
+        "non-penalty expected goals, in each of the three states a match can be "
+        "in for it. The bar above is how its season has divided between them, "
+        "<span class='ws-s0-k'>ahead</span>, <span class='ws-s1-k'>level</span> and "
+        f"<span class='ws-s2-k'>behind</span>. A state needs {WS_MIN_MINUTES} "
+        "minutes \u2014 two full matches \u2014 before its rate is drawn; one "
+        "that has not got there yet is greyed out. Hover a point for its "
+        "minutes.</p>"
+    )
+    about = (
+        "<p><strong>What it shows.</strong> What a club does when the score "
+        "changes. Every minute of its season is put in one of three states by "
+        "the score at the time, and its chances for and against are divided the "
+        "same way, so each line is the club's own behaviour as a match moves "
+        "under it: whether it pushes when it falls behind, sits back when it "
+        "goes ahead, or carries on the same whatever the score.</p>"
+        "<p><strong>Read each club against itself.</strong> Comparing two "
+        "clubs in the same state mostly measures how good they are, because "
+        "good sides spend more time ahead and create more wherever they are. "
+        "The shape of one club's line is the part that is about approach: a "
+        "blue line climbing to the right is a side that chases; one falling is "
+        "a side that runs out of ideas when it needs them.</p>"
+        "<p><strong>Small samples.</strong> A season's minutes split three "
+        "ways leaves the rarer states thin \u2014 a leading club may have spent "
+        "three matches behind all year. Those rates move a long way on one "
+        "afternoon, and the gaps between states have narrowed as the season has "
+        "gone on, which is what noise shrinking looks like. Read a big swing on "
+        "the short side of the bar as a hint, not a habit.</p>"
+        "<p><strong>Where it comes from.</strong> The shot maps the match "
+        "reports draw, whose goals reproduce every final score this season, so "
+        "the state at each moment is exact. Penalties are left out of the "
+        "chances, since a penalty is given rather than created. Stoppage time "
+        "is measured from the latest shot struck in it, so it is a slight "
+        "undercount, and a shot in the same minute as a goal counts in the "
+        "state before it, because the feed records minutes and not seconds. "
+        "Allsvenskan only: Understat keeps no shot times for the big five.</p>"
+    )
+    return block("When the score changes",
+                 f"<div class='chart-card'>{legend}"
+                 f"<div class='ws-grid'>{cells}</div></div>", about)
+
+
 def teams_panel(db, leagues, archive=False):
     tables = "".join(
         lgview(lg, xg_table(db, lg), i == 0) for i, lg in enumerate(leagues)
     )
     charts = "".join(
         lgview(lg, style_scatter(db, lg) + rolling_sparklines(db, lg) +
-               shot_profile(db, lg), i == 0)
+               shot_profile(db, lg) + score_state_block(db, lg), i == 0)
         for i, lg in enumerate(leagues)
     )
     teams_by_lg = {lg: load_teams(db, lg) for lg in leagues}
