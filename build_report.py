@@ -129,6 +129,7 @@ h1 {
   border: 1px solid var(--border); background: var(--card);
   padding: 3px 11px; border-radius: 999px;
 }
+.badge-held { color: var(--loss); border-color: var(--loss); }
 h2 { font-size: 20px; letter-spacing: -0.01em; margin: 26px 0 4px; }
 h3 { font-size: 13px; margin: 0; color: var(--text-primary);
      text-transform: uppercase; letter-spacing: 0.06em; }
@@ -9914,6 +9915,25 @@ SEARCH_HTML = (
 )
 
 
+def understat_held_badge(db, now=None):
+    """A warning badge while the big five's xG is older than the page.
+
+    The Understat fetcher keeps the stored data when Understat cannot be
+    reached rather than stopping the nightly run, so everything else still
+    publishes. The Updated badge would then vouch for numbers it did not
+    refresh; this says which ones, and since when.
+    """
+    for label, raw, _age in stale_sources(db, now):
+        if label != "Understat xG":
+            continue
+        stamp = datetime.fromisoformat(raw)
+        return (f"<span class='badge badge-held' title='Understat could not be "
+                f"reached since, so the expected-goals numbers for the big five "
+                f"are the last ones it published'>Big-five xG as of "
+                f"{stamp.day} {stamp:%B} — Understat unreachable</span>")
+    return ""
+
+
 def build_page(db, nav, generated, archive_label=None, frozen=None):
     """The full dashboard HTML. archive_label (e.g. '2018/19') switches to the
     archive layout: no volatile 'Updated' badge, so the file only changes when
@@ -10011,6 +10031,8 @@ def build_page(db, nav, generated, archive_label=None, frozen=None):
                   "best-effort and can run hours late, so the <em>Updated</em> badge "
                   "at the top is the one to trust for how fresh this page is.")
     badges = "".join(f"<span class='badge'>{escape(t)}</span>" for t in badge_texts)
+    if not archive:
+        badges += understat_held_badge(db)
     # the archive pages are frozen snapshots of a finished season; a running
     # list of what changed this week belongs on the live dashboard only
     whats_new = "" if archive else changelog_block(changelog_entries())

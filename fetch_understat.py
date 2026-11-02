@@ -133,6 +133,13 @@ def ppda_ratio(value):
     return None
 
 
+def stored_fetch(db, league, season):
+    """When this league's season was last fetched, or None if it never was."""
+    return db.execute(
+        "SELECT MAX(fetched_at) FROM understat_team_matches "
+        "WHERE league = ? AND season = ?", (league, season)).fetchone()[0]
+
+
 def fetch_league(db, league, slug, season, fetched_at):
     url = f"https://understat.com/getLeagueData/{slug}/{season}"
     print(f"Fetching {url} ...")
@@ -297,7 +304,21 @@ def main() -> None:
     for season in seasons:
         print(f"--- season {season}/{int(season) % 100 + 1} ---")
         for league, slug in LEAGUES.items():
-            fetch_league(db, league, slug, season, fetched_at)
+            try:
+                fetch_league(db, league, slug, season, fetched_at)
+            except OSError as error:
+                # Understat down or unreachable (on 2026-11-02 its name would
+                # not resolve from the runner and its server would not answer
+                # from anywhere). Yesterday's rows are still right, just a day
+                # old, so keep them and let the build say how old; an outage
+                # elsewhere must not freeze the whole site. Only a network
+                # error qualifies: a reply that no longer parses means the
+                # feed changed, and that should still stop the run
+                held = stored_fetch(db, league, season)
+                if held is None:
+                    raise
+                print(f"  {league}: Understat unreachable ({error}); "
+                      f"keeping the data stored on {held}")
             db.commit()
             time.sleep(REQUEST_PAUSE)
 
