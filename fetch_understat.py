@@ -140,6 +140,10 @@ def stored_fetch(db, league, season):
         "WHERE league = ? AND season = ?", (league, season)).fetchone()[0]
 
 
+class UnderstatDown(OSError):
+    """Understat answered, but with its maintenance page rather than data."""
+
+
 def fetch_league(db, league, slug, season, fetched_at):
     url = f"https://understat.com/getLeagueData/{slug}/{season}"
     print(f"Fetching {url} ...")
@@ -148,6 +152,13 @@ def fetch_league(db, league, slug, season, fetched_at):
     raw = urllib.request.urlopen(request, timeout=60).read()
     if raw[:2] == b"\x1f\x8b":
         raw = gzip.decompress(raw)
+    if raw.lstrip()[:1] == b"<":
+        # From 2026-11-04 Understat answered every URL, this JSON endpoint
+        # included, with HTTP 200 and a static "We will come back soon" page.
+        # The JSON feed never serves HTML, so that is the site being away,
+        # not the feed changing: count it as an outage like a 503
+        raise UnderstatDown(f"served an HTML page instead of JSON "
+                            f"({raw.lstrip()[:60]!r}...)")
     data = json.loads(raw)
 
     (DATA_DIR / f"understat_{slug.lower()}_{season}.json").write_text(

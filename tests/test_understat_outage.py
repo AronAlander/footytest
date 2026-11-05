@@ -74,6 +74,45 @@ def test_a_reply_that_does_not_parse_is_still_fatal(tmp_path, monkeypatch):
         fetch_understat.main()
 
 
+MAINTENANCE = (b"<!DOCTYPE html>\n<html>\n    <head>\n\t\t<title>Understat.com</title>"
+               b"</head><body>We will come back soon</body></html>")
+
+
+def _reply_with(monkeypatch, body):
+    """Let the real fetch_league run against a canned HTTP 200 reply."""
+    class Reply:
+        def read(self):
+            return body
+    monkeypatch.setattr(fetch_understat.urllib.request, "urlopen",
+                        lambda *_a, **_k: Reply())
+
+
+def test_a_maintenance_page_counts_as_unreachable(tmp_path, monkeypatch, capsys):
+    """2026-11-04: every Understat URL answered 200 with 'We will come back soon'."""
+    path = _db(tmp_path, monkeypatch)
+    _reply_with(monkeypatch, MAINTENANCE)
+    fetch_understat.main()
+    out = capsys.readouterr().out
+    assert "served an HTML page instead of JSON" in out
+    assert "keeping the data stored on 2026-11-01T10:30:00+00:00" in out
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT COUNT(*) FROM understat_team_matches").fetchone()[0] == 5
+
+
+def test_a_maintenance_page_with_nothing_stored_is_still_fatal(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch, stored=False)
+    _reply_with(monkeypatch, MAINTENANCE)
+    with pytest.raises(fetch_understat.UnderstatDown):
+        fetch_understat.main()
+
+
+def test_a_non_html_reply_that_does_not_parse_is_still_fatal(tmp_path, monkeypatch):
+    _db(tmp_path, monkeypatch)
+    _reply_with(monkeypatch, b'{"teams": ')
+    with pytest.raises(ValueError):
+        fetch_understat.main()
+
+
 def _stamped(db, when):
     db.execute("INSERT INTO understat_team_matches (season, league, team, match_date, "
                "fetched_at) VALUES ('2026','Serie A','A','2026-10-31',?)", (when,))
