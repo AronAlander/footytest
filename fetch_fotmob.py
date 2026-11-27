@@ -1,4 +1,10 @@
-"""Fetch Allsvenskan advanced stats (xG, xA, shots on target, ...) from FotMob.
+"""Fetch advanced stats (xG, xA, shots on target, ...) from FotMob.
+
+Allsvenskan has always come from here. The big five's current season does too
+since Understat went down on 2026-11-03: their earlier seasons stay
+Understat's, and their rows here are stored under Understat's club names and
+season labels ("2026", not FotMob's "2026/2027"), so a club reads as one club
+across the change of source. See BIG_FIVE below.
 
 FotMob has no official API, but its website loads JSON from two hosts that
 need no key or signing (verified 2026-08-31):
@@ -17,9 +23,9 @@ Understat doesn't offer. xPts is not provided either, so it is computed here
 with a Poisson model over each match's xG (documented in the report).
 
 Usage:
-    python fetch_fotmob.py               # current season (calendar year)
-    python fetch_fotmob.py 2024 2025     # specific seasons
-    python fetch_fotmob.py --backfill    # every season with stats (2017+)
+    python fetch_fotmob.py               # current season, Allsvenskan + big five
+    python fetch_fotmob.py 2024 2025     # specific Allsvenskan seasons
+    python fetch_fotmob.py --backfill    # every Allsvenskan season (2017+)
 
 Matches already stored are skipped, so re-runs only fetch new results
 (~2 s per new match; a full season is ~240 matches, roughly 8 minutes) --
@@ -36,16 +42,133 @@ import json
 import sqlite3
 import sys
 import time
+import urllib.parse
 import urllib.request
 from datetime import date, datetime, timezone
 from math import exp, factorial
 from pathlib import Path
+
+import club_names
 
 LEAGUE_ID = 67
 LEAGUE = "Allsvenskan"
 SEASON = str(date.today().year)  # Allsvenskan runs over a calendar year
 FIRST_SEASON = 2017              # oldest season with FotMob stat links
 REQUEST_PAUSE = 1.8
+
+# The big five's current season, standing in for Understat, which has served
+# nothing but a maintenance page since 2026-11-03. Measured against it on the
+# 835 club-matches both held (August to 3 November): FotMob's xG runs about
+# 7.5% lower -- it is Opta's model, not Understat's -- but correlates 0.93
+# match by match and 0.97-0.99 per club, and predictions built on it scored
+# within noise of Understat's (Brier 0.5490 against 0.5474 over 190 matches).
+# Only the current season is fetched: every earlier one is Understat's.
+BIG_FIVE = {
+    "Premier League": 47,
+    "La Liga": 87,
+    "Serie A": 55,
+    "Bundesliga": 54,
+    "Ligue 1": 53,
+}
+NEW_PER_RUN = 80        # new matches fetched per league per run, oldest
+                        # first. A season joining mid-way is ~130 matches a
+                        # league, and all five at once would add twenty
+                        # minutes to a run with a sixty-minute limit; this
+                        # spreads the first catch-up over two nights. The
+                        # report waits for a league to be caught up before
+                        # reading it (build_report.current_xg_source)
+
+
+def big_five_season(today=None):
+    """Autumn-spring seasons by starting year, flipping on 1 August -- the
+    same rule fetch_understat.py uses, so the two label a season alike."""
+    today = today or date.today()
+    return str(today.year if today.month >= 8 else today.year - 1)
+
+
+class League:
+    """One league's fetch: its FotMob id, how FotMob labels the season, how
+    it is stored here, and the club names it is stored under."""
+
+    def __init__(self, name, fotmob_id, season, label=None):
+        self.name = name
+        self.id = fotmob_id
+        self.season = season              # as stored in this database
+        self.label = label or season      # as FotMob names it
+        self.names = None                 # FotMob name -> stored name
+
+    def rename(self, name, strict=True):
+        """The stored name for a club FotMob names `name`.
+
+        Strict for the clubs in a match, which must be in the league's
+        mapping. Lenient for the player leaderboards, which can carry a
+        club a player has since left for another league; those keep
+        FotMob's name, which nothing joins on."""
+        if self.names is None:
+            return name
+        if name in self.names:
+            return self.names[name]
+        if strict:
+            raise ValueError(f"{self.name}: no stored name for club {name!r}")
+        return name
+
+
+def allsvenskan(season=SEASON):
+    return League(LEAGUE, LEAGUE_ID, season)
+
+
+def big_five(name, today=None):
+    season = big_five_season(today)
+    return League(name, BIG_FIVE[name], season, f"{season}/{int(season) + 1}")
+
+
+def _understat_names(db, league, season=None):
+    """Club names Understat has stored for a league, for one season or all."""
+    sql = "SELECT DISTINCT team FROM understat_team_matches WHERE league = ?"
+    args = (league,)
+    if season is not None:
+        sql += " AND season = ?"
+        args += (season,)
+    try:
+        return sorted(r[0] for r in db.execute(sql, args))
+    except sqlite3.Error:
+        return []           # a database that never ran fetch_understat.py
+
+
+def map_names(db, lg, fotmob_names):
+    """FotMob club name -> the name this league's rows are stored under.
+
+    Allsvenskan keeps FotMob's own names, as it always has. A big-five club
+    takes Understat's name, so its history, head-to-heads and predictions
+    see one club across the change of source. Understat's rows for the same
+    season list exactly the clubs in the division, so the match is closed:
+    every club must map to one of them, one to one, or the run stops and says
+    which -- a club split under two names would quietly halve its history.
+    Without those rows (a season Understat never reached) the names are
+    matched against every club Understat has ever held for the league, and a
+    club it has never seen, newly promoted, keeps FotMob's name.
+    """
+    if lg.name not in BIG_FIVE:
+        return {n: n for n in fotmob_names}
+    current = _understat_names(db, lg.name, lg.season)
+    pool = current or _understat_names(db, lg.name)
+    found = club_names.mapping(fotmob_names, pool)
+    missing = sorted(n for n, v in found.items() if v is None)
+    if missing and current:
+        raise RuntimeError(
+            f"{lg.name}: FotMob club(s) {', '.join(missing)} match no club "
+            f"Understat holds for {lg.season} -- add an alias to club_names.py")
+    for n in missing:
+        print(f"  {lg.name}: {n} has no Understat history; stored under "
+              f"FotMob's name")
+        found[n] = n
+    taken = {}
+    for n, v in found.items():
+        taken.setdefault(v, []).append(n)
+    clash = {v: ns for v, ns in taken.items() if len(ns) > 1}
+    if clash:
+        raise RuntimeError(f"{lg.name}: several FotMob clubs map to one name: {clash}")
+    return found
 
 BASE = "https://www.fotmob.com/api/data"
 HEADERS = {
@@ -363,10 +486,10 @@ def season_stat_id(league_json, season):
     return None
 
 
-def fetch_players(db, season, stat_id, fetched_at):
+def fetch_players(db, lg, stat_id, fetched_at):
     players = {}
     for slug, column in STAT_FILES.items():
-        url = f"https://data.fotmob.com/stats/{LEAGUE_ID}/season/{stat_id}/{slug}.json"
+        url = f"https://data.fotmob.com/stats/{lg.id}/season/{stat_id}/{slug}.json"
         try:
             data = get_json(url)
         except Exception as error:
@@ -377,7 +500,7 @@ def fetch_players(db, season, stat_id, fetched_at):
             pid = str(entry.get("ParticiantId"))
             p = players.setdefault(pid, {
                 "name": entry.get("ParticipantName"),
-                "team": entry.get("TeamName"),
+                "team": lg.rename(entry.get("TeamName"), strict=False),
                 "matches": entry.get("MatchesPlayed"),
             })
             p[column] = entry.get("StatValue")
@@ -394,7 +517,7 @@ def fetch_players(db, season, stat_id, fetched_at):
             "INSERT OR REPLACE INTO fotmob_players VALUES "
             "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                season, LEAGUE, pid, p.get("name"), p.get("team"),
+                lg.season, lg.name, pid, p.get("name"), p.get("team"),
                 minutes, int(p.get("matches") or 0),
                 int(p.get("goals") or 0), num(p.get("xg")) or 0.0,
                 int(p.get("assists") or 0), num(p.get("xa")) or 0.0,
@@ -447,7 +570,7 @@ def position_of(player):
     return None if value is None else str(value)
 
 
-def store_match_players(db, season, match_id, md, teams, fetched_at):
+def store_match_players(db, lg, match_id, md, teams, fetched_at):
     """One row per player who was in the squad, from the same payload.
 
     Player ids here are the ids fotmob_players already stores, so a match
@@ -484,8 +607,9 @@ def store_match_players(db, season, match_id, md, teams, fetched_at):
     for pid, player in stats.items():
         flat = player_stat_map(player)
         rows.append((
-            season, LEAGUE, str(match_id), str(pid),
-            names.get(str(player.get("teamId"))) or player.get("teamName"),
+            lg.season, lg.name, str(match_id), str(pid),
+            names.get(str(player.get("teamId")))
+            or lg.rename(player.get("teamName"), strict=False),
             player.get("name"),
             1 if str(pid) in started else 0,
             1 if player.get("isGoalkeeper") else 0,
@@ -498,7 +622,7 @@ def store_match_players(db, season, match_id, md, teams, fetched_at):
         return 0
     db.execute(
         "DELETE FROM fotmob_match_players WHERE season = ? AND league = ? AND match_id = ?",
-        (season, LEAGUE, str(match_id)),
+        (lg.season, lg.name, str(match_id)),
     )
     db.executemany(
         f"INSERT OR REPLACE INTO fotmob_match_players ({columns}) "
@@ -515,7 +639,7 @@ SHOT_COLUMNS = (
 )
 
 
-def store_match_shots(db, season, match_id, md, teams, fetched_at):
+def store_match_shots(db, lg, match_id, md, teams, fetched_at):
     """Every shot in the match, from content.shotmap.
 
     FotMob has already turned the pitch round for us: both teams' shots are
@@ -538,7 +662,7 @@ def store_match_shots(db, season, match_id, md, teams, fetched_at):
         if s.get("id") is None or s.get("x") is None or s.get("y") is None:
             continue        # a shot with no location cannot be drawn
         rows.append((
-            season, LEAGUE, str(match_id), str(s.get("id")),
+            lg.season, lg.name, str(match_id), str(s.get("id")),
             names.get(str(s.get("teamId"))),
             None if s.get("playerId") is None else str(s.get("playerId")),
             s.get("playerName"),
@@ -556,7 +680,7 @@ def store_match_shots(db, season, match_id, md, teams, fetched_at):
         return 0
     db.execute(
         "DELETE FROM fotmob_match_shots WHERE season = ? AND league = ? AND match_id = ?",
-        (season, LEAGUE, str(match_id)),
+        (lg.season, lg.name, str(match_id)),
     )
     db.executemany(
         f"INSERT OR REPLACE INTO fotmob_match_shots ({SHOT_COLUMNS}) "
@@ -566,11 +690,13 @@ def store_match_shots(db, season, match_id, md, teams, fetched_at):
     return len(rows)
 
 
-def fetch_match(db, season, match_id, fetched_at):
+def fetch_match(db, lg, match_id, fetched_at):
     md = get_json(f"{BASE}/matchDetails?matchId={match_id}")
     header_teams = (md.get("header") or {}).get("teams") or []
     if len(header_teams) != 2:
         raise ValueError(f"match {match_id}: unexpected header")
+    # under the names this league is stored by, before anything is written
+    header_teams = [dict(t, name=lg.rename(t.get("name"))) for t in header_teams]
     general = md.get("general") or {}
     match_date = str(general.get("matchTimeUTCDate") or "")[:10]
     stats = match_stat_map(md)
@@ -625,7 +751,7 @@ def fetch_match(db, season, match_id, fetched_at):
             "".join(f", {column}" for column, _, _ in MATCH_STATS) +
             ") VALUES (" + ",".join("?" * (26 + len(MATCH_STATS))) + ")",
             (
-                season, LEAGUE, str(match_id),
+                lg.season, lg.name, str(match_id),
                 header_teams[side].get("name"), header_teams[opp].get("name"),
                 match_date, "h" if side == 0 else "a",
                 xg[side], xg[opp], npxg[side], npxg[opp],
@@ -645,32 +771,38 @@ def fetch_match(db, season, match_id, fetched_at):
             ),
         )
 
-    store_match_players(db, season, match_id, md, header_teams, fetched_at)
-    store_match_shots(db, season, match_id, md, header_teams, fetched_at)
+    store_match_players(db, lg, match_id, md, header_teams, fetched_at)
+    store_match_shots(db, lg, match_id, md, header_teams, fetched_at)
 
 
-def fetch_season(db, season, fetched_at, refresh_budget=REFRESH_PER_RUN):
-    print(f"--- {LEAGUE} {season} ---")
-    league_json = get_json(f"{BASE}/leagues?id={LEAGUE_ID}&season={season}")
-    (DATA_DIR / f"fotmob_allsvenskan_{season}.json").write_text(
+def fetch_season(db, lg, fetched_at, refresh_budget=REFRESH_PER_RUN):
+    print(f"--- {lg.name} {lg.label} ---")
+    league_json = get_json(f"{BASE}/leagues?id={lg.id}&season="
+                           f"{urllib.parse.quote(lg.label, safe='')}")
+    slug = lg.name.lower().replace(" ", "_")
+    (DATA_DIR / f"fotmob_{slug}_{lg.season}.json").write_text(
         json.dumps(league_json, indent=1), encoding="utf-8"
     )
 
-    stat_id = season_stat_id(league_json, season)
+    fixtures = (league_json.get("fixtures") or {}).get("allMatches") or []
+    lg.names = map_names(db, lg, sorted(
+        {(m.get(side) or {}).get("name") for m in fixtures for side in ("home", "away")}
+        - {None}))
+
+    stat_id = season_stat_id(league_json, lg.label)
     if stat_id:
-        fetch_players(db, season, stat_id, fetched_at)
+        fetch_players(db, lg, stat_id, fetched_at)
         db.commit()
     else:
-        print(f"  ! no player stat link for {season} - match data only")
+        print(f"  ! no player stat link for {lg.label} - match data only")
 
-    fixtures = (league_json.get("fixtures") or {}).get("allMatches") or []
     finished = sorted(
         (m for m in fixtures if (m.get("status") or {}).get("finished")),
         key=lambda m: str((m.get("status") or {}).get("utcTime") or ""),
     )
     stored = {r[0] for r in db.execute(
         "SELECT DISTINCT match_id FROM fotmob_team_matches WHERE season = ? AND league = ?",
-        (season, LEAGUE),
+        (lg.season, lg.name),
     )}
     # a match stored before the current stat set existed is worth revisiting:
     # it is the same one request, and it is the only way the new columns ever
@@ -679,21 +811,23 @@ def fetch_season(db, season, fetched_at, refresh_budget=REFRESH_PER_RUN):
         "SELECT DISTINCT match_id FROM fotmob_team_matches "
         "WHERE season = ? AND league = ? "
         "AND (stats_version IS NULL OR stats_version < ?)",
-        (season, LEAGUE, STATS_VERSION),
+        (lg.season, lg.name, STATS_VERSION),
     )}
     new = [m for m in finished if str(m.get("id")) not in stored]
+    waiting = max(0, len(new) - NEW_PER_RUN)
+    new = new[:NEW_PER_RUN]         # oldest first; the rest wait for tomorrow
     # newest first, because the site only shows the last ten results and a
     # part-done refresh should have covered every match anyone can see
     refresh = [m for m in reversed(finished)
                if str(m.get("id")) in stale][:max(0, refresh_budget)]
     todo = new + refresh
     print(f"  matches: {len(finished)} finished, {len(stored)} stored, "
-          f"{len(new)} new, {len(refresh)} of {len(stale)} to re-fetch for stats "
-          f"v{STATS_VERSION}")
+          f"{len(new)} new" + (f" ({waiting} more next run)" if waiting else "")
+          + f", {len(refresh)} of {len(stale)} to re-fetch for stats v{STATS_VERSION}")
     misses = 0
     for i, m in enumerate(todo, 1):
         try:
-            fetch_match(db, season, m["id"], fetched_at)
+            fetch_match(db, lg, m["id"], fetched_at)
             db.commit()
             misses = 0
         except Exception as error:
@@ -742,17 +876,26 @@ def main() -> None:
     # first, and whatever is left over goes to the older ones
     budget = 10 ** 6 if "--refresh-all" in sys.argv[1:] else REFRESH_PER_RUN
     for season in sorted(seasons_from_args(sys.argv[1:]), reverse=True):
-        budget -= fetch_season(db, season, fetched_at, refresh_budget=budget) or 0
+        budget -= fetch_season(db, allsvenskan(season), fetched_at,
+                               refresh_budget=budget) or 0
+    # the big five only ever need the season being played: every earlier one
+    # is Understat's. An explicit season or --backfill is about Allsvenskan
+    if not any(not a.startswith("-") or a == "--backfill" for a in sys.argv[1:]):
+        for name in BIG_FIVE:
+            budget -= fetch_season(db, big_five(name), fetched_at,
+                                   refresh_budget=budget) or 0
 
     print(f"\nDatabase: {DB_PATH.name}")
     for row in db.execute(
-        "SELECT season, COUNT(DISTINCT match_id), "
-        "(SELECT COUNT(*) FROM fotmob_players p WHERE p.season = m.season), "
-        "(SELECT COUNT(*) FROM fotmob_match_players q WHERE q.season = m.season) "
-        "FROM fotmob_team_matches m GROUP BY season ORDER BY season"
+        "SELECT league, season, COUNT(DISTINCT match_id), "
+        "(SELECT COUNT(*) FROM fotmob_players p "
+        " WHERE p.season = m.season AND p.league = m.league), "
+        "(SELECT COUNT(*) FROM fotmob_match_players q "
+        " WHERE q.season = m.season AND q.league = m.league) "
+        "FROM fotmob_team_matches m GROUP BY league, season ORDER BY league, season"
     ):
-        print(f"  {row[0]}: {row[1]} matches, {row[2]} players, "
-              f"{row[3]} player-match lines")
+        print(f"  {row[0]} {row[1]}: {row[2]} matches, {row[3]} players, "
+              f"{row[4]} player-match lines")
     db.close()
 
 
