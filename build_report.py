@@ -17,7 +17,6 @@ import re
 import sqlite3
 import subprocess
 import sys
-import unicodedata
 
 from bisect import bisect
 from datetime import date, datetime, timedelta, timezone
@@ -25,6 +24,7 @@ from html import escape, unescape
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import club_names
 import prediction_log
 import projection_log
 import report_records
@@ -44,6 +44,18 @@ LEAGUE_ORDER = ["Serie A", "Premier League", "La Liga", "Bundesliga", "Ligue 1",
 # leagues whose advanced stats come from Understat; Allsvenskan's come from
 # FotMob instead (no PPDA / deep completions / xGChain, but real per-match xG)
 UNDERSTAT_LEAGUES = ["Serie A", "Premier League", "La Liga", "Bundesliga", "Ligue 1"]
+
+# Where a big-five league's season being played is read from. Understat has
+# served only a maintenance page since 2026-11-03, so FotMob's rows take over
+# the current season -- fetch_fotmob.py stores them under Understat's club
+# names and season labels -- while every earlier season stays Understat's.
+# "understat" puts it back. UNDERSTAT_LEAGUES above still means "history
+# from Understat"; current_xg_source() is what the current season is.
+BIG_FIVE_CURRENT_SOURCE = "fotmob"
+FOTMOB_COVERAGE = 0.95  # share of the season's played matches FotMob must
+                        # hold before a league switches: the fetcher catches
+                        # up over two nights, and a half-fetched season read
+                        # as the whole one would be a table of half a season
 
 FORM_WINDOW = 5     # matches shown in the form column
 TREND_WINDOW = 5    # rounds used for the rank-trend arrow
@@ -1314,56 +1326,12 @@ PREDICT_MIN_MATCHES = 6       # matches backtest.py's and season_lab.py's
                               # sample size through in the lab code it was
                               # tuned against, only in production
 
-# TheSportsDB fixture names -> xG-source (Understat/FotMob) names, for the
-# pairs that normalisation alone cannot bridge; extended when the build
-# prints an "no xG history matched" warning for a club that has history
-PREDICT_ALIASES = {
-    "Inter Milan": "Inter",  # bare "Inter" is a subset of both Milan clubs
-    "Borussia Mönchengladbach": "Borussia M.Gladbach",
-    "Köln": "FC Cologne",
-    "Hamburg": "Hamburger SV",
-    "RB Leipzig": "RasenBallsport Leipzig",
-    "Halmstad": "Halmstads BK",
-    # and the same pair the other way round, for the squad bridge, which
-    # joins FotMob's player table to its match table rather than to a
-    # fixture list. "Halmstads" and "Halmstad" are different tokens once
-    # "BK" is dropped, so normalisation alone leaves this club unlinked
-    "Halmstads BK": "Halmstad",
-}
-
-
-def _predict_norm(name):
-    """Club-name join key: ASCII-folded, lowercased, generic club tokens
-    dropped, remaining tokens sorted so word order does not matter."""
-    s = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode()
-    s = re.sub(r"[^a-z0-9 ]", " ", s.lower())
-    drop = {
-        "fc", "afc", "cf", "ac", "as", "ss", "ssc", "us", "ud", "cd", "rc",
-        "rcd", "sc", "sd", "sv", "bsc", "vfl", "vfb", "tsg", "fsv", "spvgg",
-        "if", "ff", "bk", "sk", "fk", "aif", "club", "de", "cp", "calcio",
-        "1899", "1846", "1860", "04", "05", "09", "1", "96", "98", "99",
-    }
-    toks = [t for t in s.split() if t not in drop]
-    return " ".join(sorted(toks)) or s.strip()
-
-
-def _predict_mapping(fixture_names, strength_names):
-    """Fixture name -> strengths name (or None when nothing matches safely)."""
-    by_norm = {_predict_norm(n): n for n in strength_names}
-    tokens = {n: set(_predict_norm(n).split()) for n in strength_names}
-    mapping = {}
-    for name in fixture_names:
-        if name in PREDICT_ALIASES:
-            mapping[name] = PREDICT_ALIASES[name]
-            continue
-        norm = _predict_norm(name)
-        if norm in by_norm:
-            mapping[name] = by_norm[norm]
-            continue
-        want = set(norm.split())
-        subset = [n for n, t in tokens.items() if want <= t or t <= want]
-        mapping[name] = subset[0] if len(subset) == 1 else None
-    return mapping
+# TheSportsDB fixture names -> xG-source (Understat/FotMob) names. The
+# matching lives in club_names.py, shared with fetch_fotmob.py, which stores
+# the big five's FotMob rows under Understat's names with the same rules
+PREDICT_ALIASES = club_names.ALIASES
+_predict_norm = club_names.norm
+_predict_mapping = club_names.mapping
 
 
 def _team_strengths(db, league, as_of=None):
@@ -1390,11 +1358,18 @@ def _team_strengths(db, league, as_of=None):
              WHERE league = ? AND xg IS NOT NULL AND xga IS NOT NULL
                AND match_date >= ?""" + upper)
     extra = (now.isoformat(),) if as_of is not None else ()
+    # a big-five league FotMob has taken over reads Understat up to the
+    # season FotMob starts and FotMob from there; one it has not reads no
+    # FotMob at all. Both feeds hold August to November, and a match read
+    # from each would count twice
+    source = current_xg_source(db, league)
+    taken = league in UNDERSTAT_LEAGUES and source == "fotmob"
+    before = " AND season < ?" if taken else ""
     rows = db.execute(
-        sql.format(table="main.understat_team_matches", deep="deep"),
-        (league, cutoff) + extra,
+        sql.format(table="main.understat_team_matches", deep="deep") + before,
+        (league, cutoff) + extra + ((_fotmob_season(db, league),) if taken else ()),
     ).fetchall()
-    if fotmob_available(db):
+    if fotmob_available(db) and source == "fotmob":
         # FotMob has no deep-completions metric — the territory term skips
         rows += db.execute(
             sql.format(table="main.fotmob_team_matches", deep="NULL"),
@@ -3931,7 +3906,7 @@ def insights_panel(db, leagues):
     return (
         f"<h2>Insights <span class='dim'>({sources_label(db, leagues)})</span></h2>"
         "<p class='meta'>Second-order reads of the xG data: what the raw tables hide.</p>"
-        + metric_glossary() + views
+        + metric_glossary(db) + views
     )
 
 
@@ -4386,9 +4361,8 @@ def load_club_history(db, league, names):
     ).fetchone()[0]
     if cap is None or not names:
         return {}
-    table = ("main.understat_team_matches" if league in UNDERSTAT_LEAGUES
-             else "main.fotmob_team_matches")
-    if not fotmob_available(db) and table.endswith("fotmob_team_matches"):
+    table = _club_seasons_from(db, league)
+    if table is None:
         return {}
     rows = db.execute(
         f"""SELECT season, team, COUNT(*), SUM(pts), SUM(xpts),
@@ -4443,9 +4417,8 @@ def history_wall(db, league):
     A view of load_club_history, so it inherits that function's cap: an
     archive page shows the seasons up to its own and nothing after.
     """
-    table = ("main.understat_team_matches" if league in UNDERSTAT_LEAGUES
-             else "main.fotmob_team_matches")
-    if table.endswith("fotmob_team_matches") and not fotmob_available(db):
+    table = _club_seasons_from(db, league)
+    if table is None:
         return ""
     everyone = [unescape(t) for (t,) in db.execute(
         f"SELECT DISTINCT team FROM {table} WHERE league = ?", (league,))]
@@ -4619,6 +4592,11 @@ def _resolved_matches(db, league):
     Allsvenskan skips all of that: its FotMob-sourced table already names
     the opponent.
     """
+    fotmob = current_xg_source(db, league) == "fotmob" and fotmob_available(db)
+    # FotMob's seasons are its own from the one it took a big-five league
+    # over; everything before that is Understat's, paired as above
+    since = _fotmob_season(db, league) if fotmob else None
+    rows = []
     if league in UNDERSTAT_LEAGUES:
         rows = db.execute(
             """SELECT h.season, h.match_date, h.team, a.team,
@@ -4630,17 +4608,17 @@ def _resolved_matches(db, league):
                 AND h.scored = a.missed AND h.missed = a.scored
                 AND ABS(h.xg - a.xga) < 0.0001 AND ABS(h.xga - a.xg) < 0.0001
                WHERE h.league = ? AND h.home_away = 'h' AND a.home_away = 'a'
-                 AND h.team <> a.team
+                 AND h.team <> a.team AND h.season < ?
                ORDER BY h.match_date""",
-            (league,),
+            (league, since or "9999"),
         ).fetchall()
-    else:
-        rows = db.execute(
+    if fotmob:
+        rows += db.execute(
             """SELECT season, match_date, team, opponent, scored, missed, xg, xga
                FROM main.fotmob_team_matches
-               WHERE league = ? AND home_away = 'h'
+               WHERE league = ? AND home_away = 'h' AND season >= ?
                ORDER BY match_date""",
-            (league,),
+            (league, since if league in UNDERSTAT_LEAGUES else ""),
         ).fetchall()
     return [
         (r[0], r[1][:10], unescape(r[2]), unescape(r[3]), r[4], r[5],
@@ -4738,7 +4716,7 @@ def _match_stats(db, league, since=None):
     explorer can actually show rather than pairing twelve seasons to serve
     ten lookups.
     """
-    understat = league in UNDERSTAT_LEAGUES
+    understat = current_xg_source(db, league) == "understat"
     table = "understat_team_matches" if understat else "fotmob_team_matches"
     cols = UNDERSTAT_MATCH_STATS if understat else FOTMOB_MATCH_STATS
     # only what this database actually has: the live one is migrated by the
@@ -8327,7 +8305,8 @@ def coverage_label(db, leagues):
     parts = [f"Big five {season_label(db)}".strip()]
     if "Allsvenskan" in leagues and fotmob_available(db):
         season = db.execute(
-            "SELECT MAX(season) FROM main.fotmob_team_matches"
+            "SELECT MAX(season) FROM main.fotmob_team_matches "
+            "WHERE league = 'Allsvenskan'"
         ).fetchone()[0]
         if season:
             parts.append(f"Allsvenskan {season}")
@@ -8343,13 +8322,21 @@ def sources_label(db, leagues):
     entirely when this page has no rows from it.
     """
     parts = []
-    if season_label(db):
-        parts.append(f"{season_label(db)}, Understat")
     fm = [r for r in db.execute(
         "SELECT league, MAX(season) FROM fotmob_team_matches GROUP BY league "
         "ORDER BY league"
     )] if fotmob_available(db) else []
-    parts += [f"{lg} {season}, FotMob" for lg, season in fm if lg in leagues]
+    if season_label(db):
+        # the big five's season is FotMob's on this page when the view holds
+        # their FotMob rows: on the live page once it has taken over, never
+        # on an archive, whose views hold no FotMob rows at all
+        big = [lg for lg in leagues if lg in UNDERSTAT_LEAGUES]
+        moved = {lg for lg, _ in fm if lg in big}
+        source = ("FotMob" if big and moved == set(big)
+                  else "Understat + FotMob" if moved else "Understat")
+        parts.append(f"{season_label(db)}, {source}")
+    parts += [f"{lg} {season}, FotMob" for lg, season in fm
+              if lg in leagues and lg not in UNDERSTAT_LEAGUES]
     return " · ".join(parts)
 
 
@@ -8369,6 +8356,86 @@ def fotmob_available(db):
     if not {"fotmob_team_matches", "fotmob_players"} <= tables:
         return False
     return db.execute("SELECT COUNT(*) FROM main.fotmob_team_matches").fetchone()[0] > 0
+
+
+def _fotmob_season(db, league):
+    """The newest season FotMob holds for a league, or None."""
+    if not fotmob_available(db):
+        return None
+    return db.execute("SELECT MAX(season) FROM main.fotmob_team_matches WHERE league = ?",
+                      (league,)).fetchone()[0]
+
+
+def current_xg_source(db, league):
+    """"fotmob" or "understat": where this league's season being played is read.
+
+    Allsvenskan is always FotMob. A big-five league is FotMob's once
+    BIG_FIVE_CURRENT_SOURCE says so and FotMob has caught up: its newest
+    season is at least Understat's, and it holds FOTMOB_COVERAGE of the
+    matches played in it -- counted from TheSportsDB's results and from
+    Understat's own rows for the same season, whichever is more, so neither
+    a slow results feed nor a frozen Understat can let a half-fetched league
+    through. Reads main tables only, so an archive page gets the same answer
+    as the live one; the season views keep the archives on their own season.
+    """
+    if league not in UNDERSTAT_LEAGUES:
+        return "fotmob"
+    if BIG_FIVE_CURRENT_SOURCE != "fotmob":
+        return "understat"
+    season = _fotmob_season(db, league)
+    if season is None:
+        return "understat"
+    understat_season = db.execute(
+        "SELECT MAX(season) FROM main.understat_team_matches WHERE league = ?",
+        (league,)).fetchone()[0]
+    if understat_season is not None and understat_season > season:
+        return "understat"
+    held = db.execute(
+        "SELECT COUNT(DISTINCT match_id) FROM main.fotmob_team_matches "
+        "WHERE league = ? AND season = ?", (league, season)).fetchone()[0]
+    understat_held = db.execute(
+        "SELECT COUNT(*) FROM main.understat_team_matches "
+        "WHERE league = ? AND season = ? AND home_away = 'h'",
+        (league, season)).fetchone()[0]
+    try:
+        played = db.execute(
+            "SELECT COUNT(*) FROM main.matches WHERE league = ? "
+            "AND home_score IS NOT NULL AND season = (SELECT MAX(season) "
+            "FROM main.matches WHERE league = ? AND home_score IS NOT NULL)",
+            (league, league)).fetchone()[0]
+    except sqlite3.Error:
+        played = 0          # no results feed in this database
+    needed = max(played, understat_held)
+    return "fotmob" if held and held >= FOTMOB_COVERAGE * needed else "understat"
+
+
+def _fotmob_leagues(db, leagues=UNDERSTAT_LEAGUES):
+    """The big-five leagues whose current season FotMob supplies."""
+    return [lg for lg in leagues if current_xg_source(db, lg) == "fotmob"]
+
+
+def _sql_list(values):
+    return "(" + ",".join(_sqlq(v) for v in values) + ")" if values else "('')"
+
+
+def _club_seasons_from(db, league):
+    """A FROM clause over every stored season of one league's team rows.
+
+    Understat's seasons, then FotMob's from the season it took over, for a
+    big-five league it has taken over; one table otherwise. The columns are
+    the ones the club histories read, so either shape serves them.
+    """
+    if league not in UNDERSTAT_LEAGUES:
+        return "main.fotmob_team_matches" if fotmob_available(db) else None
+    if current_xg_source(db, league) != "fotmob":
+        return "main.understat_team_matches"
+    cols = ("season, league, team, match_date, home_away, xg, xga, "
+            "scored, missed, pts, xpts")
+    lq, fs = _sqlq(league), _sqlq(_fotmob_season(db, league))
+    return (f"(SELECT {cols} FROM main.understat_team_matches "
+            f" WHERE league = {lq} AND season < {fs} "
+            f" UNION ALL SELECT {cols} FROM main.fotmob_team_matches "
+            f" WHERE league = {lq} AND season >= {fs})")
 
 
 def season_label(db):
@@ -8422,6 +8489,19 @@ GLOSSARY = [
      "best summary of how well a team actually played, ignoring finishing luck at "
      "both ends."),
 ]
+
+# shown while FotMob stands in for Understat (BIG_FIVE_CURRENT_SOURCE)
+SOURCE_NOTE = (
+    "Where the numbers come from",
+    "Big five: Understat for every season up to 2025/26. Understat has shown "
+    "only a maintenance page since 3 November 2026, so the whole 2026/27 season "
+    "comes from FotMob instead, whose expected goals are Opta's model. On the "
+    "matches both covered, FotMob's xG ran about 7% lower than Understat's, but "
+    "the two agreed closely on which clubs were good. So rankings and differences "
+    "hold, but this season's xG totals are not like for like with earlier "
+    "seasons'. FotMob has no PPDA or deep completions, so those stay blank for "
+    "2026/27. Allsvenskan: FotMob throughout.",
+)
 
 
 CHANGELOG_PATH = PROJECT_DIR / "CHANGELOG.md"
@@ -8533,10 +8613,19 @@ def changelog_block(entries):
             f"<div class='about-body'>{body}{more}</div></details>")
 
 
-def metric_glossary():
+def big_five_on_fotmob_here(db):
+    """Whether this page's season views hold the big five's FotMob rows:
+    the live page once FotMob has taken over, never an archive page."""
+    return fotmob_available(db) and db.execute(
+        "SELECT 1 FROM fotmob_team_matches WHERE league IN "
+        f"{_sql_list(UNDERSTAT_LEAGUES)} LIMIT 1").fetchone() is not None
+
+
+def metric_glossary(db):
+    entries = GLOSSARY + ([SOURCE_NOTE] if big_five_on_fotmob_here(db) else [])
     items = "".join(
         f"<div><dt>{term}</dt><dd>{definition}</dd></div>"
-        for term, definition in GLOSSARY
+        for term, definition in entries
     )
     return (
         "<details class='glossary'><summary>Metric glossary — what xG, npxG, "
@@ -8959,7 +9048,7 @@ def teams_panel(db, leagues, archive=False):
     teams_by_lg = {lg: load_teams(db, lg) for lg in leagues}
     return (
         f"<h2>Team analytics <span class='dim'>({sources_label(db, leagues)})</span></h2>"
-        + metric_glossary() + tables
+        + metric_glossary(db) + tables
         # recent form is deliberately cross-season, which is right on the live
         # dashboard and wrong on a frozen one: an archive page would show a
         # club's 2026 results under a 2018/19 heading, and every archive file
@@ -9606,7 +9695,7 @@ def players_panel(db, leagues):
     views = "".join(lgview(lg, boards(lg), i == 0) for i, lg in enumerate(leagues))
     return (
         f"<h2>Players <span class='dim'>({sources_label(db, leagues)})</span></h2>"
-        + metric_glossary()
+        + metric_glossary(db)
         + player_explorer(players_by_lg, load_player_careers(db, players_by_lg))
         + player_compare()
         + views
@@ -9648,13 +9737,20 @@ def scope_to_current_season(db):
     # Understat shape (PPDA/deep don't exist there and stay NULL) so the
     # xG table, form curves, head-to-head and npxGD insights just work.
     # Databases that never ran fetch_fotmob.py simply skip the union.
+    # each league's season from exactly one source: a big-five league
+    # FotMob has taken over drops out of Understat's half, and one it has
+    # not (or not yet caught up on) drops out of FotMob's -- both feeds hold
+    # August to November, and a match counted twice is a table of nonsense
+    taken = _sql_list(_fotmob_leagues(db) if fotmob_available(db) else [])
+    waiting = _sql_list([lg for lg in UNDERSTAT_LEAGUES
+                         if current_xg_source(db, lg) != "fotmob"])
     understat_current = (
         "SELECT season, league, team, match_date, home_away, xg, xga, npxg, npxga, "
         "       ppda, ppda_allowed, deep, deep_allowed, scored, missed, xpts, "
         "       result, pts, npxgd, fetched_at "
         "FROM main.understat_team_matches t "
         "WHERE t.season = (SELECT MAX(u.season) FROM main.understat_team_matches u "
-        "WHERE u.league = t.league)"
+        f"WHERE u.league = t.league) AND t.league NOT IN {taken}"
     )
     if fotmob_available(db):
         db.execute(
@@ -9664,7 +9760,7 @@ def scope_to_current_season(db):
             "       NULL, NULL, NULL, NULL, scored, missed, xpts, result, pts, npxgd, fetched_at "
             "FROM main.fotmob_team_matches f "
             "WHERE f.season = (SELECT MAX(u.season) FROM main.fotmob_team_matches u "
-            "WHERE u.league = f.league)"
+            f"WHERE u.league = f.league) AND f.league NOT IN {waiting}"
         )
         # fotmob_match_shots joins them now that a block reads it a season
         # at a time. The match reports go on asking main. for named match
@@ -9673,7 +9769,7 @@ def scope_to_current_season(db):
             db.execute(
                 f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} t "
                 f"WHERE t.season = (SELECT MAX(u.season) FROM main.{table} u "
-                "WHERE u.league = t.league)"
+                f"WHERE u.league = t.league) AND t.league NOT IN {waiting}"
             )
         # the per-match tables anchor on fotmob_team_matches, not on
         # themselves. A match can be stored before its shotmap or its lineup
@@ -9684,7 +9780,8 @@ def scope_to_current_season(db):
             db.execute(
                 f"CREATE TEMP VIEW {table} AS SELECT * FROM main.{table} t "
                 "WHERE t.season = (SELECT MAX(u.season) "
-                "FROM main.fotmob_team_matches u WHERE u.league = t.league)"
+                "FROM main.fotmob_team_matches u WHERE u.league = t.league) "
+                f"AND t.league NOT IN {waiting}"
             )
     else:
         db.execute("CREATE TEMP VIEW understat_team_matches AS " + understat_current)
@@ -9771,7 +9868,8 @@ def fotmob_archive_seasons(db):
         return []
     return [(r[0], r[1]) for r in db.execute(
         "SELECT league, season FROM main.fotmob_team_matches t "
-        "WHERE t.season < (SELECT MAX(u.season) FROM main.fotmob_team_matches u "
+        f"WHERE t.league NOT IN {_sql_list(UNDERSTAT_LEAGUES)} "
+        "AND t.season < (SELECT MAX(u.season) FROM main.fotmob_team_matches u "
         "                  WHERE u.league = t.league) "
         "GROUP BY t.league, t.season ORDER BY t.league, t.season DESC"
     )]
@@ -9921,15 +10019,22 @@ def understat_held_badge(db, now=None):
     The Understat fetcher keeps the stored data when Understat cannot be
     reached rather than stopping the nightly run, so everything else still
     publishes. The Updated badge would then vouch for numbers it did not
-    refresh; this says which ones, and since when.
+    refresh; this says which ones, and since when. Only for the leagues
+    still reading Understat: one FotMob has taken over is current again.
     """
+    held = [lg for lg in UNDERSTAT_LEAGUES if current_xg_source(db, lg) == "understat"]
+    if not held:
+        return ""
     for label, raw, _age in stale_sources(db, now):
         if label != "Understat xG":
             continue
         stamp = datetime.fromisoformat(raw)
+        which = ("Big-five" if len(held) == len(UNDERSTAT_LEAGUES)
+                 else " and ".join([", ".join(held[:-1]), held[-1]] if len(held) > 1
+                                   else held))
         return (f"<span class='badge badge-held' title='Understat could not be "
-                f"reached since, so the expected-goals numbers for the big five "
-                f"are the last ones it published'>Big-five xG as of "
+                f"reached since, so these expected-goals numbers are the last "
+                f"ones it published'>{escape(which)} xG as of "
                 f"{stamp.day} {stamp:%B} — Understat unreachable</span>")
     return ""
 
@@ -10108,7 +10213,16 @@ def stale_sources(db, now=None):
 
 
 def warn_if_stale(db):
-    stale = stale_sources(db)
+    in_use = any(current_xg_source(db, lg) == "understat" for lg in UNDERSTAT_LEAGUES)
+    stale = [s for s in stale_sources(db) if in_use or s[0] != "Understat xG"]
+    understat_stale = any(s[0] == "Understat xG" for s in stale_sources(db))
+    if not in_use and not understat_stale:
+        # FotMob stands in for Understat (BIG_FIVE_CURRENT_SOURCE), and
+        # Understat's own fetch has just worked: it is back, and going back
+        # to it is a decision for a person, not for a nightly run
+        print("  Understat is answering again. The big five's current season "
+              "still reads FotMob; set BIG_FIVE_CURRENT_SOURCE = \"understat\" "
+              "in build_report.py to switch back.")
     if not stale:
         return
     print(f"  ! stale data - these sources have not been fetched for over "
